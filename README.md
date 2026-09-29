@@ -1,6 +1,6 @@
 # Codex 周额度悬浮窗
 
-一个在 Windows 和 macOS 桌面查看 Codex 额度的小工具。它显示本周剩余百分比、重置时间和倒计时、最近更新时间、可用重置卡数量；Plus 账号另显示 5 小时额度，Pro 账号只显示周额度。悬浮窗有极简和详细两种模式，可拖动与调整大小。Windows 可收进系统托盘，macOS 可从菜单栏打开。
+一个在 Windows 和 macOS 桌面查看 Codex 额度的小工具。它显示本周剩余百分比、重置时间和倒计时、最近更新时间、可用重置卡数量；Plus 账号还显示 5 小时额度，Pro 账号只显示周额度。悬浮窗有极简和详细两种模式，可拖动与调整大小。Windows 可收进系统托盘，macOS 可从菜单栏打开。
 
 详细窗还读取 [codexreset.ai](https://codexreset.ai/) 的公开全局临时重置记录，以及 [whenreset.app](https://whenreset.app/) 的历史频率估计。这些公开记录与个人账号的固定额度周期不同；**未来概率不是已确定的重置时间或承诺**。
 
@@ -13,9 +13,11 @@
 
 第一次使用，请先阅读 [Windows 步骤](windows/README.md)或 [macOS 步骤](macos/README.md)。下载时在 GitHub 页面点 **Code → Download ZIP**，解压后保留整个文件夹。不要同时运行同一台电脑上的两份副本：本机服务固定使用 `127.0.0.1:39224`。
 
+macOS 版支持从窗口的上下左右边缘及四角拖动缩放，极简窗最小可缩到 36×36。两种模式各自记住位置与尺寸，窗口不会移出屏幕。首次运行后会生成可放入程序坞的启动图标，图标显示当前剩余额度。
+
 ## 工作方式
 
-- 本机 Node.js 服务通过 Codex CLI 的 `app-server` 只读 `account/read` 与 `account/rateLimits/read` 获取账号额度；不需要 API Key，也不修改 Codex 客户端文件。
+- 本机 Node.js 服务通过 Codex CLI `app-server` 的只读 `account/read` 与 `account/rateLimits/read` 获取账号额度；不需要 API Key，也不修改 Codex 客户端文件。
 - 额度每 5 分钟读取一次；超过 10 分钟未更新、旧重置时间已到或登录失效时，旧百分比不再当作当前数据展示。
 - 外部公开站点的记录单独读取，不发送你的登录信息或个人额度。工具只显示重置卡数量，不使用重置卡。
 - 没有开机启动、主动提醒或远程同步。运行记录保存在本机。
@@ -24,10 +26,10 @@
 
 Windows 版本已在本机运行验证。两套 Node 核心代码和页面测试可分别在 `windows`、`macos` 文件夹运行：
 
-```text
+```sh
 node --test test/quota.test.mjs test/rpc.test.mjs test/presentation.test.mjs test/external.test.mjs
 ```
 
-macOS 原生悬浮窗源码已提供，但尚未在真实 Mac 上编译和操作验收。首次运行时会在该 Mac 上编译；若编译失败，可查看 `~/Library/Application Support/CodexWeeklyMonitor/build.log`。
+macOS 原生悬浮窗已在 Apple Silicon Mac 上完成编译和交互验收；其他 Mac 配置尚需分别验证。首次运行时会在该 Mac 上编译；若编译失败，可查看 `~/Library/Application Support/CodexWeeklyMonitor/build.log` 或 `launcher-build.log`。
 
 这是独立的非官方工具，与 OpenAI 无关联。Codex `app-server` 当前为实验性命令；客户端升级后请重新核对实际额度显示。
