@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Codex 周额度</title>
+  <link rel="stylesheet" href="/app.css">
+  <script type="module" src="/app.mjs"></script>
+</head>
+<body>
+  <main id="card" class="card" data-tone="muted">
+    <header class="header">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">◉</span><span>Codex 周额度</span></div>
+      <span id="status" class="status">正在读取</span>
+    </header>
+
+    <section class="quota" aria-label="本周额度">
+      <div id="ring" class="ring" role="meter" aria-label="本周剩余额度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div class="ring-inner"><strong id="percent">—</strong><span>剩余</span></div>
+      </div>
+      <p id="caption" class="caption" aria-live="polite">正在查询 Codex 额度</p>
+    </section>
+
+    <dl class="details">
+      <div><dt>重置时间</dt><dd id="reset">—</dd></div>
+      <div><dt>距离重置</dt><dd id="countdown">—</dd></div>
+      <div><dt>最近更新</dt><dd id="updated">—</dd></div>
+      <div><dt>重置卡</dt><dd id="cards">—</dd></div>
+    </dl>
+
+    <section id="five-hour" class="extra" aria-label="Plus 五小时额度" hidden>
+      <h2>Plus · 5 小时额度</h2>
+      <div><span>剩余</span><strong id="five-hour-value">—</strong></div>
+      <div><span>重置时间</span><strong id="five-hour-reset">—</strong></div>
+    </section>
+
+    <section class="extra" aria-label="公开全局临时重置">
+      <h2>公开全局临时重置</h2>
+      <div><span>上次公告</span><strong id="global-announcement">—</strong></div>
+      <div><span>送达记录</span><strong id="global-delivery">—</strong></div>
+      <div class="odds"><span>未来概率</span><strong id="global-odds">—</strong></div>
+      <p>历史频率估计，非重置承诺 · <a href="https://codexreset.ai/" target="_blank" rel="noopener noreferrer">codexreset.ai</a> / whenreset.app</p>
+      <small id="external-updated">—</small>
+    </section>
+
+    <footer class="footer">
+      <span>每 5 分钟读取一次额度</span>
+      <button id="refresh" type="button">立即刷新</button>
+    </footer>
+  </main>
+</body>
+</html>

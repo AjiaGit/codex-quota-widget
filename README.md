@@ -31,4 +31,3 @@ node --test test/quota.test.mjs test/rpc.test.mjs test/presentation.test.mjs tes
 macOS 原生悬浮窗源码已提供，但尚未在真实 Mac 上编译和操作验收。首次运行时会在该 Mac 上编译；若编译失败，可查看 `~/Library/Application Support/CodexWeeklyMonitor/build.log`。
 
 这是独立的非官方工具，与 OpenAI 无关联。Codex `app-server` 当前为实验性命令；客户端升级后请重新核对实际额度显示。
-
