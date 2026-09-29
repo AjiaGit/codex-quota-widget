@@ -278,7 +278,7 @@ private final class CompactView: NSView {
     }
 }
 
-private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate {
+private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate, WKNavigationDelegate, WKUIDelegate {
     private var panel: NSPanel!
     private var root: NSView!
     private var web: WKWebView!
@@ -291,6 +291,7 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
     private var refreshButton: NSButton!
     private var hideButton: NSButton!
     private var statusItem: NSStatusItem!
+    private var visibilityMenuItem: NSMenuItem!
     private var isCompact = UserDefaults.standard.bool(forKey: "compact")
     private var transitioning = false
     private var pollTimer: Timer?
@@ -379,13 +380,15 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
         statusItem.button?.title = "—"
         statusItem.button?.toolTip = "Codex 本周额度"
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "显示悬浮窗", action: #selector(show), keyEquivalent: ""))
+        visibilityMenuItem = NSMenuItem(title: "隐藏悬浮窗", action: #selector(toggleVisibility), keyEquivalent: "")
+        menu.addItem(visibilityMenuItem)
         menu.addItem(NSMenuItem(title: "切换极简／详细", action: #selector(toggle), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "刷新额度", action: #selector(refresh), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "在浏览器中打开详细页", action: #selector(openPage), keyEquivalent: ""))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "退出监控工具", action: #selector(quitAll), keyEquivalent: ""))
         for item in menu.items { item.target = self }
+        menu.delegate = self
         statusItem.menu = menu
 
         layoutViews()
@@ -483,6 +486,13 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
         panel.orderFrontRegardless()
     }
 
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        visibilityMenuItem.title = panel.isVisible ? "隐藏悬浮窗" : "显示悬浮窗"
+    }
+
+    @objc private func toggleVisibility() {
+        if panel.isVisible { hide() } else { show() }
+    }
     @objc private func show() { panel.orderFrontRegardless() }
     @objc private func hide() { panel.orderOut(nil) }
     @objc private func collapse() { setCompact(true) }
