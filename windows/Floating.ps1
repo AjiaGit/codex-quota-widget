@@ -1,4 +1,4 @@
-﻿param(
+param(
     [ValidateSet('System', 'Light', 'Dark')]
     [string]$Theme = 'System',
     [ValidatePattern('^http://127\.0\.0\.1:\d+$')]
@@ -216,10 +216,19 @@ foreach ($control in @($title, $status, $compactButton, $refresh, $close, $ring,
     $fiveDivider, $fiveTitle, $fiveValue, $fiveReset, $externalDivider, $externalTitle, $lastGlobal, $delivery, $odds, $attribution)) {
     [void]$form.Controls.Add($control)
 }
-$resizeGrip = New-Object System.Windows.Forms.Panel
-$resizeGrip.Cursor = [System.Windows.Forms.Cursors]::SizeNWSE
-$resizeGrip.Size = [System.Drawing.Size]::new(18, 18)
-[void]$form.Controls.Add($resizeGrip)
+$script:resizeEdges = @{}
+foreach ($edge in @('Top', 'Bottom', 'Left', 'Right', 'TopLeft', 'TopRight', 'BottomLeft', 'BottomRight')) {
+    $zone = New-Object System.Windows.Forms.Panel
+    $zone.Tag = $edge
+    $zone.Cursor = switch ($edge) {
+        { $_ -in @('Left', 'Right') } { [System.Windows.Forms.Cursors]::SizeWE; break }
+        { $_ -in @('Top', 'Bottom') } { [System.Windows.Forms.Cursors]::SizeNS; break }
+        { $_ -in @('TopLeft', 'BottomRight') } { [System.Windows.Forms.Cursors]::SizeNWSE; break }
+        default { [System.Windows.Forms.Cursors]::SizeNESW }
+    }
+    [void]$form.Controls.Add($zone)
+    $script:resizeEdges[$edge] = $zone
+}
 $script:detailControls = @($title, $status, $compactButton, $refresh, $close, $caption, $countdown, $reset, $divider, $updated, $cards,
     $fiveDivider, $fiveTitle, $fiveValue, $fiveReset, $externalDivider, $externalTitle, $lastGlobal, $delivery, $odds, $attribution)
 
@@ -228,13 +237,26 @@ $tooltip.SetToolTip($refresh, '立即刷新额度')
 $tooltip.SetToolTip($close, '隐藏到系统托盘')
 $tooltip.SetToolTip($compactButton, '切换到极简悬浮窗')
 $tooltip.SetToolTip($ring, '极简模式可单击展开，拖动可调整位置')
-$tooltip.SetToolTip($resizeGrip, '拖动右下角调整大小')
+foreach ($zone in $script:resizeEdges.Values) { $tooltip.SetToolTip($zone, '拖动边缘调整大小') }
 $tooltip.SetToolTip($odds, '公开全局临时重置的历史频率估计，不是账号每周重置时间，也不是 OpenAI 承诺。')
 
 function Set-ControlBox($control, [double]$x, [double]$y, [double]$width, [double]$height) {
     $control.Bounds = [System.Drawing.Rectangle]::new(
         [int][Math]::Round($x), [int][Math]::Round($y),
         [int][Math]::Max(1, [Math]::Round($width)), [int][Math]::Max(1, [Math]::Round($height)))
+}
+
+function Update-ResizeEdges([int]$width, [int]$height, [bool]$compact, [double]$scale = 1) {
+    $edgeSize = if ($compact) { 6 } else { [int][Math]::Round(7 * $scale) }
+    $cornerSize = if ($compact) { 13 } else { [int][Math]::Round(16 * $scale) }
+    Set-ControlBox $script:resizeEdges.Top $cornerSize 0 ($width - 2 * $cornerSize) $edgeSize
+    Set-ControlBox $script:resizeEdges.Bottom $cornerSize ($height - $edgeSize) ($width - 2 * $cornerSize) $edgeSize
+    Set-ControlBox $script:resizeEdges.Left 0 $cornerSize $edgeSize ($height - 2 * $cornerSize)
+    Set-ControlBox $script:resizeEdges.Right ($width - $edgeSize) $cornerSize $edgeSize ($height - 2 * $cornerSize)
+    Set-ControlBox $script:resizeEdges.TopLeft 0 0 $cornerSize $cornerSize
+    Set-ControlBox $script:resizeEdges.TopRight ($width - $cornerSize) 0 $cornerSize $cornerSize
+    Set-ControlBox $script:resizeEdges.BottomLeft 0 ($height - $cornerSize) $cornerSize $cornerSize
+    Set-ControlBox $script:resizeEdges.BottomRight ($width - $cornerSize) ($height - $cornerSize) $cornerSize $cornerSize
 }
 
 function Update-ResponsiveLayout {
@@ -244,7 +266,7 @@ function Update-ResponsiveLayout {
     if ($script:mode -eq 'Compact') {
         $ringSize = [Math]::Max(38, [Math]::Min($width - 10, $height - 20))
         Set-ControlBox $ring (($width - $ringSize) / 2) (($height - $ringSize) / 2) $ringSize $ringSize
-        Set-ControlBox $resizeGrip ($width - 17) ($height - 17) 17 17
+        Update-ResizeEdges $width $height $true
     } else {
         $offset = if ($script:layoutPlus) { 62 } else { 0 }
         $baseHeight = 390 + $offset
@@ -277,7 +299,7 @@ function Update-ResponsiveLayout {
         Set-ControlBox $delivery $margin ((297 + $offset) * $vertical) $contentWidth (24 * $scale)
         Set-ControlBox $odds $margin ((326 + $offset) * $vertical) $contentWidth (26 * $scale)
         Set-ControlBox $attribution $margin ((356 + $offset) * $vertical) $contentWidth (22 * $scale)
-        Set-ControlBox $resizeGrip ($width - 22 * $scale) ($height - 22 * $scale) (22 * $scale) (22 * $scale)
+        Update-ResizeEdges $width $height $false $scale
     }
     Set-RoundedRegion
     $ring.Invalidate()
@@ -359,7 +381,7 @@ function Set-Theme {
     }
     $form.BackColor = $script:colors.back
     $ring.BackColor = $script:colors.back
-    $resizeGrip.BackColor = $script:colors.back
+    foreach ($zone in $script:resizeEdges.Values) { $zone.BackColor = $script:colors.back }
     $divider.BackColor = $script:colors.line
     $fiveDivider.BackColor = $script:colors.line
     $externalDivider.BackColor = $script:colors.line
@@ -540,7 +562,7 @@ function Set-ModeVisual([bool]$compact) {
     if (-not $compact -and $script:layoutPlus -ne $true) {
         foreach ($control in @($fiveDivider, $fiveTitle, $fiveValue, $fiveReset)) { $control.Visible = $false }
     }
-    $resizeGrip.Visible = $true
+    foreach ($zone in $script:resizeEdges.Values) { $zone.Visible = $true }
     $modeTip = if ($compact) { '单击展开，拖动可调整位置' } else { '拖动悬浮窗' }
     $tooltip.SetToolTip($ring, $modeTip)
     Update-ResponsiveLayout
@@ -574,7 +596,7 @@ function Start-ModeTransition([string]$nextMode) {
     $script:animationStart = [DateTime]::UtcNow
     $script:animating = $true
     foreach ($control in $script:detailControls) { $control.Visible = $false }
-    $resizeGrip.Visible = $false
+    foreach ($zone in $script:resizeEdges.Values) { $zone.Visible = $false }
     $script:animationTimer.Start()
 }
 
@@ -661,33 +683,10 @@ foreach ($control in @($form, $ring)) {
     $control.Add_MouseMove($compactMove)
     $control.Add_MouseUp($compactUp)
 }
-$resizeGrip.Add_MouseDown({
-    param($sender, $e)
-    if ($script:animating -or $e.Button -ne [System.Windows.Forms.MouseButtons]::Left) { return }
-    $script:resizing = $true
-    $script:resizeStart = [System.Windows.Forms.Cursor]::Position
-    $script:resizeOrigin = $form.ClientSize
-    $resizeGrip.Capture = $true
-})
-$resizeGrip.Add_MouseMove({
+function Complete-Resize {
     if (-not $script:resizing) { return }
-    $cursor = [System.Windows.Forms.Cursor]::Position
-    $screen = [System.Windows.Forms.Screen]::FromControl($form).WorkingArea
-    $compact = $script:mode -eq 'Compact'
-    $offset = if ($script:layoutPlus) { 62 } else { 0 }
-    $minWidth = if ($compact) { 48 } else { 404 }
-    $minHeight = if ($compact) { 64 } else { 390 + $offset }
-    $maxWidth = if ($compact) { [Math]::Min(160, $screen.Right - $form.Left) } else { [Math]::Min(720, $screen.Right - $form.Left) }
-    $maxHeight = if ($compact) { [Math]::Min(200, $screen.Bottom - $form.Top) } else { [Math]::Min((650 + $offset), ($screen.Bottom - $form.Top)) }
-    $width = [Math]::Max($minWidth, [Math]::Min(($script:resizeOrigin.Width + $cursor.X - $script:resizeStart.X), $maxWidth))
-    $height = [Math]::Max($minHeight, [Math]::Min(($script:resizeOrigin.Height + $cursor.Y - $script:resizeStart.Y), $maxHeight))
-    $form.ClientSize = [System.Drawing.Size]::new([int]$width, [int]$height)
-})
-$resizeGrip.Add_MouseUp({
-    param($sender, $e)
-    if (-not $script:resizing -or $e.Button -ne [System.Windows.Forms.MouseButtons]::Left) { return }
     $script:resizing = $false
-    $resizeGrip.Capture = $false
+    if ($script:resizeControl.Capture) { $script:resizeControl.Capture = $false }
     if ($script:mode -eq 'Compact') {
         $script:compactSize = $form.ClientSize
     } else {
@@ -696,7 +695,62 @@ $resizeGrip.Add_MouseUp({
         Update-DetailFonts
     }
     $script:positionDirty = $true
-})
+}
+
+$resizeDown = {
+    param($sender, $e)
+    if ($script:animating -or $e.Button -ne [System.Windows.Forms.MouseButtons]::Left) { return }
+    $script:resizing = $true
+    $script:resizeControl = $sender
+    $script:resizeDirection = [string]$sender.Tag
+    $script:resizeStart = [System.Windows.Forms.Cursor]::Position
+    $script:resizeOrigin = $form.Bounds
+    $script:resizeScreen = [System.Windows.Forms.Screen]::FromControl($form).WorkingArea
+    $sender.Capture = $true
+}
+$resizeMove = {
+    param($sender, $e)
+    if (-not $script:resizing -or $sender -ne $script:resizeControl) { return }
+    $cursor = [System.Windows.Forms.Cursor]::Position
+    $dx = $cursor.X - $script:resizeStart.X
+    $dy = $cursor.Y - $script:resizeStart.Y
+    $origin = $script:resizeOrigin
+    $screen = $script:resizeScreen
+    $direction = $script:resizeDirection
+    $compact = $script:mode -eq 'Compact'
+    $offset = if ($script:layoutPlus) { 62 } else { 0 }
+    $minWidth = if ($compact) { 48 } else { 404 }
+    $minHeight = if ($compact) { 64 } else { 390 + $offset }
+    $maxWidth = if ($compact) { 160 } else { 720 }
+    $maxHeight = if ($compact) { 200 } else { 650 + $offset }
+    $left = $origin.Left; $right = $origin.Right
+    $top = $origin.Top; $bottom = $origin.Bottom
+    if ($direction.Contains('Left')) {
+        $left = [Math]::Max($screen.Left, [Math]::Max(($right - $maxWidth), [Math]::Min(($origin.Left + $dx), ($right - $minWidth))))
+    } elseif ($direction.Contains('Right')) {
+        $right = [Math]::Min($screen.Right, [Math]::Min(($left + $maxWidth), [Math]::Max(($origin.Right + $dx), ($left + $minWidth))))
+    }
+    if ($direction.Contains('Top')) {
+        $top = [Math]::Max($screen.Top, [Math]::Max(($bottom - $maxHeight), [Math]::Min(($origin.Top + $dy), ($bottom - $minHeight))))
+    } elseif ($direction.Contains('Bottom')) {
+        $bottom = [Math]::Min($screen.Bottom, [Math]::Min(($top + $maxHeight), [Math]::Max(($origin.Bottom + $dy), ($top + $minHeight))))
+    }
+    $form.Bounds = [System.Drawing.Rectangle]::new([int]$left, [int]$top, [int]($right - $left), [int]($bottom - $top))
+}
+$resizeUp = {
+    param($sender, $e)
+    if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left -and $sender -eq $script:resizeControl) { Complete-Resize }
+}
+$resizeCaptureChanged = {
+    param($sender, $e)
+    if ($script:resizing -and $sender -eq $script:resizeControl -and -not $sender.Capture) { Complete-Resize }
+}
+foreach ($zone in $script:resizeEdges.Values) {
+    $zone.Add_MouseDown($resizeDown)
+    $zone.Add_MouseMove($resizeMove)
+    $zone.Add_MouseUp($resizeUp)
+    $zone.Add_MouseCaptureChanged($resizeCaptureChanged)
+}
 $form.Add_SizeChanged({ Update-ResponsiveLayout })
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
