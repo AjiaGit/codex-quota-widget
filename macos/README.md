@@ -1,22 +1,27 @@
 # macOS 使用步骤
 
-macOS 版在菜单栏显示本周剩余百分比，并提供始终置顶的极简／详细悬浮窗。极简窗只有圆环和环内数字；单击展开。两种窗口都可拖动右下角边缘调整大小，没有可见的缩放手柄。
+Mac 版在菜单栏显示本周剩余额度，并提供始终置顶的极简／详细悬浮窗。极简窗显示进度圆环与数字；单击展开详细窗。
 
 ## 第一次启动
 
-1. 在 GitHub 点 **Code → Download ZIP** 并解压。把解压得到的 `codex-quota-widget-main` 文件夹改名为 `codex-quota-widget`，再把整个文件夹放到个人应用目录 `~/Applications/`。在 Finder 按 `Shift + Command + H` 可打开个人文件夹；若没有 `Applications`，新建一个。工具不会自动移动文件夹。
-2. 按 `Command + 空格`，输入“终端”并打开。运行 `node -v` 和 `codex --version`。若缺少 Node.js，请安装 [24 或更新的 LTS 版本](https://nodejs.org/en/download)；若缺少 Codex CLI，可按[官方说明](https://learn.chatgpt.com/docs/codex/cli)安装。然后运行 `codex login`，用要监控的 ChatGPT 账号登录。
-3. 在终端运行 `xcode-select --install`，按[Apple 的安装提示](https://developer.apple.com/documentation/xcode/installing-the-command-line-tools)安装命令行工具；如提示已经安装，直接继续。
-4. 在 Finder 打开 `~/Applications/codex-quota-widget/macos/`，双击 `Start.command`。首次启动会在这台 Mac 上编译悬浮窗，可能需要一两分钟。若系统阻止打开，在 Finder 右键 `Start.command` →“打开”；若双击只显示脚本文本，在终端输入 `bash `（末尾保留空格），把 `Start.command` 拖进终端窗口，再按回车。
-5. 右上角菜单栏出现 `数字%` 即启动成功。首次成功后，本文件夹会生成 `启动 Codex 周额度.app`，可以拖到 Dock；之后不要单独搬动这个 app，也不要改名或移动整个工程文件夹。
+1. 在仓库首页点 **Code → Download ZIP** 并解压。把解压得到的整个 `codex-quota-widget-main` 文件夹放到个人应用目录 `~/Applications/`。之后不要只移动生成的 `.app`；源码、启动器和本机服务需要留在同一个文件夹。
+2. 安装 Node.js 24 或更新版本、Codex CLI，并在终端运行 `codex login`。Codex 桌面应用的登录状态不一定等于 CLI 登录状态。用 `node -v`、`codex --version` 检查安装。
+3. 在终端运行 `xcode-select --install` 安装 Apple 命令行工具；如果已经安装，直接继续。
+4. 在 Finder 打开 `~/Applications/codex-quota-widget-main/macos/`，双击 `Start.command`。首次启动会在本机编译悬浮窗和程序坞入口。若系统阻止打开，在 Finder 中右键该文件并选“打开”；若双击只显示文本，在终端输入 `bash `，把文件拖进终端后按回车。
+5. 菜单栏出现百分比后，文件夹内会生成 `启动 Codex 周额度.app`。将它拖到程序坞，之后点击即可打开或重新显示悬浮窗。
 
 ## 日常使用
 
-- 点菜单栏百分比，可显示悬浮窗、切换极简／详细、刷新或退出。
-- 极简窗单击展开；拖动窗体移动；拖动右下角边缘调整大小。
-- 详细窗顶部“极简”可缩小；顶部空白区域可拖动；详细内容可滚动。两种尺寸分别记住。
-- 双击 `Stop.command` 可完全停止；再次双击 `Start.command` 可恢复。没有开机启动项。
+- 点击菜单栏百分比，可显示悬浮窗、切换极简／详细、刷新额度或退出。
+- 极简窗单击圆环展开；拖动窗体移动。左右边缘调整宽度，上下边缘调整高度，四角同时调整两者。最小尺寸是 36×36。
+- 详细窗顶部的“极简”可缩小；拖动顶部空白区域移动。两种模式各自记住位置和尺寸；移动及缩放都被限制在屏幕范围内。详细内容可以滚动。
+- 程序坞图标显示本周剩余额度的圆环与百分比，约每 30 秒读取一次本机缓存。额度暂不可用时显示 `—`。
+- 双击 `Stop.command` 可停止工具；再次双击 `Start.command` 或点击程序坞图标可恢复。工具不会自动开机启动。
 
-工具本体留在本文件夹；运行记录和日志保存在 `~/Library/Application Support/CodexWeeklyMonitor/`。显示 `—` 时先运行 `codex login status`，再从菜单栏刷新。若无法启动，请查看该目录的 `build.log` 或 `monitor.log`。
+## 数据刷新与故障排查
 
-Mac 原生窗口尚未在真实 Mac 上完成编译、深浅色和拖拽验收。账号额度取自本机 Codex CLI；Codex 桌面 app 已登录不保证 CLI 也已登录。
+本机服务每 5 分钟向 Codex CLI 读取一次账号额度；详细窗每分钟读取本机缓存，菜单栏和程序坞图标每 30 秒更新显示。公开站点记录单独每 10 分钟刷新；不会向这些站点发送登录信息或个人额度。超过 10 分钟未更新、重置时间已到或登录失效时，旧百分比不会继续显示为当前额度。
+
+若显示 `—`，先在终端运行 `codex login status`，然后从菜单栏刷新。若启动或编译失败，查看 `~/Library/Application Support/CodexWeeklyMonitor/` 下的 `monitor.log`、`build.log` 或 `launcher-build.log`。工具本体留在 `macos` 文件夹，运行记录保存在上述本机目录。
+
+这套 macOS 原生悬浮窗已经在 Apple Silicon Mac 上编译并验证过极简／详细切换、各边缘缩放、屏幕边界约束和程序坞图标。其他 Mac 配置仍需分别验证。
