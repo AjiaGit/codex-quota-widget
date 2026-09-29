@@ -20,4 +20,5 @@ stop_owned() {
 
 stop_owned "$STATE/widget.pid" "$EXE"
 stop_owned "$STATE/monitor.pid" "$ROOT/monitor.mjs"
+stop_owned "$STATE/launcher.pid" "$ROOT/启动 Codex 周额度.app/Contents/MacOS/Launch"
 echo 'Codex 周额度工具已停止。'
