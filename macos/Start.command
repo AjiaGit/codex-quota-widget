@@ -6,7 +6,10 @@ STATE="$HOME/Library/Application Support/CodexWeeklyMonitor"
 APP="$ROOT/Codex 周额度.app"
 EXE="$APP/Contents/MacOS/CodexQuota"
 mkdir -p "$STATE"
-PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
+PATH="/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
+if [[ "$(uname -m)" == "arm64" && -x "$ROOT/runtime/node" ]]; then
+  PATH="$ROOT/runtime:$PATH"
+fi
 export PATH
 
 notice() {
@@ -38,12 +41,11 @@ if ! command -v codex >/dev/null 2>&1; then
   notice "未找到 Codex CLI。请按 README.md 的一次性准备步骤安装并登录。"
   exit 1
 fi
-if ! /usr/bin/xcrun --find swiftc >/dev/null 2>&1; then
-  notice "未找到 Apple 命令行工具。请在终端运行 xcode-select --install，安装完成后重新打开 Start.command。"
-  exit 1
-fi
-
 if [[ ! -x "$EXE" || "$ROOT/MacWidget.swift" -nt "$EXE" ]]; then
+  if ! /usr/bin/xcrun --find swiftc >/dev/null 2>&1; then
+    notice "未找到 Apple 命令行工具。请在终端运行 xcode-select --install，安装完成后重新打开 Start.command。"
+    exit 1
+  fi
   mkdir -p "$APP/Contents/MacOS"
   cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -59,17 +61,25 @@ if [[ ! -x "$EXE" || "$ROOT/MacWidget.swift" -nt "$EXE" ]]; then
 </dict></plist>
 PLIST
   echo '首次运行：正在编译 Mac 悬浮窗（可能需要 1～2 分钟）…'
-  if ! /usr/bin/xcrun swiftc -O -framework AppKit -framework WebKit \
+  mkdir -p "$STATE/clang-cache" "$STATE/swift-cache"
+  export CLANG_MODULE_CACHE_PATH="$STATE/clang-cache"
+  export SWIFT_MODULE_CACHE_PATH="$STATE/swift-cache"
+  swift_args=(-parse-as-library -O -framework AppKit -framework WebKit)
+  if [[ -d /Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk ]]; then
+    swift_args+=(-sdk /Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk)
+  fi
+  if ! /usr/bin/xcrun swiftc "${swift_args[@]}" \
       -o "$EXE" "$ROOT/MacWidget.swift" >"$STATE/build.log" 2>&1; then
     notice "Mac 悬浮窗编译失败。请打开 $STATE/build.log 查看错误，或把该文件发给我。"
     exit 1
   fi
 fi
 
-# Create the Dock launcher on this Mac, avoiding a downloaded app bundle's translocation.
+# Build a persistent Dock app so its icon can show the current remaining percentage.
 LAUNCHER="$ROOT/启动 Codex 周额度.app"
-if [[ ! -x "$LAUNCHER/Contents/MacOS/Launch" ]]; then
-  mkdir -p "$LAUNCHER/Contents/MacOS"
+LAUNCH_EXE="$LAUNCHER/Contents/MacOS/Launch"
+if [[ ! -x "$LAUNCH_EXE" || "$ROOT/DockLauncher.swift" -nt "$LAUNCH_EXE" ]]; then
+  mkdir -p "$LAUNCHER/Contents/MacOS" "$LAUNCHER/Contents/Resources"
   cat > "$LAUNCHER/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -78,14 +88,26 @@ if [[ ! -x "$LAUNCHER/Contents/MacOS/Launch" ]]; then
   <key>CFBundleIdentifier</key><string>local.codex.weeklymonitor.launcher</string>
   <key>CFBundleName</key><string>启动 Codex 周额度</string>
   <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleIconFile</key><string>CodexQuota.icns</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
 </dict></plist>
 PLIST
-  cat > "$LAUNCHER/Contents/MacOS/Launch" <<'LAUNCH'
-#!/bin/bash
-ROOT="$(cd "$(dirname "$0")/../../.." && pwd -P)"
-exec /bin/bash "$ROOT/Start.command"
-LAUNCH
-  chmod 755 "$LAUNCHER/Contents/MacOS/Launch"
+  mkdir -p "$STATE/clang-cache" "$STATE/swift-cache"
+  export CLANG_MODULE_CACHE_PATH="$STATE/clang-cache"
+  export SWIFT_MODULE_CACHE_PATH="$STATE/swift-cache"
+  launcher_args=(-parse-as-library -O -framework AppKit)
+  if [[ -d /Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk ]]; then
+    launcher_args+=(-sdk /Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk)
+  fi
+  if ! /usr/bin/xcrun swiftc "${launcher_args[@]}" -o "$LAUNCH_EXE" \
+      "$ROOT/DockLauncher.swift" >"$STATE/launcher-build.log" 2>&1; then
+    notice "程序坞入口编译失败。请查看 $STATE/launcher-build.log。"
+    exit 1
+  fi
+  "$LAUNCH_EXE" --icon-png "$STATE/CodexQuota.png"
+  /usr/bin/sips -s format icns "$STATE/CodexQuota.png" \
+    --out "$LAUNCHER/Contents/Resources/CodexQuota.icns" >/dev/null
 fi
 
 if ! owned_pid "$STATE/monitor.pid" "$ROOT/monitor.mjs" >/dev/null; then
@@ -110,7 +132,7 @@ if ! owned_pid "$STATE/monitor.pid" "$ROOT/monitor.mjs" >/dev/null; then
 fi
 
 if owned_pid "$STATE/widget.pid" "$EXE" >/dev/null; then
-  notice "悬浮窗已在运行。请点 Mac 屏幕右上角菜单栏里的百分比，选择“显示悬浮窗”。"
+  /usr/bin/open "$APP"
 else
   /usr/bin/open "$APP"
   echo '已启动。屏幕右上角菜单栏会显示本周剩余百分比。'
