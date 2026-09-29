@@ -1,4 +1,4 @@
-param(
+﻿param(
     [ValidateSet('System', 'Light', 'Dark')]
     [string]$Theme = 'System',
     [ValidatePattern('^http://127\.0\.0\.1:\d+$')]
