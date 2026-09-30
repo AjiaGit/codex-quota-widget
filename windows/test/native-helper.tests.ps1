@@ -52,6 +52,37 @@ Test-Case 'process ownership requires executable exact script and process creati
     $process.CommandLine = 'node.exe "C:\Widget\monitor.mjs"'
     Assert-Equal (Test-WidgetProcessOwnership $process 'C:\Node\node.exe' 'C:\Widget\monitor.mjs' '2026-09-29T08:00:00Z') $false 'Reused process ID'
 }
+Test-Case 'Node ownership rejects a foreign executed script even when a later argument names the monitor' {
+    $process = [pscustomobject]@{ ExecutablePath = 'C:\Node\node.exe'; CommandLine = '"C:\Node\node.exe" "C:\Widget\foreign.mjs" "C:\Widget\monitor.mjs"'; CreationDate = [datetime]'2026-09-30T08:00:00Z' }
+    Assert-Equal (Test-WidgetProcessOwnership $process 'C:\Node\node.exe' 'C:\Widget\monitor.mjs' '2026-09-30T08:00:00Z') $false 'Foreign Node script with target as data argument'
+}
+Test-Case 'PowerShell ownership requires the script following File rather than another argument or Command' {
+    $exe = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+    $process = [pscustomobject]@{ ExecutablePath = $exe; CommandLine = 'powershell.exe -NoProfile -Sta -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Widget\foreign.ps1" "C:\Widget\Floating.ps1"'; CreationDate = [datetime]'2026-09-30T08:00:00Z' }
+    Assert-Equal (Test-WidgetProcessOwnership $process $exe 'C:\Widget\Floating.ps1' '2026-09-30T08:00:00Z') $false 'Foreign PowerShell File script with target as argument'
+    $process.CommandLine = 'powershell.exe -Command "C:\Widget\Floating.ps1"'
+    Assert-Equal (Test-WidgetProcessOwnership $process $exe 'C:\Widget\Floating.ps1' '2026-09-30T08:00:00Z') $false 'PowerShell Command does not identify an owned File launch'
+}
+Test-Case 'owned launches support quoted paths with spaces and case differences' {
+    $process = [pscustomobject]@{ ExecutablePath = 'C:\Program Files\nodejs\node.exe'; CommandLine = '"C:\Program Files\nodejs\node.exe" "c:\quota widget\monitor.mjs"'; CreationDate = [datetime]'2026-09-30T08:00:00Z' }
+    Assert-Equal (Test-WidgetProcessOwnership $process 'C:\Program Files\nodejs\node.exe' 'C:\Quota Widget\monitor.mjs' '2026-09-30T08:00:00Z') $true 'Quoted Node launch'
+    $process.ExecutablePath = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+    $process.CommandLine = '"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -Sta -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Quota Widget\Floating.ps1"'
+    Assert-Equal (Test-WidgetProcessOwnership $process $process.ExecutablePath 'C:\Quota Widget\Floating.ps1' '2026-09-30T08:00:00Z') $true 'Quoted PowerShell File launch'
+}
+Test-Case 'ownership rejects script token concatenation malformed quoting and Node evaluation modes' {
+    $process = [pscustomobject]@{ ExecutablePath = 'C:\Node\node.exe'; CreationDate = [datetime]'2026-09-30T08:00:00Z' }
+    foreach ($line in @(
+        'node.exe "C:\Widget\monitor.mjs"suffix',
+        'node.exe "C:\Widget\monitor.mjs',
+        'node.exe -e "C:\Widget\monitor.mjs"',
+        'node.exe -p "C:\Widget\monitor.mjs"',
+        '"C:\Another Node\node.exe" "C:\Widget\monitor.mjs"'
+    )) {
+        $process | Add-Member -NotePropertyName CommandLine -NotePropertyValue $line -Force
+        Assert-Equal (Test-WidgetProcessOwnership $process 'C:\Node\node.exe' 'C:\Widget\monitor.mjs' '2026-09-30T08:00:00Z') $false "Ambiguous or foreign launch: $line"
+    }
+}
 Test-Case 'migration preserves geometry and preferences and rejects foreign process records' {
     $base = Join-Path ([System.IO.Path]::GetTempPath()) ('quota-native-test-' + [guid]::NewGuid())
     try {

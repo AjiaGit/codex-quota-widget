@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
@@ -130,20 +130,31 @@ final class LocalService: URLProtocol {
   } finally { rmSync(temp, { recursive: true, force: true }); }
 });
 
-test('Stop terminates this installation and rejects a similarly prefixed script path', { skip: process.platform !== 'darwin' }, async context => {
+test('Stop verifies the executed script, rejecting prefix impostors and target paths carried as ordinary arguments', { skip: process.platform !== 'darwin' }, async context => {
   const inspection = spawnSync('/bin/ps', ['-p', String(process.pid), '-o', 'command='], { encoding: 'utf8' });
   if (inspection.status !== 0) { context.skip('Process inspection is denied in this sandbox'); return; }
-  const temp = realpathSync(mkdtempSync(join(tmpdir(), 'codex-native-owned-stop-')));
+  const temp = realpathSync(mkdtempSync(join(tmpdir(), 'codex-native owned-stop-')));
   const children = [];
   try {
     const state = join(temp, 'Library', 'Application Support', 'CodexWeeklyMonitor');
     assert.equal(spawnSync('/bin/mkdir', ['-p', state]).status, 0);
     const stopper = join(temp, 'Stop.command');
     writeFileSync(stopper, readFileSync(join(root, 'macos', 'Stop.command')));
-    for (const suffix of ['-other', '']) {
-      const script = join(temp, `monitor.mjs${suffix}`);
+    writeFileSync(join(temp, 'NativeSupport.swift'), readFileSync(native));
+    assert.equal(spawnSync('/bin/mkdir', ['-p', join(temp, 'runtime')]).status, 0);
+    symlinkSync(process.execPath, join(temp, 'runtime', 'node'));
+    const monitor = join(temp, 'monitor.mjs');
+    const cases = [
+      { script: join(temp, 'monitor.mjs-other'), args: [], owned: false },
+      { script: join(temp, 'foreign.mjs'), args: [monitor], owned: false },
+      { script: monitor, args: ['ordinary-extra-argument'], owned: false },
+      { script: join(temp, 'foreign.mjs'), args: [join(temp, 'Codex 周额度.app', 'Contents', 'MacOS', 'CodexQuota')], owned: false, pidFile: 'widget.pid' },
+      { script: monitor, args: [], owned: true },
+    ];
+    for (const scenario of cases) {
+      const script = scenario.script;
       writeFileSync(script, 'setInterval(() => {}, 1000); console.log("ready");');
-      const child = spawn(process.execPath, [script], { stdio: ['ignore', 'pipe', 'pipe'] });
+      const child = spawn(process.execPath, [script, ...scenario.args], { stdio: ['ignore', 'pipe', 'pipe'] });
       children.push(child);
       await new Promise((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error('test process did not start')), 3000);
@@ -151,18 +162,22 @@ test('Stop terminates this installation and rejects a similarly prefixed script 
         child.once('error', error => { clearTimeout(timeout); reject(error); });
         child.once('exit', () => { clearTimeout(timeout); reject(new Error('test process exited before readiness')); });
       });
-      const file = join(state, 'monitor.pid');
+      const file = join(state, scenario.pidFile ?? 'monitor.pid');
       writeFileSync(file, String(child.pid));
       const stopped = spawnSync('/bin/bash', [stopper], { env: { ...process.env, HOME: temp }, encoding: 'utf8' });
       assert.equal(stopped.status, 0, stopped.stderr);
       await new Promise(resolve => setTimeout(resolve, 100));
-      if (suffix) {
+      if (!scenario.owned) {
         assert.equal(child.exitCode, null);
         assert.equal(child.signalCode, null);
         assert.equal(existsSync(file), true);
       } else {
         assert.equal(child.signalCode, 'SIGTERM');
         assert.equal(existsSync(file), false);
+        writeFileSync(file, String(child.pid));
+        const stale = spawnSync('/bin/bash', [stopper], { env: { ...process.env, HOME: temp }, encoding: 'utf8' });
+        assert.equal(stale.status, 0, stale.stderr);
+        assert.equal(readFileSync(file, 'utf8'), String(child.pid), 'a stale record is preserved');
       }
     }
   } finally {
@@ -179,7 +194,10 @@ test('Stop preserves a PID file and process owned by a different installation', 
     assert.equal(mkdir.status, 0);
     const pidFile = join(state, 'widget.pid');
     writeFileSync(pidFile, `${process.pid}\n`);
-    const result = spawnSync('/bin/bash', [join(root, 'macos', 'Stop.command')], { env: { ...process.env, HOME: temp }, encoding: 'utf8' });
+    const stopper = join(temp, 'Stop.command');
+    writeFileSync(stopper, readFileSync(join(root, 'macos', 'Stop.command')));
+    writeFileSync(join(temp, 'NativeSupport.swift'), readFileSync(native));
+    const result = spawnSync('/bin/bash', [stopper], { env: { ...process.env, HOME: temp }, encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
     assert.ok(existsSync(pidFile), 'a different installation retains its process record');
     assert.equal(readFileSync(pidFile, 'utf8'), `${process.pid}\n`);
@@ -192,6 +210,22 @@ test('macOS build rejects missing bundled Node with an actionable error before p
     const result = spawnSync('/bin/bash', [join(root, 'scripts', 'build-macos.sh')], { env: { ...process.env, NODE_ROOT: join(temp, 'missing-node'), OUTPUT_DIR: join(temp, 'out'), ARCH: process.arch === 'arm64' ? 'arm64' : 'x86_64' }, encoding: 'utf8' });
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /NODE_ROOT.*bin\/node.*LICENSE/);
+    assert.equal(existsSync(join(temp, 'out', 'Codex Quota Widget.app')), false);
+  } finally { rmSync(temp, { recursive: true, force: true }); }
+});
+
+test('macOS build reports a missing selected lipo tool without blaming the Node architecture', { skip: process.platform !== 'darwin' }, () => {
+  const temp = mkdtempSync(join(tmpdir(), 'codex-native-build-tool-'));
+  try {
+    assert.equal(spawnSync('/bin/mkdir', ['-p', join(temp, 'node', 'bin')]).status, 0);
+    symlinkSync(process.execPath, join(temp, 'node', 'bin', 'node'));
+    writeFileSync(join(temp, 'node', 'LICENSE'), 'non-shipping fixture');
+    const result = spawnSync('/bin/bash', [join(root, 'scripts', 'build-macos.sh')], {
+      env: { ...process.env, NODE_ROOT: join(temp, 'node'), OUTPUT_DIR: join(temp, 'out'),
+        ARCH: process.arch === 'arm64' ? 'arm64' : 'x86_64', DEVELOPER_DIR: join(temp, 'missing-xcode') }, encoding: 'utf8' });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /lipo was not found/);
+    assert.doesNotMatch(result.stderr, /does not contain the requested architecture/);
     assert.equal(existsSync(join(temp, 'out', 'Codex Quota Widget.app')), false);
   } finally { rmSync(temp, { recursive: true, force: true }); }
 });

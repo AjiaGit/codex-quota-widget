@@ -16,6 +16,7 @@ if (-not (Test-Path -LiteralPath $Installer -PathType Leaf)) { throw 'Installer 
 if ($UpgradeInstaller) { $UpgradeInstaller = [IO.Path]::GetFullPath($UpgradeInstaller) }
 $savedLocal = $env:LOCALAPPDATA; $savedTemp = $env:TEMP; $savedTmp = $env:TMP; $savedPath = $env:PATH
 $savedCli = $env:CODEX_CLI_PATH; $savedModeFile = $env:QUOTA_SMOKE_MODE_FILE
+$savedPidFile = $env:QUOTA_SMOKE_PID_FILE; $savedWrapperPidFile = $env:QUOTA_SMOKE_WRAPPER_PID_FILE
 $env:LOCALAPPDATA = Join-Path $OutputDir 'AppData'
 $env:TEMP = Join-Path $OutputDir 'Temp'; $env:TMP = $env:TEMP
 [void][IO.Directory]::CreateDirectory($env:TEMP)
@@ -50,6 +51,20 @@ function Stop-Installed {
     try { Invoke-RestMethod "$serviceUrl/health" -TimeoutSec 1 | Out-Null; $healthy = $true } catch { }
     Assert-True (-not $healthy) 'Service remained after quit.'
 }
+function Assert-NoFixtureProcesses([string]$phase) {
+    Wait-Until {
+        @(Get-CimInstance Win32_Process -Filter "Name='codex.exe'" -ErrorAction SilentlyContinue | Where-Object {
+            [string]::Equals([string]$_.ExecutablePath, $nativeFixtureExe, [StringComparison]::OrdinalIgnoreCase)
+        }).Count -eq 0
+    } "Native Codex fixture left an orphan process $phase" 15
+    Assert-True (-not (Test-Path -LiteralPath $env:QUOTA_SMOKE_WRAPPER_PID_FILE)) 'Service used the npm JavaScript wrapper rather than its native executable.'
+    $recordedPids = @(Get-Content -LiteralPath $env:QUOTA_SMOKE_PID_FILE | Where-Object { $_ -match '^\d+$' } | ForEach-Object { [int]$_ } | Select-Object -Unique)
+    Assert-True ($recordedPids.Count -gt 0) 'Native fixture PID records were not generated.'
+    foreach ($recordedPid in $recordedPids) {
+        $recordedProcess = Get-CimInstance Win32_Process -Filter "ProcessId=$recordedPid" -ErrorAction SilentlyContinue
+        Assert-True (-not $recordedProcess -or ($recordedProcess.ExecutablePath -and -not [string]::Equals([string]$recordedProcess.ExecutablePath, $nativeFixtureExe, [StringComparison]::OrdinalIgnoreCase))) "Recorded native fixture PID $recordedPid remained $phase"
+    }
+}
 try {
     # Fabricated npm shim: no credentials, access token, auth file, or real account.
     $fixtureRoot = Join-Path $OutputDir 'fixture'
@@ -59,22 +74,80 @@ try {
     [IO.File]::WriteAllText($env:CODEX_CLI_PATH, '@echo off' + "`r`n")
     $env:QUOTA_SMOKE_MODE_FILE = Join-Path $fixtureRoot 'mode.txt'
     [IO.File]::WriteAllText($env:QUOTA_SMOKE_MODE_FILE, 'ok')
+    $env:QUOTA_SMOKE_PID_FILE = Join-Path $fixtureRoot 'native-pids.txt'
+    $env:QUOTA_SMOKE_WRAPPER_PID_FILE = Join-Path $fixtureRoot 'wrapper-pids.txt'
+    $nativeDirectory = Join-Path $fixtureRoot 'node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin'
+    [void][IO.Directory]::CreateDirectory($nativeDirectory)
+    $nativeFixtureExe = Join-Path $nativeDirectory 'codex.exe'
+    $fixtureSource = Join-Path $fixtureRoot 'FakeCodex.cs'
+    $nativeFixture = @'
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Threading;
+using System.Web.Script.Serialization;
+internal static class FakeCodex {
+    private static int Main(string[] args) {
+        if (args.Length != 1 || args[0] != "app-server") return 41;
+        File.AppendAllText(Environment.GetEnvironmentVariable("QUOTA_SMOKE_PID_FILE"), Process.GetCurrentProcess().Id + "\n");
+        Console.InputEncoding = new System.Text.UTF8Encoding(false);
+        Console.OutputEncoding = new System.Text.UTF8Encoding(false);
+        if (File.ReadAllText(Environment.GetEnvironmentVariable("QUOTA_SMOKE_MODE_FILE")).Trim() == "timeout") {
+            Thread.Sleep(Timeout.Infinite);
+            return 0;
+        }
+        var serializer = new JavaScriptSerializer();
+        long now = (long)(DateTime.UtcNow - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds;
+        string line;
+        while ((line = Console.ReadLine()) != null) {
+            var request = (Dictionary<string, object>)serializer.DeserializeObject(line);
+            string method = (string)request["method"];
+            if (method == "initialized") continue;
+            object id = request["id"];
+            object result;
+            if (method == "initialize") result = new Dictionary<string, object>();
+            else if (method == "account/rateLimits/read") result = new {
+                rateLimits = new {
+                    primary = new { usedPercent = 61, windowDurationMins = 10080, resetsAt = now + 3600 * 72 },
+                    secondary = new { usedPercent = 25, windowDurationMins = 300, resetsAt = now + 3600 }
+                },
+                rateLimitResetCredits = new {
+                    availableCount = 2,
+                    credits = new[] { new {
+                        id = "fixture-id-must-never-be-shown", title = "Sample grant / 示例发放", description = "Fabricated test data / 虚构测试数据",
+                        grantedAt = now - 86400, expiresAt = now + 86400
+                    } }
+                }
+            };
+            else if (method == "account/read") result = File.ReadAllText(Environment.GetEnvironmentVariable("QUOTA_SMOKE_MODE_FILE")).Trim() == "signed_out"
+                ? (object)new { account = (object)null, requiresOpenaiAuth = true }
+                : (object)new { account = new { type = "chatgpt", planType = "plus" }, requiresOpenaiAuth = true };
+            else return 42;
+            Console.WriteLine(serializer.Serialize(new { id = id, result = result }));
+            Console.Out.Flush();
+        }
+        // Deliberately remain alive after stdin closes: killing only an npm
+        // JavaScript wrapper would leave this native child behind.
+        Thread.Sleep(Timeout.Infinite);
+        return 0;
+    }
+}
+'@
+    [IO.File]::WriteAllText($fixtureSource, $nativeFixture, [Text.UTF8Encoding]::new($true))
+    $csc = Join-Path $env:SystemRoot 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
+    if (-not (Test-Path -LiteralPath $csc)) { $csc = Join-Path $env:SystemRoot 'Microsoft.NET/Framework/v4.0.30319/csc.exe' }
+    & $csc /nologo /target:exe /platform:x64 ('/out:' + $nativeFixtureExe) /reference:System.Web.Extensions.dll $fixtureSource
+    Assert-True ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $nativeFixtureExe)) 'Native RPC fixture compilation failed.'
+    # Models the upstream npm wrapper's child-process structure. The service
+    # must discover the optional package binary and bypass this wrapper.
     $fixture = @'
-const readline = require('node:readline');
-const fs = require('node:fs');
-const now = Math.floor(Date.now()/1000);
-const answer = (id, result) => process.stdout.write(JSON.stringify({id,result})+'\n');
-readline.createInterface({input:process.stdin}).on('line', line => {
-  const request = JSON.parse(line);
-  if(request.method==='initialize') answer(request.id,{});
-  else if(request.method==='account/rateLimits/read') answer(request.id,{
-    rateLimits:{primary:{usedPercent:61,windowDurationMins:10080,resetsAt:now+3600*72},secondary:{usedPercent:25,windowDurationMins:300,resetsAt:now+3600}},
-    rateLimitResetCredits:{availableCount:2,credits:[{id:'fixture-id-must-never-be-shown',title:'Sample grant / 示例发放',description:'Fabricated test data / 虚构测试数据',grantedAt:now-86400,expiresAt:now+86400}]}
-  });
-  else if(request.method==='account/read') answer(request.id,fs.readFileSync(process.env.QUOTA_SMOKE_MODE_FILE,'utf8').trim()==='signed_out'
-    ? {account:null,requiresOpenaiAuth:true}
-    : {account:{type:'chatgpt',planType:'plus'},requiresOpenaiAuth:true});
-});
+const {spawn}=require('node:child_process'),fs=require('node:fs'),path=require('node:path');
+fs.appendFileSync(process.env.QUOTA_SMOKE_WRAPPER_PID_FILE,process.pid+'\n');
+const native=path.join(__dirname,'..','..','codex-win32-x64','vendor','x86_64-pc-windows-msvc','bin','codex.exe');
+const child=spawn(native,process.argv.slice(2),{stdio:'inherit',windowsHide:true});
+for(const signal of ['SIGINT','SIGTERM','SIGHUP'])process.on(signal,()=>child.kill(signal));
+child.on('exit',(code)=>process.exit(code??1));
 '@
     [IO.File]::WriteAllText((Join-Path $bin 'codex.js'), $fixture, [Text.UTF8Encoding]::new($false))
     Install-Widget $Installer 'install.log'
@@ -102,6 +175,8 @@ readline.createInterface({input:process.stdin}).on('line', line => {
     $usage = Invoke-RestMethod "$serviceUrl/api/usage"
     Assert-True ($usage.remainingPercent -eq 39 -and $usage.resetCards -eq 2 -and @($usage.resetDetails).Count -eq 1) 'Fixture quota or authoritative count was changed.'
     Assert-True (-not ($usage | ConvertTo-Json -Depth 8).Contains('fixture-id-must-never-be-shown')) 'Credit ID leaked from service.'
+    Assert-True (Test-Path -LiteralPath $env:QUOTA_SMOKE_PID_FILE) 'Native fixture was not executed.'
+    Assert-NoFixtureProcesses 'after a successful quota query'
     $settings = Invoke-RestMethod "$serviceUrl/api/settings" -Method Post -ContentType 'application/json' -Body '{"language":"zh-CN"}'
     Assert-True ($settings.language -eq 'zh-CN') 'Language API failed.'
     $firstPid = $state.pid; $firstFloatingPid = $state.floatingPid
@@ -118,6 +193,13 @@ readline.createInterface({input:process.stdin}).on('line', line => {
         Assert-True ($missingCli.errorCode -eq 'cli_missing') 'Missing CLI was not reported with setup guidance.'
     } finally { Move-Item -LiteralPath ($env:CODEX_CLI_PATH + '.disabled') -Destination $env:CODEX_CLI_PATH }
     [void](Invoke-RestMethod "$serviceUrl/api/refresh" -Method Post -TimeoutSec 30)
+    [IO.File]::WriteAllText($env:QUOTA_SMOKE_MODE_FILE, 'timeout')
+    try {
+        $timedOut = Invoke-RestMethod "$serviceUrl/api/refresh" -Method Post -TimeoutSec 35
+        Assert-True ($timedOut.errorCode -eq 'timeout') 'Hung native CLI did not report the timeout state.'
+        Assert-NoFixtureProcesses 'after the native query timed out'
+    } finally { [IO.File]::WriteAllText($env:QUOTA_SMOKE_MODE_FILE, 'ok') }
+    [void](Invoke-RestMethod "$serviceUrl/api/refresh" -Method Post -TimeoutSec 30)
     # Upgrade while owned processes are running; the installer must stop them before copying.
     $preferences = Read-WidgetJson (Join-Path $dataDir 'window.json')
     if ($UpgradeInstaller) { Install-Widget $UpgradeInstaller 'upgrade.log' }
@@ -126,6 +208,7 @@ readline.createInterface({input:process.stdin}).on('line', line => {
     Assert-True ((Read-WidgetJson (Join-Path $dataDir 'window.json')).detailWidth -eq $preferences.detailWidth) 'Upgrade lost geometry.'
     Start-Installed
     Stop-Installed
+    Assert-NoFixtureProcesses 'after quitting the monitor'
     Assert-True (Test-Path (Join-Path $dataDir 'settings.json')) 'Quit deleted preferences.'
     # Completely fabricated native screenshots use a local fixture, including external data.
     $uiFixturePath = Join-Path $fixtureRoot 'ui-fixture.js'
@@ -217,6 +300,7 @@ public static class QuotaSmokeWindows {
     $uninstall = Start-Process -FilePath $uninstaller -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',('/LOG="' + (Join-Path $OutputDir 'uninstall.log') + '"')) -Wait -PassThru
     Assert-True ($uninstall.ExitCode -eq 0) 'Uninstall failed.'
     $uninstalled = $true
+    Assert-NoFixtureProcesses 'after uninstall'
     Assert-True (-not (Test-Path (Join-Path $dataDir 'state.json'))) 'Uninstall left running state.'
     Assert-True (Test-Path (Join-Path $dataDir 'settings.json')) 'Uninstall lost language preference.'
     Assert-True (Test-Path (Join-Path $dataDir 'window.json')) 'Uninstall lost window geometry.'
@@ -231,5 +315,11 @@ public static class QuotaSmokeWindows {
         try { & (Join-Path $installDir 'Stop.ps1') -Quiet | Out-Null } catch { }
         if (Test-Path (Join-Path $installDir 'unins000.exe')) { try { Start-Process -FilePath (Join-Path $installDir 'unins000.exe') -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART') -Wait | Out-Null } catch { } }
     }
+    if ($nativeFixtureExe) {
+        foreach ($native in @(Get-CimInstance Win32_Process -Filter "Name='codex.exe'" -ErrorAction SilentlyContinue | Where-Object { [string]::Equals([string]$_.ExecutablePath, $nativeFixtureExe, [StringComparison]::OrdinalIgnoreCase) })) {
+            Stop-Process -Id ([int]$native.ProcessId) -Force -ErrorAction SilentlyContinue
+        }
+    }
+    $env:QUOTA_SMOKE_PID_FILE=$savedPidFile; $env:QUOTA_SMOKE_WRAPPER_PID_FILE=$savedWrapperPidFile
     $env:LOCALAPPDATA=$savedLocal; $env:TEMP=$savedTemp; $env:TMP=$savedTmp; $env:PATH=$savedPath; $env:CODEX_CLI_PATH=$savedCli; $env:QUOTA_SMOKE_MODE_FILE=$savedModeFile
 }

@@ -1,4 +1,84 @@
 import Foundation
+import Darwin
+
+let nativeProcessGuardVersion = "CodexQuotaProcessGuard/1"
+
+/// Read argument boundaries from the kernel. Rendered `ps` text loses those boundaries.
+private func nativeProcessArguments(_ pid: pid_t) -> (executable: String, arguments: [String])? {
+    var limit: Int32 = 0
+    var limitSize = MemoryLayout<Int32>.size
+    var limitMIB: [Int32] = [CTL_KERN, KERN_ARGMAX]
+    guard sysctl(&limitMIB, 2, &limit, &limitSize, nil, 0) == 0,
+          limit > 0, limit <= 16 * 1024 * 1024 else { return nil }
+    var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
+    var bytes = [UInt8](repeating: 0, count: Int(limit))
+    var size = bytes.count
+    let result = bytes.withUnsafeMutableBytes { buffer in
+        sysctl(&mib, 3, buffer.baseAddress, &size, nil, 0)
+    }
+    guard result == 0, size > MemoryLayout<Int32>.size else { return nil }
+    var argc: Int32 = 0
+    withUnsafeMutableBytes(of: &argc) { destination in
+        destination.copyBytes(from: bytes.prefix(MemoryLayout<Int32>.size))
+    }
+    guard argc > 0, argc <= 4096 else { return nil }
+    var offset = MemoryLayout<Int32>.size
+    func nextString() -> String? {
+        guard offset < size else { return nil }
+        let start = offset
+        while offset < size, bytes[offset] != 0 { offset += 1 }
+        guard offset < size else { return nil }
+        let value = String(bytes: bytes[start..<offset], encoding: .utf8)
+        offset += 1
+        return value
+    }
+    guard let executable = nextString(), executable.hasPrefix("/") else { return nil }
+    // KERN_PROCARGS2 pads the executable path before argv[0]. Environment is never read.
+    while offset < size, bytes[offset] == 0 { offset += 1 }
+    var arguments: [String] = []
+    for _ in 0..<argc {
+        guard let argument = nextString() else { return nil }
+        arguments.append(argument)
+    }
+    return (executable, arguments)
+}
+
+func nativeProcessMatches(pid: pid_t, executable: String, script: String? = nil) -> Bool {
+    guard pid > 1, executable.hasPrefix("/"),
+          let process = nativeProcessArguments(pid) else { return false }
+    func canonical(_ path: String) -> String {
+        URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
+    }
+    let expectedExecutable = canonical(executable)
+    guard canonical(process.executable) == expectedExecutable else { return false }
+    guard let script else { return true }
+    // Start invokes exactly `node <absolute monitor.mjs>`. An ordinary argument cannot own a PID.
+    return script.hasPrefix("/") && process.arguments.count == 2
+        && process.arguments[1].hasPrefix("/")
+        && canonical(process.arguments[0]) == expectedExecutable
+        && canonical(process.arguments[1]) == canonical(script)
+}
+
+/// A non-GUI mode shared by the prebuilt launcher and the source stop guard.
+func nativeProcessGuardCommand(_ arguments: [String]) -> Int32? {
+    guard arguments.count > 1 else { return nil }
+    if arguments[1] == "--process-guard-version" {
+        print(nativeProcessGuardVersion)
+        return 0
+    }
+    guard arguments[1] == "--owns-process" else { return nil }
+    guard arguments.count == 4 || arguments.count == 5,
+          let pid = pid_t(arguments[2]) else { return 1 }
+    return nativeProcessMatches(pid: pid, executable: arguments[3],
+                                script: arguments.count == 5 ? arguments[4] : nil) ? 0 : 1
+}
+
+#if PROCESS_GUARD_ONLY
+@main
+private struct NativeProcessGuardMain {
+    static func main() { exit(nativeProcessGuardCommand(CommandLine.arguments) ?? 1) }
+}
+#endif
 
 enum NativeLanguage: String, CaseIterable {
     case automatic = "auto"

@@ -35,12 +35,16 @@ notice() {
 }
 
 owned_pid() {
-  local file="$1" expected="$2" pid command
+  local file="$1" expected_executable="$2" expected_script="${3:-}" pid
   [[ -f "$file" ]] || return 1
   pid="$(cat "$file")"
   [[ "$pid" =~ ^[0-9]+$ ]] || return 1
-  command="$(/bin/ps -p "$pid" -o command= 2>/dev/null || true)"
-  [[ "$command" == "$expected" || "$command" == "$expected "* || "$command" == *" $expected" || "$command" == *" $expected "* ]] || return 1
+  [[ -x "$LAUNCH_EXE" ]] && /usr/bin/grep -aFq 'CodexQuotaProcessGuard/1' "$LAUNCH_EXE" || return 1
+  if [[ -n "$expected_script" ]]; then
+    "$LAUNCH_EXE" --owns-process "$pid" "$expected_executable" "$expected_script" || return 1
+  else
+    "$LAUNCH_EXE" --owns-process "$pid" "$expected_executable" || return 1
+  fi
   printf '%s' "$pid"
 }
 
@@ -119,7 +123,7 @@ PLIST
 fi
 
 # A missing CLI or signed-out account is shown by the running UI, using service error codes.
-if ! owned_pid "$STATE/monitor.pid" "$ROOT/monitor.mjs" >/dev/null; then
+if ! owned_pid "$STATE/monitor.pid" "$NODE" "$ROOT/monitor.mjs" >/dev/null; then
   if /usr/bin/curl --silent --max-time 2 http://127.0.0.1:39224/health | /usr/bin/grep -q 'codex-weekly-monitor'; then
     notice 'Another installation is using port 39224. Quit that widget or run its Stop.command, then reopen this app.' '另一份工具正在使用端口 39224。请退出旧工具或运行它的 Stop.command，然后重新打开当前应用。'
     exit 1
@@ -133,7 +137,7 @@ if ! owned_pid "$STATE/monitor.pid" "$ROOT/monitor.mjs" >/dev/null; then
     sleep 0.5
   done
   if [[ "$ready" != 1 ]]; then
-    if owned_pid "$STATE/monitor.pid" "$ROOT/monitor.mjs" >/dev/null; then kill "$MONITOR_PID" 2>/dev/null || true; rm -f "$STATE/monitor.pid"; fi
+    if owned_pid "$STATE/monitor.pid" "$NODE" "$ROOT/monitor.mjs" >/dev/null; then kill "$MONITOR_PID" 2>/dev/null || true; rm -f "$STATE/monitor.pid"; fi
     notice "The local service did not start. Check $STATE/monitor.log." "本机额度服务没有启动，请查看 $STATE/monitor.log。"
     exit 1
   fi

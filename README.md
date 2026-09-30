@@ -6,6 +6,10 @@ A small Windows and macOS desktop widget for Codex quota. See remaining weekly q
 
 This is an independent, unofficial tool, with no OpenAI affiliation or endorsement.
 
+Illustrative browser detail page with fabricated sample data:
+
+![English quota detail page with sample data](docs/images/widget-en.jpg)
+
 ## Install
 
 Version **0.1.0** packages include Node.js **24.19.0** and its license. You do not need to install Node or developer tools to use a prebuilt package.

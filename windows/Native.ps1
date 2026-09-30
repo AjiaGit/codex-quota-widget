@@ -158,8 +158,32 @@ function Get-WidgetLanguageSetting([string]$dataDirectory = (Get-WidgetDataDirec
 function Test-WidgetProcessOwnership($process, [string]$executable, [string]$scriptPath, [string]$startedAt) {
     if (-not $process -or -not $executable -or -not $scriptPath) { return $false }
     if (-not [string]::Equals([string]$process.ExecutablePath, $executable, [StringComparison]::OrdinalIgnoreCase)) { return $false }
-    $pattern = '(?:^|[\s"])' + [regex]::Escape($scriptPath) + '(?:[\s"]|$)'
-    if (-not [regex]::IsMatch([string]$process.CommandLine, $pattern, [Text.RegularExpressions.RegexOptions]::IgnoreCase)) { return $false }
+    # Accept only the unambiguous launch forms produced by Start.ps1. An owned
+    # script mentioned in another program's arguments does not identify ownership.
+    $commandLine = [string]$process.CommandLine
+    if ($commandLine -match '[\r\n]') { return $false }
+    $options = [Text.RegularExpressions.RegexOptions]::IgnoreCase
+    $launch = [regex]::Match($commandLine, '^\s*(?:"(?<executable>[^"]+)"|(?<executable>[^\s"]+))\s+(?<arguments>.+?)\s*$', $options)
+    if (-not $launch.Success) { return $false }
+    $executableName = [regex]::Match($executable, '[^\\/]+$').Value
+    $launchExecutable = $launch.Groups['executable'].Value
+    if (-not [string]::Equals($launchExecutable, $executable, [StringComparison]::OrdinalIgnoreCase) -and
+        -not [string]::Equals($launchExecutable, $executableName, [StringComparison]::OrdinalIgnoreCase)) { return $false }
+    $arguments = $launch.Groups['arguments'].Value
+    $scriptToken = '(?:"(?<script>[^"]+)"|(?<script>[^\s"]+))(?:\s+.*)?$'
+    if ($executableName -ieq 'node.exe') {
+        # Node options such as -e are rejected; our monitor launch has a script
+        # as its first argument, followed only by any script arguments.
+        $scriptArgument = [regex]::Match($arguments, '^' + $scriptToken, $options)
+    } elseif ($executableName -ieq 'powershell.exe') {
+        # Only known non-execution switches may precede -File. In particular,
+        # -Command / -EncodedCommand must never masquerade as a -File launch.
+        $switches = '(?:(?:-(?:NoProfile|Sta|NonInteractive|NoLogo))\s+|' +
+            '-ExecutionPolicy\s+(?:"(?:Bypass|RemoteSigned|AllSigned|Restricted|Unrestricted|Default|Undefined)"|(?:Bypass|RemoteSigned|AllSigned|Restricted|Unrestricted|Default|Undefined))\s+|' +
+            '-WindowStyle\s+(?:"(?:Hidden|Normal|Minimized|Maximized)"|(?:Hidden|Normal|Minimized|Maximized))\s+)*'
+        $scriptArgument = [regex]::Match($arguments, '^' + $switches + '-File\s+' + $scriptToken, $options)
+    } else { return $false }
+    if (-not $scriptArgument.Success -or -not [string]::Equals($scriptArgument.Groups['script'].Value, $scriptPath, [StringComparison]::OrdinalIgnoreCase)) { return $false }
     if ($startedAt -and $process.CreationDate) {
         try {
             $recorded = [DateTimeOffset]::Parse($startedAt)

@@ -233,6 +233,7 @@ private final class DockLauncher: NSObject, NSApplicationDelegate, NSMenuDelegat
 @main
 private struct Main {
     static func main() {
+        if let status = nativeProcessGuardCommand(CommandLine.arguments) { exit(status) }
         if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--icon-png" {
             let bitmap = dockImage(percent: nil).1
             guard let data = bitmap.representation(using: .png, properties: [:]) else { exit(1) }

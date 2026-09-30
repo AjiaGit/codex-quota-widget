@@ -44,11 +44,13 @@ Name: "chinesesimplified"; MessagesFile: "{#ChineseMessages}"
 #endif
 
 [CustomMessages]
+english.OptionsGroup=Additional options:
 english.DesktopIcon=Create a desktop shortcut
 english.AutoStart=Start Codex Quota Widget when I sign in
 english.LaunchWidget=Open Codex Quota Widget
 english.StopFailed=Codex Quota Widget could not stop its owned processes. Close the widget and try again.
 #ifdef ChineseMessages
+chinesesimplified.OptionsGroup=其他选项：
 chinesesimplified.DesktopIcon=创建桌面快捷方式
 chinesesimplified.AutoStart=登录 Windows 时启动 Codex 周额度
 chinesesimplified.LaunchWidget=打开 Codex 周额度
@@ -56,8 +58,8 @@ chinesesimplified.StopFailed=未能停止本工具的进程，请关闭悬浮窗
 #endif
 
 [Tasks]
-Name: "desktopicon"; Description: "{cm:DesktopIcon}"; GroupDescription: ""; Flags: unchecked
-Name: "autostart"; Description: "{cm:AutoStart}"; GroupDescription: ""; Flags: unchecked
+Name: "desktopicon"; Description: "{cm:DesktopIcon}"; GroupDescription: "{cm:OptionsGroup}"; Flags: unchecked
+Name: "autostart"; Description: "{cm:AutoStart}"; GroupDescription: "{cm:OptionsGroup}"; Flags: unchecked
 
 [Files]
 Source: "{#PayloadDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs

@@ -206,3 +206,10 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
+      - name: Upload fabricated Windows UI previews
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: Windows-UI-previews
+          path: ${{ runner.temp }}/codex-quota-smoke/*.png
+          if-no-files-found: error
+          retention-days: 14

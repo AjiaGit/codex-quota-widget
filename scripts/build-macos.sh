@@ -18,7 +18,11 @@ if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   printf '%s\n' 'VERSION must contain three numeric components.' >&2
   exit 1
 fi
-if ! /usr/bin/lipo -verify_arch "$ARCH" "$NODE_ROOT/bin/node" >/dev/null 2>&1; then
+if ! LIPO="$(/usr/bin/xcrun --find lipo 2>/dev/null)"; then
+  printf '%s\n' 'Apple lipo was not found. Select an installed Xcode or Apple command line tools before building.' >&2
+  exit 1
+fi
+if ! "$LIPO" -verify_arch "$ARCH" "$NODE_ROOT/bin/node" >/dev/null; then
   printf 'Bundled Node does not contain the requested architecture: %s\n' "$ARCH" >&2
   exit 1
 fi
