@@ -21,7 +21,7 @@ The service and presentation logic currently have copies under both platform fol
 
 Include the operating system and architecture, Node and Codex CLI versions, the failing action, expected behavior, and a sanitized error message. Say whether `codex login status` succeeds without sharing credentials or account details.
 
-Do not upload `auth.json`, access tokens, refresh tokens, raw account responses, unredacted logs, or personal account screenshots. Do not report a credential exposure by posting the credential in a public issue. A private security-reporting channel must be configured before the first public release; see the release checklist.
+Do not upload `auth.json`, access tokens, refresh tokens, raw account responses, unredacted logs, or personal account screenshots. Do not post credentials in public issues, including when reporting a security problem.
 
 ## Pull requests
 

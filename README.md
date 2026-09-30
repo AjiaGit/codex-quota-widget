@@ -54,7 +54,7 @@ Codex App Server is an experimental interface. Codex updates can require compati
 
 ## Development and support
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for tests, development notes, and useful bug reports. Before publishing a release, follow the [release checklist](docs/RELEASE_CHECKLIST.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for tests, development instructions, and bug reports.
 
 macOS interaction was previously verified on an Apple Silicon Mac. Windows was previously exercised in its development environment. Other operating-system versions and Mac architectures need their own verification before being advertised as supported.
 
