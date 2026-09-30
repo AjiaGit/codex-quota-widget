@@ -90,8 +90,19 @@ function Save-UiEvidence($element, [string]$language, [string]$phase) {
             })
         } catch { }
     }
+    $nativeEdit = $null
+    try {
+        $snapshot = [QuotaSmokeWindows]::ReadOwnedEdit([IntPtr]$element.Current.NativeWindowHandle, $ui.Id)
+        if ($snapshot) {
+            $nativeEdit = @{
+                nativeHandle = $snapshot.Handle.ToInt64(); className = $snapshot.ClassName
+                style = ('0x{0:X8}' -f $snapshot.Style); actualText = $snapshot.Text
+            }
+        }
+    } catch { }
     Write-WidgetJson (Join-Path $OutputDir ("ui-trace-$phase-$language.json")) @{
-        phase = $phase; language = $language; capturedAt = [DateTimeOffset]::UtcNow.ToString('o'); controls = $rows.ToArray()
+        phase = $phase; language = $language; capturedAt = [DateTimeOffset]::UtcNow.ToString('o')
+        controls = $rows.ToArray(); nativeEdit = $nativeEdit
     }
     $summary = @($rows | ForEach-Object { "$($_.controlType) [$($_.className)] patterns=$($_.patterns -join ',')" }) -join '; '
     Write-Output "Fabricated UI provider trace ($phase / $language): $summary"
@@ -281,11 +292,48 @@ using System; using System.Runtime.InteropServices; using System.Text;
 public static class QuotaSmokeWindows {
     private delegate bool EnumProc(IntPtr hWnd, IntPtr param);
     [DllImport("user32.dll")] private static extern bool EnumWindows(EnumProc callback, IntPtr param);
+    [DllImport("user32.dll")] private static extern bool EnumChildWindows(IntPtr parent, EnumProc callback, IntPtr param);
+    [DllImport("user32.dll")] private static extern bool IsChild(IntPtr parent, IntPtr child);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetClassName(IntPtr hWnd, StringBuilder text, int count);
+    [DllImport("user32.dll", EntryPoint="GetWindowLongW", ExactSpelling=true)] private static extern int GetWindowStyle(IntPtr hWnd, int index);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
-    [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll", EntryPoint="SendMessageW", CharSet=CharSet.Unicode, ExactSpelling=true)] private static extern IntPtr SendMessageText(IntPtr hWnd, uint msg, IntPtr wParam, StringBuilder text);
+    public sealed class EditSnapshot {
+        public IntPtr Handle;
+        public string ClassName;
+        public uint Style;
+        public string Text;
+    }
+    private static bool IsOwned(IntPtr window, int pid) {
+        uint owner;
+        return window != IntPtr.Zero && GetWindowThreadProcessId(window, out owner) != 0 && owner == (uint)pid;
+    }
+    public static EditSnapshot ReadOwnedEdit(IntPtr parent, int pid) {
+        if (!IsOwned(parent, pid)) return null;
+        EditSnapshot result = null;
+        EnumChildWindows(parent, delegate(IntPtr child, IntPtr unused) {
+            if (!IsChild(parent, child) || !IsOwned(child, pid)) return true;
+            var name = new StringBuilder(256);
+            GetClassName(child, name, name.Capacity);
+            if (!name.ToString().StartsWith("WindowsForms10.EDIT.", StringComparison.OrdinalIgnoreCase)) return true;
+            // WM_GETTEXT is marshalled by Windows for this owned child control;
+            // GetWindowText cannot reliably read another process's edit text.
+            long length = SendMessage(child, 0x000E, IntPtr.Zero, IntPtr.Zero).ToInt64();
+            if (length < 0 || length > 1024 * 1024) return true;
+            var text = new StringBuilder((int)length + 1);
+            SendMessageText(child, 0x000D, new IntPtr(text.Capacity), text);
+            result = new EditSnapshot {
+                Handle = child, ClassName = name.ToString(),
+                Style = unchecked((uint)GetWindowStyle(child, -16)), Text = text.ToString()
+            };
+            return false;
+        }, IntPtr.Zero);
+        return result;
+    }
     public static IntPtr Find(int pid, string title) {
         IntPtr result=IntPtr.Zero;
         EnumWindows(delegate(IntPtr window, IntPtr unused) {
@@ -322,21 +370,37 @@ public static class QuotaSmokeWindows {
         [void][QuotaSmokeWindows]::SendMessage($creditHandle,0x202,[IntPtr]0,[IntPtr]0x00050005)
         $detailsTitle = Get-WidgetText 'detailsTitle' $language
         Wait-Until { [QuotaSmokeWindows]::Find($ui.Id,$detailsTitle) -ne [IntPtr]::Zero } "Reset details window missing: $language"
-        $detailsElement = [Windows.Automation.AutomationElement]::FromHandle([QuotaSmokeWindows]::Find($ui.Id,$detailsTitle))
+        $detailsHandle = [QuotaSmokeWindows]::Find($ui.Id,$detailsTitle)
+        $detailsElement = [Windows.Automation.AutomationElement]::FromHandle($detailsHandle)
+        Assert-True ($null -eq [QuotaSmokeWindows]::ReadOwnedEdit($detailsHandle, 0)) 'Native text reader accepted an unrelated process.'
+        Assert-True ($null -eq [QuotaSmokeWindows]::ReadOwnedEdit($handle, $ui.Id)) 'Native text reader escaped the details dialog.'
         Save-UiEvidence $detailsElement $language 'reset-details'
-        # A read-only multiline WinForms TextBox can expose Document/TextPattern.
-        # Read the actual provider text; neither labels nor the service fixture
-        # are used as a substitute for the dialog's displayed contents.
+        # Hosted CI can expose every WinForms control as a generic Pane without
+        # text patterns. Keep UIA text when available; otherwise read WM_GETTEXT
+        # from the EDIT descendant owned by this exact dialog and process.
         $editCondition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Edit)
         $documentCondition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Document)
         $textCondition = [Windows.Automation.OrCondition]::new($editCondition, $documentCondition)
-        $script:detailValue = $null
+        $script:detailValue = $null; $script:detailNative = $null; $script:detailReadMethod = $null
         Wait-Until {
-            $textControl = $detailsElement.FindFirst([Windows.Automation.TreeScope]::Descendants, $textCondition)
-            if (-not $textControl) { return $false }
-            $script:detailValue = Read-UiText $textControl
+            $script:detailNative = [QuotaSmokeWindows]::ReadOwnedEdit($detailsHandle, $ui.Id)
+            if (-not $script:detailNative) { return $false }
+            $script:detailValue = try {
+                $textControl = $detailsElement.FindFirst([Windows.Automation.TreeScope]::Descendants, $textCondition)
+                if ($textControl) { Read-UiText $textControl } else { $null }
+            } catch { $null }
+            $script:detailReadMethod = 'UIA'
+            if ([string]::IsNullOrWhiteSpace($script:detailValue)) {
+                $script:detailValue = $script:detailNative.Text
+                $script:detailReadMethod = 'Win32 WM_GETTEXT'
+            }
             -not [string]::IsNullOrWhiteSpace($script:detailValue)
-        } "Reset details provider did not expose readable text: $language" 15
+        } "Owned reset details textbox did not expose readable text: $language" 15
+        # ES_MULTILINE | ES_READONLY | WS_VSCROLL proves this is the actual
+        # scrollable, read-only native text area, regardless of the UIA proxy.
+        $requiredStyles = [uint32]0x00200804
+        Assert-True (($script:detailNative.Style -band $requiredStyles) -eq $requiredStyles) 'Reset details textbox was not multiline, read-only and vertically scrollable.'
+        Write-Output ("Fabricated reset details text ($language): $($script:detailReadMethod), $($script:detailNative.ClassName), style=0x{0:X8}" -f $script:detailNative.Style)
         $detailValue = $script:detailValue
         $expectedCount = if ($language -eq 'en') { 'Available reset credits: 2' } else { '可用重置卡：2张' }
         $expectedGrant = if ($language -eq 'en') { 'Granted:' } else { '发放：' }

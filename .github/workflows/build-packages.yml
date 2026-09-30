@@ -2,6 +2,12 @@ name: Build packages
 
 on:
   workflow_dispatch:
+    inputs:
+      upload_private_draft:
+        description: Upload verified packages to the existing private v0.1.0 draft
+        type: boolean
+        required: false
+        default: false
   push:
     branches: [main, release-preparation]
   pull_request:
@@ -114,6 +120,121 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
+
+  upload_private_draft:
+    name: Upload verified packages to existing private draft
+    needs: [macos, windows]
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.upload_private_draft == true &&
+      github.event.repository.private == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      EXPECTED_COMMIT: ${{ github.sha }}
+      DRAFT_TAG: v0.1.0
+    steps:
+      - name: Verify the private draft and upload checked packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          bridge_root="$(mktemp -d "$RUNNER_TEMP/codex-quota-draft.XXXXXX")"
+          export BRIDGE_ROOT="$bridge_root"
+          cat > "$bridge_root/verify-draft.py" <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ['BRIDGE_ROOT'])
+          repository = json.loads((root / 'repository.json').read_text())
+          if repository.get('private') is not True:
+              raise SystemExit('The repository must still be private.')
+          if repository.get('full_name', '').lower() != os.environ['GH_REPO'].lower():
+              raise SystemExit('Unexpected repository response.')
+          pages = json.loads((root / 'releases.json').read_text())
+          drafts = [release for page in pages for release in page
+                    if release.get('tag_name') == os.environ['DRAFT_TAG']]
+          if len(drafts) != 1:
+              raise SystemExit('Exactly one existing v0.1.0 release is required.')
+          draft = drafts[0]
+          if draft.get('draft') is not True or draft.get('published_at') is not None:
+              raise SystemExit('The existing release must be an unpublished draft.')
+          if draft.get('target_commitish') != os.environ['EXPECTED_COMMIT']:
+              raise SystemExit('Draft target must exactly match the build commit.')
+          release_id = draft.get('id')
+          if type(release_id) is not int:
+              raise SystemExit('Invalid draft release ID.')
+          if os.environ.get('EXPECTED_DRAFT_ID') not in (None, str(release_id)):
+              raise SystemExit('The draft release changed during verification.')
+          print(release_id)
+          PY
+          verify_draft() {
+            gh api "repos/$GH_REPO" > "$bridge_root/repository.json"
+            gh api --paginate --slurp "repos/$GH_REPO/releases?per_page=100" > "$bridge_root/releases.json"
+            python3 "$bridge_root/verify-draft.py" > "$bridge_root/draft-id"
+          }
+          verify_draft
+          export EXPECTED_DRAFT_ID="$(cat "$bridge_root/draft-id")"
+          gh run download "$GITHUB_RUN_ID" --repo "$GH_REPO" --dir "$bridge_root/download" \
+            --name CodexQuotaWidget-0.1.0-macos-arm64 \
+            --name CodexQuotaWidget-0.1.0-macos-x64 \
+            --name CodexQuotaWidget-0.1.0-windows-x64
+          python3 - <<'PY'
+          import hashlib
+          import os
+          import re
+          import shutil
+          from pathlib import Path
+
+          root = Path(os.environ['BRIDGE_ROOT'])
+          expected = {
+              'CodexQuotaWidget-0.1.0-macos-arm64': 'CodexQuotaWidget-0.1.0-macos-arm64.zip',
+              'CodexQuotaWidget-0.1.0-macos-x64': 'CodexQuotaWidget-0.1.0-macos-x64.zip',
+              'CodexQuotaWidget-0.1.0-windows-x64': 'CodexQuotaWidget-0.1.0-windows-x64.exe',
+          }
+          upload = root / 'upload'
+          upload.mkdir()
+          merged = []
+          for artifact, filename in sorted(expected.items()):
+              directory = root / 'download' / artifact
+              if directory.is_symlink() or not directory.is_dir():
+                  raise SystemExit(f'Missing artifact directory: {artifact}')
+              if {path.name for path in directory.iterdir()} != {filename, 'SHA256SUMS'}:
+                  raise SystemExit(f'Unexpected artifact contents: {artifact}')
+              package = directory / filename
+              manifest = directory / 'SHA256SUMS'
+              if any(path.is_symlink() or not path.is_file() for path in (package, manifest)):
+                  raise SystemExit(f'Invalid package or manifest: {artifact}')
+              rows = manifest.read_text(encoding='ascii').splitlines()
+              if len(rows) != 1:
+                  raise SystemExit(f'Expected one checksum entry: {artifact}')
+              match = re.fullmatch(r'([0-9a-fA-F]{64})  ' + re.escape(filename), rows[0])
+              if match is None:
+                  raise SystemExit(f'Unexpected checksum filename or format: {artifact}')
+              digest = hashlib.sha256()
+              with package.open('rb') as source:
+                  for chunk in iter(lambda: source.read(1024 * 1024), b''):
+                      digest.update(chunk)
+              checksum = digest.hexdigest()
+              if checksum != match.group(1).lower():
+                  raise SystemExit(f'Package checksum failed: {filename}')
+              shutil.copyfile(package, upload / filename)
+              merged.append(f'{checksum}  {filename}\n')
+          (upload / 'SHA256SUMS').write_text(''.join(merged), encoding='ascii')
+          print('Verified all three packages and merged their checksums.')
+          PY
+          # Recheck live visibility, draft state, ID, and commit immediately before upload.
+          verify_draft
+          gh release upload "$DRAFT_TAG" --repo "$GH_REPO" --clobber \
+            "$bridge_root/upload/CodexQuotaWidget-0.1.0-macos-arm64.zip" \
+            "$bridge_root/upload/CodexQuotaWidget-0.1.0-macos-x64.zip" \
+            "$bridge_root/upload/CodexQuotaWidget-0.1.0-windows-x64.exe" \
+            "$bridge_root/upload/SHA256SUMS"
 
   windows:
     name: Windows x64
