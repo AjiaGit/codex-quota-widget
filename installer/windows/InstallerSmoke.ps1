@@ -51,6 +51,51 @@ function Stop-Installed {
     try { Invoke-RestMethod "$serviceUrl/health" -TimeoutSec 1 | Out-Null; $healthy = $true } catch { }
     Assert-True (-not $healthy) 'Service remained after quit.'
 }
+function Read-UiText($element) {
+    [object]$pattern = $null
+    if ($element.TryGetCurrentPattern([Windows.Automation.TextPattern]::Pattern, [ref]$pattern)) {
+        return ([Windows.Automation.TextPattern]$pattern).DocumentRange.GetText(-1)
+    }
+    $pattern = $null
+    if ($element.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern, [ref]$pattern)) {
+        return ([Windows.Automation.ValuePattern]$pattern).Current.Value
+    }
+    return $null
+}
+function Save-UiEvidence($element, [string]$language, [string]$phase) {
+    # Only call for windows belonging to the completely fabricated local UI fixture.
+    try {
+        $rectangle = $element.Current.BoundingRectangle
+        if ($rectangle.Width -gt 0 -and $rectangle.Height -gt 0) {
+            $bitmap = [Drawing.Bitmap]::new([int]$rectangle.Width, [int]$rectangle.Height)
+            $graphics = [Drawing.Graphics]::FromImage($bitmap)
+            try {
+                $graphics.CopyFromScreen([int]$rectangle.X, [int]$rectangle.Y, 0, 0, $bitmap.Size)
+                $bitmap.Save((Join-Path $OutputDir ("$phase-$language.png")), [Drawing.Imaging.ImageFormat]::Png)
+            } finally { $graphics.Dispose(); $bitmap.Dispose() }
+        }
+    } catch { Write-Output "UI screenshot unavailable: $phase / $language" }
+    $rows = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($control in @($element) + @($element.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition))) {
+        try {
+            $current = $control.Current
+            $text = try { Read-UiText $control } catch { $null }
+            $rows.Add([pscustomobject]@{
+                name = $current.Name; controlType = $current.ControlType.ProgrammaticName
+                className = $current.ClassName; automationId = $current.AutomationId
+                frameworkId = $current.FrameworkId; nativeHandle = $current.NativeWindowHandle
+                isOffscreen = $current.IsOffscreen
+                patterns = @($control.GetSupportedPatterns() | ForEach-Object { $_.ProgrammaticName })
+                actualText = $text
+            })
+        } catch { }
+    }
+    Write-WidgetJson (Join-Path $OutputDir ("ui-trace-$phase-$language.json")) @{
+        phase = $phase; language = $language; capturedAt = [DateTimeOffset]::UtcNow.ToString('o'); controls = $rows.ToArray()
+    }
+    $summary = @($rows | ForEach-Object { "$($_.controlType) [$($_.className)] patterns=$($_.patterns -join ',')" }) -join '; '
+    Write-Output "Fabricated UI provider trace ($phase / $language): $summary"
+}
 function Assert-NoFixtureProcesses([string]$phase) {
     Wait-Until {
         @(Get-CimInstance Win32_Process -Filter "Name='codex.exe'" -ErrorAction SilentlyContinue | Where-Object {
@@ -269,10 +314,7 @@ public static class QuotaSmokeWindows {
         $names = @($labels | ForEach-Object { $_.Current.Name }) -join "`n"
         Assert-True ($names.Contains((Get-WidgetText 'fiveHour' $language))) "5-hour title untranslated: $language"
         Assert-True (-not $names.Contains('fixture-id-must-never-be-shown')) 'Native UI leaked an ID.'
-        $rectangle = $element.Current.BoundingRectangle
-        $bitmap = [Drawing.Bitmap]::new([int]$rectangle.Width,[int]$rectangle.Height)
-        $graphics = [Drawing.Graphics]::FromImage($bitmap)
-        try { $graphics.CopyFromScreen([int]$rectangle.X,[int]$rectangle.Y,0,0,$bitmap.Size); $bitmap.Save((Join-Path $OutputDir ("native-$language.png")),[Drawing.Imaging.ImageFormat]::Png) } finally { $graphics.Dispose(); $bitmap.Dispose() }
+        Save-UiEvidence $element $language 'native'
         # Label click opens the actual scrollable credit details window.
         $creditElement = $element.FindFirst([Windows.Automation.TreeScope]::Descendants,$creditCondition)
         $creditHandle = [IntPtr]$creditElement.Current.NativeWindowHandle
@@ -281,16 +323,28 @@ public static class QuotaSmokeWindows {
         $detailsTitle = Get-WidgetText 'detailsTitle' $language
         Wait-Until { [QuotaSmokeWindows]::Find($ui.Id,$detailsTitle) -ne [IntPtr]::Zero } "Reset details window missing: $language"
         $detailsElement = [Windows.Automation.AutomationElement]::FromHandle([QuotaSmokeWindows]::Find($ui.Id,$detailsTitle))
-        $editCondition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty,[Windows.Automation.ControlType]::Edit)
-        $edit = $detailsElement.FindFirst([Windows.Automation.TreeScope]::Descendants,$editCondition)
-        Assert-True ($null -ne $edit) 'Scrollable reset details text was missing.'
-        $detailValue = ([Windows.Automation.ValuePattern]$edit.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern)).Current.Value
-        Assert-True ($detailValue.Contains((Get-WidgetText 'detailsCount' $language @(2)))) 'Reset details changed authoritative count.'
-        Assert-True ($detailValue.Contains((Get-WidgetText 'grant' $language @('')).Trim()) -and $detailValue.Contains((Get-WidgetText 'expiry' $language @('')).Trim())) 'Grant or expiry fields were not localized.'
+        Save-UiEvidence $detailsElement $language 'reset-details'
+        # A read-only multiline WinForms TextBox can expose Document/TextPattern.
+        # Read the actual provider text; neither labels nor the service fixture
+        # are used as a substitute for the dialog's displayed contents.
+        $editCondition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Edit)
+        $documentCondition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Document)
+        $textCondition = [Windows.Automation.OrCondition]::new($editCondition, $documentCondition)
+        $script:detailValue = $null
+        Wait-Until {
+            $textControl = $detailsElement.FindFirst([Windows.Automation.TreeScope]::Descendants, $textCondition)
+            if (-not $textControl) { return $false }
+            $script:detailValue = Read-UiText $textControl
+            -not [string]::IsNullOrWhiteSpace($script:detailValue)
+        } "Reset details provider did not expose readable text: $language" 15
+        $detailValue = $script:detailValue
+        $expectedCount = if ($language -eq 'en') { 'Available reset credits: 2' } else { '可用重置卡：2张' }
+        $expectedGrant = if ($language -eq 'en') { 'Granted:' } else { '发放：' }
+        $expectedExpiry = if ($language -eq 'en') { 'Expires:' } else { '到期：' }
+        Assert-True ($detailValue.Contains($expectedCount)) 'Reset details changed authoritative count.'
+        Assert-True ($detailValue.Contains($expectedGrant) -and $detailValue.Contains($expectedExpiry)) 'Grant or expiry fields were not localized.'
         Assert-True (-not $detailValue.Contains('fixture-id-must-never-be-shown')) 'Reset details exposed an ID.'
-        $rectangle = $detailsElement.Current.BoundingRectangle
-        $bitmap = [Drawing.Bitmap]::new([int]$rectangle.Width,[int]$rectangle.Height); $graphics = [Drawing.Graphics]::FromImage($bitmap)
-        try { $graphics.CopyFromScreen([int]$rectangle.X,[int]$rectangle.Y,0,0,$bitmap.Size); $bitmap.Save((Join-Path $OutputDir ("reset-details-$language.png")),[Drawing.Imaging.ImageFormat]::Png) } finally { $graphics.Dispose(); $bitmap.Dispose() }
+        Save-UiEvidence $detailsElement $language 'reset-details'
         Stop-Process -Id $ui.Id -Force
         $ui.WaitForExit(10000) | Out-Null
     }
@@ -309,6 +363,19 @@ public static class QuotaSmokeWindows {
     Assert-True (-not (Test-Path (Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'Codex Quota Widget.lnk'))) 'Uninstall left desktop shortcut.'
     Write-Output 'PASS Windows install, bundled startup, health, fixture quota, localization, reopen, upgrade/reinstall, quit, uninstall and preference preservation'
     Write-Output "Fabricated native screenshots: $OutputDir"
+} catch {
+    $failure = $_
+    if ($ui -and $language -and ('QuotaSmokeWindows' -as [type])) {
+        foreach ($entry in @(@('app','native-failure'), @('detailsTitle','reset-details-failure'))) {
+            try {
+                $failureHandle = [QuotaSmokeWindows]::Find($ui.Id, (Get-WidgetText $entry[0] $language))
+                if ($failureHandle -ne [IntPtr]::Zero) {
+                    Save-UiEvidence ([Windows.Automation.AutomationElement]::FromHandle($failureHandle)) $language $entry[1]
+                }
+            } catch { }
+        }
+    }
+    throw $failure
 } finally {
     foreach ($process in $testProcesses) { try { if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit(5000) | Out-Null } } catch { } }
     if (-not $uninstalled -and (Test-Path (Join-Path $installDir 'Stop.ps1'))) {

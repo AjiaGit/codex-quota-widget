@@ -22,7 +22,7 @@ if ! LIPO="$(/usr/bin/xcrun --find lipo 2>/dev/null)"; then
   printf '%s\n' 'Apple lipo was not found. Select an installed Xcode or Apple command line tools before building.' >&2
   exit 1
 fi
-if ! "$LIPO" -verify_arch "$ARCH" "$NODE_ROOT/bin/node" >/dev/null; then
+if ! "$LIPO" "$NODE_ROOT/bin/node" -verify_arch "$ARCH" >/dev/null; then
   printf 'Bundled Node does not contain the requested architecture: %s\n' "$ARCH" >&2
   exit 1
 fi
