@@ -1,35 +1,63 @@
-# Codex 周额度悬浮窗
+# Codex Quota Widget
 
-一个在 Windows 和 macOS 桌面查看 Codex 额度的小工具。它显示本周剩余百分比、重置时间和倒计时、最近更新时间、可用重置卡数量；Plus 账号还显示 5 小时额度，Pro 账号只显示周额度。悬浮窗有极简和详细两种模式，可拖动与调整大小。Windows 可收进系统托盘，macOS 可从菜单栏打开。
+English | [简体中文](README.zh-CN.md)
 
-详细窗还读取 [codexreset.ai](https://codexreset.ai/) 的公开全局临时重置记录，以及 [whenreset.app](https://whenreset.app/) 的历史频率估计。这些公开记录与个人账号的固定额度周期不同；**未来概率不是已确定的重置时间或承诺**。
+A lightweight floating widget for checking Codex usage on Windows and macOS. View remaining weekly quota, the next reset, a countdown, the last successful update, and available rate-limit resets. Plus accounts also show a five-hour window when that data is available.
 
-## 开始使用
+This is an independent, unofficial tool. It is not affiliated with or endorsed by OpenAI.
 
-| 系统 | 准备 | 启动 | 停止 |
+## Features
+
+- Compact percentage ring and a detailed view.
+- Movable, resizable windows that remember their position and size.
+- Windows system tray and macOS menu bar controls.
+- A macOS Dock icon showing the current remaining percentage.
+- Manual refresh and automatic quota checks every five minutes.
+- Read-only display of available rate-limit resets; the widget does not redeem them.
+- Optional public reset announcements and historical probability estimates from [codexreset.ai](https://codexreset.ai/) and [whenreset.app](https://whenreset.app/). These estimates are not promised reset times.
+
+## Installation
+
+The current distribution runs from source. There are no prebuilt installers in this repository. Download **Code → Download ZIP**, extract it, and keep the complete folder together.
+
+| Platform | Requirements | Start | Stop |
 | --- | --- | --- | --- |
-| Windows | Node.js 24+；已用 ChatGPT 账号登录 Codex CLI | 双击 [`windows/Start.cmd`](windows/Start.cmd) | 双击 [`windows/Stop.cmd`](windows/Stop.cmd) |
-| macOS | Node.js 24+；已登录 Codex CLI；Apple 命令行工具 | 双击 [`macos/Start.command`](macos/Start.command) | 双击 [`macos/Stop.command`](macos/Stop.command) |
+| Windows | Node.js 24+ and Codex CLI signed in with ChatGPT | [windows/Start.cmd](windows/Start.cmd) | [windows/Stop.cmd](windows/Stop.cmd) |
+| macOS | Node.js 24+, signed-in Codex CLI, Apple Command Line Tools | [macos/Start.command](macos/Start.command) | [macos/Stop.command](macos/Stop.command) |
 
-第一次使用，请先阅读 [Windows 步骤](windows/README.md)或 [macOS 步骤](macos/README.md)。下载时在 GitHub 页面点 **Code → Download ZIP**，解压后保留整个文件夹。不要同时运行同一台电脑上的两份副本：本机服务固定使用 `127.0.0.1:39224`。
+Follow the [Windows guide](windows/README.md) or [macOS guide](macos/README.md) before starting. Only run one copy per computer: the local service uses `127.0.0.1:39224`.
 
-macOS 版支持从窗口的上下左右边缘及四角拖动缩放，极简窗最小可缩到 36×36。两种模式各自记住位置与尺寸，窗口不会移出屏幕。首次运行后会生成可放入程序坞的启动图标，图标显示当前剩余额度。
+English and Simplified Chinese documentation are available. The application interface currently uses Simplified Chinese. Runtime language selection is planned; English documentation does not yet mean an English interface.
 
-## 工作方式
+## Data and privacy
 
-- 本机 Node.js 服务通过 Codex CLI `app-server` 的只读 `account/read` 与 `account/rateLimits/read` 获取账号额度；不需要 API Key，也不修改 Codex 客户端文件。
-- 额度每 5 分钟读取一次；超过 10 分钟未更新、旧重置时间已到或登录失效时，旧百分比不再当作当前数据展示。
-- 外部公开站点的记录单独读取，不发送你的登录信息或个人额度。工具只显示重置卡数量，不使用重置卡。
-- 没有开机启动、主动提醒或远程同步。运行记录保存在本机。
+The local service queries Codex CLI through the read-only `account/read` and `account/rateLimits/read` App Server methods. No OpenAI API key is required, and the widget does not modify the Codex desktop app.
 
-## 验证状态
+- Account quota is queried every five minutes. Cached values older than ten minutes, expired reset windows, and failed queries are not displayed as current quota.
+- The detailed page reads the local cache every minute. The macOS menu bar and Dock icon read it every thirty seconds.
+- Public reset sources are checked separately every ten minutes. Account quota and login credentials are not sent to those sites.
+- The HTTP service listens only on loopback. Runtime logs and settings stay on your computer.
+- Login credentials, private account responses, generated apps, and runtime logs must not be included in repository contributions or release archives.
+- Startup at login, notifications, and remote synchronization are not implemented.
 
-Windows 版本已在本机运行验证。两套 Node 核心代码和页面测试可分别在 `windows`、`macos` 文件夹运行：
+## Rate-limit reset terminology
 
-```sh
-node --test test/quota.test.mjs test/rpc.test.mjs test/presentation.test.mjs test/external.test.mjs
-```
+The user-facing name used by the [official App Server documentation](https://learn.chatgpt.com/docs/app-server) is **rate-limit reset**; the API field is `rateLimitResetCredits`. The Chinese interface currently uses “重置卡” as a short label. Reset credits are separate from paid usage credits and from the regular reset countdown.
 
-macOS 原生悬浮窗已在 Apple Silicon Mac 上完成编译和交互验收；其他 Mac 配置尚需分别验证。首次运行时会在该 Mac 上编译；若编译失败，可查看 `~/Library/Application Support/CodexWeeklyMonitor/build.log` 或 `launcher-build.log`。
+The current widget displays the authoritative `availableCount`. Showing grant and expiry dates from optional detail rows is planned. A missing detail list does not mean zero available resets, and the API does not provide a schedule for future grants.
 
-这是独立的非官方工具，与 OpenAI 无关联。Codex `app-server` 当前为实验性命令；客户端升级后请重新核对实际额度显示。
+## Troubleshooting
+
+Run `codex login status` and use the widget's refresh command. If the local service has stopped, stop and restart the widget using the platform scripts. The platform guides include log locations and build diagnostics.
+
+Codex App Server is an experimental interface. Codex updates can require compatibility checks. This project currently supports the weekly window and conditionally shows five-hour data for Plus; it does not promise coverage of every plan or every quota bucket.
+
+## Development and support
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for tests, development notes, and useful bug reports. Before publishing a release, follow the [release checklist](docs/RELEASE_CHECKLIST.md).
+
+macOS interaction was previously verified on an Apple Silicon Mac. Windows was previously exercised in its development environment. Other operating-system versions and Mac architectures need their own verification before being advertised as supported.
+
+## License
+
+[MIT](LICENSE), copyright 2026 AjiaGit. Third-party services, trademarks, and separately distributed dependencies retain their own terms; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

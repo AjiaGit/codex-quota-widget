@@ -1,12 +1,42 @@
-# Windows 使用步骤
+# Windows setup
 
-1. 安装 [Node.js 24 或更新版本](https://nodejs.org/en/download)，并安装 [Codex CLI](https://learn.chatgpt.com/docs/codex/cli)。打开 PowerShell，运行 `node --version`、`codex --version` 和 `codex login status`；如未登录，运行 `codex login`，使用要监控的 ChatGPT 账号登录。
-2. 在本文件夹双击 `Start.cmd`。悬浮窗会在桌面出现，系统托盘图标显示本周剩余百分比。
-3. 详细窗点“极简”可缩成圆环；单击圆环展开。按住窗口内容可移动，拖动上下左右边缘可分别调整高度或宽度，拖动四角可同时调整。极简窗和详细窗都支持，边缘没有可见手柄。详细窗点 `×` 会隐藏到托盘；双击托盘图标可找回。
-4. 要完全停止工具，双击 `Stop.cmd`。它会核对进程身份，只停止本工具的悬浮窗和本机服务。
+English | [简体中文](README.zh-CN.md)
 
-详细窗显示本周剩余、重置时间和倒计时、更新时刻、重置卡数量。Plus 账号另显示 5 小时额度；Pro 账号不显示。底部的公开临时重置记录和历史概率来自外部公开站点，点站点名称可在浏览器打开。刷新按钮可手动重新读取。
+The Windows version uses a floating window and system tray controls. The current application interface is in Simplified Chinese.
 
-若想放到桌面，可右键 `Start.cmd` →“显示更多选项”→“发送到”→“桌面快捷方式”。这个快捷方式要与本文件夹保持关联；移动工程文件夹后需要重新创建。工具不会自动添加开机启动项。
+## Requirements
 
-显示“暂不可用”时，先检查 `codex login status`，再点刷新；如本机服务中断，运行 `Stop.cmd` 后重新运行 `Start.cmd`。日志在 `%TEMP%\CodexWeeklyMonitor`。本机服务只监听 `127.0.0.1:39224`。
+Install [Node.js 24 or later](https://nodejs.org/en/download) and [Codex CLI](https://learn.chatgpt.com/docs/codex/cli). In PowerShell, check:
+
+```powershell
+node --version
+codex --version
+codex login status
+```
+
+If not signed in, run `codex login` with the ChatGPT account to monitor.
+
+## Install and start
+
+1. Download **Code → Download ZIP** from the repository and extract it into a permanent folder.
+2. Open the `windows` subfolder and double-click `Start.cmd`.
+3. Keep the complete folder together. The current source distribution is not a standalone installer.
+
+For a desktop shortcut, right-click `Start.cmd`, choose **Show more options → Send to → Desktop (create shortcut)**. Recreate the shortcut if you move the installation folder. Startup at login is not configured.
+
+## Daily use
+
+- Click “极简” (Compact) to collapse the detailed view. Click the compact ring to expand.
+- Drag window content to move it. Drag left/right edges to change width, top/bottom edges to change height, or corners to change both. Both modes support resizing.
+- Click `×` to hide the detailed window to the tray. Double-click the tray icon to show it again. The tray menu also offers display, mode, refresh, always-on-top, and quit controls.
+- The detailed view shows weekly quota, reset time, countdown, update time, and available rate-limit reset count. Plus accounts also show a five-hour window when available.
+- Public reset announcements and probability estimates appear below account data. Their source links open in your browser. These estimates are not guaranteed reset times.
+- Double-click `Stop.cmd` to stop the window and service. The scripts verify process ownership before stopping them.
+
+## Troubleshooting
+
+If data is unavailable, check `codex login status` and refresh. If the service stops, run `Stop.cmd` followed by `Start.cmd`.
+
+Logs and current runtime records are stored in `%TEMP%\CodexWeeklyMonitor`. The local service uses `127.0.0.1:39224`; only run one copy at a time. Do not include those logs or private account responses in public bug reports.
+
+Quota is queried every five minutes. Values older than ten minutes or past their reset time are not treated as current quota. Windows UI behavior must be verified on a Windows machine when making platform-specific changes.

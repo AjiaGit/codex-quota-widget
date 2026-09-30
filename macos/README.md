@@ -1,27 +1,42 @@
-# macOS 使用步骤
+# macOS setup
 
-Mac 版在菜单栏显示本周剩余额度，并提供始终置顶的极简／详细悬浮窗。极简窗显示进度圆环与数字；单击展开详细窗。
+English | [简体中文](README.zh-CN.md)
 
-## 第一次启动
+The macOS widget shows remaining weekly Codex quota in the menu bar and provides compact and detailed floating windows. The current application interface is in Simplified Chinese.
 
-1. 在仓库首页点 **Code → Download ZIP** 并解压。把解压得到的整个 `codex-quota-widget-main` 文件夹放到个人应用目录 `~/Applications/`。之后不要只移动生成的 `.app`；源码、启动器和本机服务需要留在同一个文件夹。
-2. 安装 Node.js 24 或更新版本、Codex CLI，并在终端运行 `codex login`。Codex 桌面应用的登录状态不一定等于 CLI 登录状态。用 `node -v`、`codex --version` 检查安装。
-3. 在终端运行 `xcode-select --install` 安装 Apple 命令行工具；如果已经安装，直接继续。
-4. 在 Finder 打开 `~/Applications/codex-quota-widget-main/macos/`，双击 `Start.command`。首次启动会在本机编译悬浮窗和程序坞入口。若系统阻止打开，在 Finder 中右键该文件并选“打开”；若双击只显示文本，在终端输入 `bash `，把文件拖进终端后按回车。
-5. 菜单栏出现百分比后，文件夹内会生成 `启动 Codex 周额度.app`。将它拖到程序坞，之后点击即可打开或重新显示悬浮窗。
+## Requirements
 
-## 日常使用
+- Node.js 24 or later.
+- Codex CLI installed and signed in with the ChatGPT account to monitor.
+- Apple Command Line Tools for compiling the native widget on first launch.
 
-- 点击菜单栏百分比，可显示或隐藏悬浮窗、切换极简／详细、刷新额度或退出。
-- 极简窗单击圆环展开；拖动窗体移动。左右边缘调整宽度，上下边缘调整高度，四角同时调整两者。最小尺寸是 36×36。
-- 详细窗顶部的“极简”可缩小；拖动顶部空白区域移动。两种模式各自记住位置和尺寸；移动及缩放都被限制在屏幕范围内。详细内容可以滚动。
-- 程序坞图标显示本周剩余额度的圆环与百分比，约每 30 秒读取一次本机缓存。额度暂不可用时显示 `—`。
-- 双击 `Stop.command` 可停止工具；再次双击 `Start.command` 或点击程序坞图标可恢复。工具不会自动开机启动。
+A Codex desktop-app session does not necessarily establish a separate CLI login. Check `node -v`, `codex --version`, and `codex login status`; run `codex login` if needed.
 
-## 数据刷新与故障排查
+## Install and start
 
-本机服务每 5 分钟向 Codex CLI 读取一次账号额度；详细窗每分钟读取本机缓存，菜单栏和程序坞图标每 30 秒更新显示。公开站点记录单独每 10 分钟刷新；不会向这些站点发送登录信息或个人额度。超过 10 分钟未更新、重置时间已到或登录失效时，旧百分比不会继续显示为当前额度。
+1. Download **Code → Download ZIP** from the repository and extract it.
+2. Move the complete `codex-quota-widget-main` folder into `~/Applications/` or another permanent folder. Keep the generated apps, scripts, and source files together.
+3. Run `xcode-select --install` if Apple Command Line Tools are missing.
+4. Open the `macos` subfolder in Finder and double-click `Start.command`. It compiles the widget and Dock launcher on first launch. If the script opens as text, run `bash ` in Terminal, drag the script into Terminal, and press Return. Resolve any macOS security prompt through the normal system controls.
+5. The script creates `启动 Codex 周额度.app` in the `macos` folder. Drag this launcher to the Dock. Clicking it starts the widget or shows its window again.
 
-若显示 `—`，先在终端运行 `codex login status`，然后从菜单栏刷新。若启动或编译失败，查看 `~/Library/Application Support/CodexWeeklyMonitor/` 下的 `monitor.log`、`build.log` 或 `launcher-build.log`。工具本体留在 `macos` 文件夹，运行记录保存在上述本机目录。
+The repository does not include a ready-to-install, signed and notarized app. Source builds currently require the steps above.
 
-这套 macOS 原生悬浮窗已经在 Apple Silicon Mac 上编译并验证过极简／详细切换、各边缘缩放、屏幕边界约束和程序坞图标。其他 Mac 配置仍需分别验证。
+## Daily use
+
+- Click the menu-bar percentage to show/hide the floating window, switch compact/detail mode, refresh, open the detailed page in a browser, or quit.
+- Click the compact ring to expand. Drag the window to move it; drag its edges or corners to resize it. The minimum compact size is 36×36.
+- In detailed mode, click “极简” (Compact) to collapse, “刷新” (Refresh) to query quota, or `×` to hide the window.
+- Each mode remembers its own position and size. Moving and resizing are constrained to the screen's usable area. The detailed content can scroll.
+- The Dock icon displays remaining weekly quota. Unavailable data displays `—`.
+- Double-click `Stop.command` to stop the tool, or use the menu's quit command. Start it again through `Start.command` or the Dock launcher. Startup at login is not configured.
+
+## Refresh and troubleshooting
+
+The service queries Codex every five minutes. The detailed page reads the cache every minute; the menu bar and Dock read it every thirty seconds. Public-source data is checked every ten minutes. Account data is not sent to those sources.
+
+If the widget displays `—`, check `codex login status` and refresh. If necessary, stop and start the tool. Logs are stored in `~/Library/Application Support/CodexWeeklyMonitor/`: `monitor.log`, `build.log`, and `launcher-build.log`.
+
+Keep the installation folder in place: the Dock launcher relies on its neighboring scripts and service files. Only run one installation at a time because the service uses `127.0.0.1:39224`.
+
+The native widget has been compiled and exercised on Apple Silicon. Intel Macs and other macOS versions require separate verification.
