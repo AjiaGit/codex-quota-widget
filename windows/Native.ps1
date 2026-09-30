@@ -3,8 +3,8 @@ $script:WidgetStrings = @{
     en = @{
         app = 'Codex Quota'; loading = 'Loading'; reading = 'Reading quota'; updated = 'Updated'; unavailable = 'Unavailable'; refreshing = 'Refreshing'
         compact = 'Mini'; refresh = 'Refresh'; weekly = 'Weekly remaining'; untilReset = 'Until reset'; reset = 'Resets {0}'; resetUnknown = 'Reset time —'
-        lastUpdated = 'Updated {0}'; stale = 'Data is stale. Refresh to update.'; cards = 'Credits: {0}'; cardsUnknown = 'Credits —'
-        fiveHour = '5-hour quota'; percentRemaining = '{0}% remaining'; external = 'Public global resets'; lastAnnouncement = 'Announced {0} · {1}'
+        lastUpdated = 'Updated {0}'; stale = 'Data is stale. Refresh to update.'; cards = 'Reset credits {0}'; cardsUnknown = 'Reset credits —'
+        fiveHour = 'Plus · 5-hour quota'; percentRemaining = '{0}% remaining'; external = 'Public global resets'; lastAnnouncement = 'Announced {0} · {1}'
         paid = 'Paid accounts'; all = 'All accounts'; unknownScope = 'Scope unknown'; delivered = 'Delivered {0}'; deliveryUnknown = 'Delivery not confirmed'
         publicUnavailable = 'Public reset data unavailable'; deliveryEmpty = 'Delivery time —'; probability = 'Estimated odds: 24h {0}% · 48h {1}% · 7d {2}%'
         oddsUnknown = 'Estimated odds unavailable'; attribution = 'Historical estimate · codexreset.ai / whenreset.app'; publicSource = 'Public data · codexreset.ai'
@@ -28,12 +28,21 @@ $script:WidgetStrings = @{
         stopFailed = 'Codex Quota could not stop. Close its window and try again.'; noState = 'No owned runtime record was found.'; lockBusy = 'Codex Quota is already starting or stopping. Try again shortly.'
         signInHelp = 'Open a terminal and run codex login. Complete sign-in, then click Refresh.'; installHelp = 'Install Codex CLI using the official instructions, then click Refresh.'
         clearPrefs = 'Remove saved window position and language?'; preferencesTitle = 'Codex Quota preferences'
+        justNow = 'Updated just now'; minuteAgo = 'Updated 1 minute ago'; minutesAgo = 'Updated {0} minutes ago'; updateUnknown = 'Update time unavailable'
+        creditDetailsRow = '{0} · Details ›'; confirmedBanked = 'Confirmed reset credit grant'; confirmedRegular = 'Confirmed global temporary reset'
+        noAnnouncements = 'No confirmed reset credit grants or global temporary resets'; announcementsUnavailable = 'Confirmed announcements unavailable'; pendingUpdate = 'Information pending update'
+        retention = 'Completed results retained for 24h'; forecastPending = 'Public estimates pending update'; phaseUpcoming = 'Upcoming'; phaseWaiting = 'Awaiting delivery'; phaseAnnounced = 'Announced · awaiting delivery'; phaseDelivered = 'Delivered'; phaseArchived = 'Delivered'
+        scheduled = 'Scheduled {0}'; originalScheduled = 'Originally scheduled {0}'; scheduleUnknown = 'Delivery time not announced'; announcedOn = 'Announced {0}'; deliveredOn = 'Completed {0}'
+        publicUpdated = 'Public data updated {0}'; publicUpdateUnknown = 'Public update time unavailable'; refreshCadence = 'Quota 1 min · Notices 10 min'; sourceLinks = 'codexreset.ai / whenreset.app'
+        announcementSource = 'View announcement'; deliverySource = 'Delivery record'; announcementHistory = 'Announcement & delivery history'; historyEmpty = 'No announcement or delivery records'
+        oddsTitle = 'Estimated global reset odds'; odds24 = '24 hours'; odds48 = '48 hours'; odds7d = '7 days'; oddsNote = 'Historical frequency estimate, not a promised reset or your weekly account reset.'
+        expandHistory = 'Show announcement and delivery history'; collapseHistory = 'Hide announcement and delivery history'
     }
     'zh-CN' = @{
         app = 'Codex 周额度'; loading = '读取中'; reading = '正在读取额度'; updated = '数据已更新'; unavailable = '暂不可用'; refreshing = '正在刷新'
         compact = '极简'; refresh = '刷新'; weekly = '本周剩余'; untilReset = '距离重置'; reset = '重置 {0}'; resetUnknown = '重置时间 —'
         lastUpdated = '最近更新 {0}'; stale = '数据已过期，请刷新'; cards = '重置卡 {0}张'; cardsUnknown = '重置卡 —'
-        fiveHour = '5小时额度'; percentRemaining = '{0}% 剩余'; external = '公开全局临时重置'; lastAnnouncement = '上次公告 {0} · {1}'
+        fiveHour = 'Plus · 5小时额度'; percentRemaining = '{0}% 剩余'; external = '公开全局临时重置'; lastAnnouncement = '上次公告 {0} · {1}'
         paid = '付费账号'; all = '全部账号'; unknownScope = '范围未明'; delivered = '记录送达 {0}'; deliveryUnknown = '送达时间未确认'
         publicUnavailable = '上次公开重置暂不可用'; deliveryEmpty = '送达时间 —'; probability = '历史估计 24h {0}% · 48h {1}% · 7天 {2}%'
         oddsUnknown = '历史概率估计暂不可用'; attribution = '历史频率估计 · codexreset.ai / whenreset.app'; publicSource = '公开数据 · codexreset.ai'
@@ -57,6 +66,15 @@ $script:WidgetStrings = @{
         stopFailed = 'Codex 周额度停止失败，请关闭悬浮窗后重试。'; noState = '没有本工具的运行记录。'; lockBusy = 'Codex 周额度正在启动或停止，请稍后重试。'
         signInHelp = '请打开终端运行 codex login，完成登录后点击刷新。'; installHelp = '请按官方说明安装 Codex CLI，安装后点击刷新。'
         clearPrefs = '删除保存的窗口位置和语言设置？'; preferencesTitle = 'Codex 周额度偏好设置'
+        justNow = '刚刚更新'; minuteAgo = '1分钟前更新'; minutesAgo = '{0}分钟前更新'; updateUnknown = '更新时间暂不可用'
+        creditDetailsRow = '{0} · 查看明细 ›'; confirmedBanked = '已确认重置卡赠送'; confirmedRegular = '已确认全局临时重置'
+        noAnnouncements = '暂无已确认的重置卡赠送或全局临时重置公告'; announcementsUnavailable = '已确认公告暂不可用'; pendingUpdate = '信息待更新'
+        retention = '完成结果保留24小时'; forecastPending = '公开概率信息待更新'; phaseUpcoming = '即将进行'; phaseWaiting = '等待送达'; phaseAnnounced = '已公告 · 等待送达'; phaseDelivered = '已送达'; phaseArchived = '已送达'
+        scheduled = '计划 {0}'; originalScheduled = '原定 {0}'; scheduleUnknown = '送达时间尚未公布'; announcedOn = '公告 {0}'; deliveredOn = '确认完成 {0}'
+        publicUpdated = '公告数据更新 {0}'; publicUpdateUnknown = '公告更新时间暂不可用'; refreshCadence = '额度1分钟 · 公告10分钟'; sourceLinks = 'codexreset.ai / whenreset.app'
+        announcementSource = '查看公告'; deliverySource = '送达记录'; announcementHistory = '公告与送达记录'; historyEmpty = '暂无公告与送达记录'
+        oddsTitle = '未来临时重置概率'; odds24 = '24小时'; odds48 = '48小时'; odds7d = '7天'; oddsNote = '历史频率估计，不代表重置承诺，也不是账号每周重置时间。'
+        expandHistory = '展开公告与送达记录'; collapseHistory = '收起公告与送达记录'
     }
 }
 
@@ -86,6 +104,224 @@ function Format-WidgetDate([DateTimeOffset]$date, [string]$language) {
     $format = if ($cultureName -eq 'zh-CN') { 'M月d日 HH:mm' } else { 'MMM d HH:mm' }
     $date.ToLocalTime().ToString($format, [Globalization.CultureInfo]::GetCultureInfo($cultureName))
 }
+
+function Format-WidgetRelativeUpdate($updatedAt, [string]$language, [DateTimeOffset]$now = [DateTimeOffset]::UtcNow) {
+    if ($null -eq $updatedAt) { return Get-WidgetText 'updateUnknown' $language }
+    try {
+        $age = $now - [DateTimeOffset]::FromUnixTimeMilliseconds([long]$updatedAt)
+        if ($age.TotalSeconds -lt -60) { return Get-WidgetText 'updateUnknown' $language }
+        $minutes = [Math]::Max(0, [int][Math]::Floor($age.TotalMinutes))
+        if ($minutes -lt 1) { return Get-WidgetText 'justNow' $language }
+        if ($minutes -eq 1) { return Get-WidgetText 'minuteAgo' $language }
+        return Get-WidgetText 'minutesAgo' $language @($minutes)
+    } catch { return Get-WidgetText 'updateUnknown' $language }
+}
+function Get-WidgetHeaderLayout([int]$width, [int]$titleWidth, [int]$statusWidth) {
+    $left = 18; $buttonSize = 32; $gap = 6
+    $toolbarLeft = $width - $left - 3 * $buttonSize - 2 * $gap
+    $secondRow = $left + $titleWidth + 12 + $statusWidth + 12 -gt $toolbarLeft
+    $buttons = @()
+    foreach ($kind in @('refresh','compact','hide')) {
+        $buttons += [pscustomobject]@{ kind=$kind; x=$toolbarLeft+$buttons.Count*($buttonSize+$gap); y=10; width=$buttonSize; height=$buttonSize }
+    }
+    [pscustomobject]@{
+        titleX=$left; titleY=10; titleWidth=[Math]::Min($titleWidth,$toolbarLeft-$left-12)
+        statusX=$(if ($secondRow) {$left} else {$left+$titleWidth+12})
+        statusY=$(if ($secondRow) {42} else {10}); statusWidth=$(if ($secondRow) {$width-2*$left} else {$toolbarLeft-$left-$titleWidth-24})
+        statusSecondRow=$secondRow; height=$(if ($secondRow) {72} else {54}); buttons=$buttons
+    }
+}
+function Get-WidgetOddsColumns([int]$width) {
+    $gap=8; $columnWidth=[int][Math]::Floor(($width-2*$gap)/3)
+    for ($i=0; $i -lt 3; $i++) {
+        $x=$i*($columnWidth+$gap)
+        [pscustomobject]@{ x=$x; width=$(if ($i -eq 2) {$width-$x} else {$columnWidth}) }
+    }
+}
+function Get-WidgetDetailSectionOrder([bool]$plus) {
+    'hero'
+    if ($plus) { 'fiveHour' }
+    'credits'; 'announcements'; 'probability'; 'history'; 'sources'
+}
+function ConvertTo-WidgetTimestamp($value) {
+    if ([string]::IsNullOrWhiteSpace([string]$value)) { return $null }
+    $parsed=[DateTimeOffset]::MinValue
+    if ([DateTimeOffset]::TryParse([string]$value,[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::None,[ref]$parsed)) { return $parsed }
+    return $null
+}
+function Get-WidgetAnnouncementPhase($row, [DateTimeOffset]$now = [DateTimeOffset]::UtcNow) {
+    $delivered=ConvertTo-WidgetTimestamp $row.deliveredAt
+    if ($delivered -and $delivered -le $now) {
+        if (($now-$delivered).TotalHours -ge 24) { return 'archived' }
+        return 'delivered'
+    }
+    $scheduled=ConvertTo-WidgetTimestamp $row.scheduledAt
+    if ($scheduled) {
+        if ($scheduled -le $now) { return 'waiting' }
+        return 'upcoming'
+    }
+    if ($row.scheduledDate -match '^\d{4}-\d{2}-\d{2}$') {
+        $day=[datetime]::MinValue
+        if ([datetime]::TryParseExact([string]$row.scheduledDate,'yyyy-MM-dd',[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::None,[ref]$day)) {
+            # Match the service/browser calendar boundary without displaying an
+            # invented delivery time for a date-only announcement.
+            $end=[DateTimeOffset]::new([datetime]::SpecifyKind($day.AddDays(1),[DateTimeKind]::Utc))
+            if ($now -ge $end) { return 'waiting' }
+            return 'upcoming'
+        }
+    }
+    return 'announced'
+}
+function Test-WidgetHttpsUrl([string]$url) {
+    if (-not $url -or $url -match '[\x00-\x20]') { return $false }
+    $uri=$null
+    [Uri]::TryCreate($url,[UriKind]::Absolute,[ref]$uri) -and $uri.Scheme -eq 'https' -and -not [string]::IsNullOrWhiteSpace($uri.Host) -and [string]::IsNullOrEmpty($uri.UserInfo)
+}
+function Get-WidgetAnnouncementKey($row) {
+    if ($row.id) { return "$($row.kind):$($row.id)" }
+    return "$($row.kind):$($row.sourceUrl):$($row.announcedAt):$($row.scheduledAt):$($row.scheduledDate)"
+}
+function Format-WidgetPublicUpdate($feed, [string]$language, [DateTimeOffset]$now = [DateTimeOffset]::UtcNow) {
+    $updated=ConvertTo-WidgetTimestamp $feed.sourceUpdatedAt
+    if ($updated -and $updated -le $now) { return Get-WidgetText 'publicUpdated' $language @((Format-WidgetDate $updated $language)) }
+    return Get-WidgetText 'publicUpdateUnknown' $language
+}
+function Get-WidgetForecastView($external, [string]$language, [DateTimeOffset]$now = [DateTimeOffset]::UtcNow) {
+    $forecast=if ($external -and $external.status -eq 'ok') {$external.forecast} else {$null}
+    $available=$false; $values=@($null,$null,$null)
+    if ($forecast) {
+        try {
+            $updated=ConvertTo-WidgetTimestamp $forecast.sourceUpdatedAt
+            if ($updated -and $updated -le $now.AddMinutes(5) -and ($now-$updated).TotalHours -le 24) {
+                $numbers=@(); $valid=$true
+                foreach ($field in @('next24h','next48h','next7d')) {
+                    if ($null -eq $forecast.$field) {$valid=$false;break}
+                    $number=[double]$forecast.$field
+                    if ([double]::IsNaN($number) -or [double]::IsInfinity($number) -or $number -lt 0 -or $number -gt 100) {$valid=$false;break}
+                    $numbers+=,$number
+                }
+                if ($valid -and $numbers.Count -eq 3 -and $numbers[0] -le $numbers[1] -and $numbers[1] -le $numbers[2]) {$available=$true;$values=$numbers}
+            }
+        } catch { }
+    }
+    [pscustomobject]@{available=$available;values=$values;pendingText=$(if (-not $available) {Get-WidgetText 'forecastPending' $language} else {''})}
+}
+function Get-WidgetFiveHourView($quota, [string]$language, [DateTimeOffset]$now = [DateTimeOffset]::UtcNow) {
+    $visible=$quota -and $quota.status -eq 'ok' -and $quota.plan -eq 'plus'
+    $percentText=Get-WidgetText 'unavailable' $language; $resetText=Get-WidgetText 'resetUnknown' $language
+    if ($visible -and $quota.fiveHour -and $null -ne $quota.updatedAt -and $null -ne $quota.fiveHour.remainingPercent -and $null -ne $quota.fiveHour.resetsAt) {
+        try {
+            $age=$now-[DateTimeOffset]::FromUnixTimeMilliseconds([long]$quota.updatedAt)
+            $resetAt=[DateTimeOffset]::FromUnixTimeSeconds([long]$quota.fiveHour.resetsAt)
+            $remaining=[double]$quota.fiveHour.remainingPercent
+            if ($age.TotalMinutes -le 10 -and $age.TotalSeconds -ge -60 -and $resetAt -gt $now -and $remaining -ge 0 -and $remaining -le 100) {
+                $percentText=[string]::Format([Globalization.CultureInfo]::InvariantCulture,'{0}%',@($remaining))
+                $resetText=Get-WidgetText 'reset' $language @((Format-WidgetDate $resetAt $language))
+            }
+        } catch { }
+    }
+    [pscustomobject]@{visible=[bool]$visible;percentText=$percentText;resetText=$resetText}
+}
+function ConvertTo-WidgetAnnouncementRow($row, [string]$language, [DateTimeOffset]$now) {
+    $phase=Get-WidgetAnnouncementPhase $row $now
+    $completed=$phase -in @('delivered','archived')
+    $scheduleKey=if ($completed) {'originalScheduled'} else {'scheduled'}
+    $scheduledText=$null; $completedText=$null
+    $delivered=ConvertTo-WidgetTimestamp $row.deliveredAt
+    $scheduled=ConvertTo-WidgetTimestamp $row.scheduledAt
+    if ($scheduled) { $scheduledText=Get-WidgetText $scheduleKey $language @((Format-WidgetDate $scheduled $language)) }
+    elseif ($row.scheduledDate -match '^\d{4}-\d{2}-\d{2}$') {
+        $date=[datetime]::MinValue
+        if ([datetime]::TryParseExact([string]$row.scheduledDate,'yyyy-MM-dd',[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::None,[ref]$date)) {
+            $format=if ((Resolve-WidgetLanguage $language) -eq 'zh-CN') {'M月d日'} else {'MMM d'}
+            $culture=if ((Resolve-WidgetLanguage $language) -eq 'zh-CN') {'zh-CN'} else {'en-US'}
+            $scheduledText=Get-WidgetText $scheduleKey $language @($date.ToString($format,[Globalization.CultureInfo]::GetCultureInfo($culture)))
+        }
+    }
+    if (-not $scheduledText) { $scheduledText=Get-WidgetText 'scheduleUnknown' $language }
+    if ($completed) { $completedText=Get-WidgetText 'deliveredOn' $language @((Format-WidgetDate $delivered $language)) }
+    $scope=if ($row.scope -eq 'paid') {Get-WidgetText 'paid' $language} elseif ($row.scope -eq 'all') {Get-WidgetText 'all' $language} elseif ($row.scopeLabel) {[string]$row.scopeLabel} else {Get-WidgetText 'unknownScope' $language}
+    $phaseKey='phase'+(Get-Culture).TextInfo.ToTitleCase($phase)
+    $summary=if ((Resolve-WidgetLanguage $language) -eq 'zh-CN' -and $row.summaryZh) {[string]$row.summaryZh} elseif ($row.summary) {[string]$row.summary} else {''}
+    $details=@((Get-WidgetText $phaseKey $language),$scheduledText)
+    if ($completedText) {$details+=,$completedText}; $details+=,$scope
+    [pscustomobject]@{
+        key=Get-WidgetAnnouncementKey $row; phase=$phase
+        title=Get-WidgetText $(if ($row.kind -eq 'banked') {'confirmedBanked'} else {'confirmedRegular'}) $language
+        details=$details -join ' · '; scheduledText=$scheduledText; completedText=$completedText; scopeText=$scope
+        summary=$summary
+        retentionText=$(if ($phase -eq 'delivered') {Get-WidgetText 'retention' $language} else {''})
+        sourceUrl=$(if (Test-WidgetHttpsUrl $row.sourceUrl) {[string]$row.sourceUrl} else {$null})
+        deliverySourceUrl=$(if (Test-WidgetHttpsUrl $row.deliverySourceUrl) {[string]$row.deliverySourceUrl} else {$null})
+    }
+}
+function Get-WidgetAnnouncementView($external, [string]$language, [DateTimeOffset]$now = [DateTimeOffset]::UtcNow) {
+    $active=New-Object 'System.Collections.Generic.List[object]'; $history=New-Object 'System.Collections.Generic.List[object]'
+    $feed=if ($external) {$external.announcements} else {$null}
+    $seen=@{}
+    foreach ($row in @($feed.items)) {
+        if (-not $row -or $row.kind -notin @('banked','regular')) { continue }
+        $key=Get-WidgetAnnouncementKey $row
+        if ($seen.ContainsKey($key)) { continue }; $seen[$key]=$true
+        $view=ConvertTo-WidgetAnnouncementRow $row $language $now
+        if ($view.phase -eq 'archived') {$history.Add($view)} else {$active.Add($view)}
+    }
+    foreach ($row in @($feed.history)) {
+        if (-not $row -or $row.kind -notin @('banked','regular')) { continue }
+        $key=Get-WidgetAnnouncementKey $row
+        if ($seen.ContainsKey($key)) { continue }; $seen[$key]=$true
+        $history.Add((ConvertTo-WidgetAnnouncementRow $row $language $now))
+    }
+    [pscustomobject]@{
+        active=@($active.ToArray()); history=@($history.ToArray())
+        emptyText=Get-WidgetText $(if ($feed -and $feed.status -eq 'ok' -and -not $feed.stale) {'noAnnouncements'} else {'announcementsUnavailable'}) $language
+        staleText=$(if ($active.Count -gt 0 -and $feed -and ($feed.stale -or $feed.status -ne 'ok')) {Get-WidgetText 'pendingUpdate' $language} else {''})
+        sourceUpdateText=$(if ($active.Count -gt 0 -and $feed -and ($feed.stale -or $feed.status -ne 'ok')) {Format-WidgetPublicUpdate $feed $language $now} else {''})
+    }
+}
+function Merge-WidgetExternalData($previous, $incoming, [bool]$transportFailure = $false) {
+    # Clone the public response so a failure cannot mutate a previously cached
+    # successful snapshot. Persisted known rows survive an empty schedule feed.
+    $basis=if ($incoming -and -not $transportFailure) {$incoming} elseif ($previous) {$previous} else {[pscustomobject]@{status='unavailable';forecast=$null}}
+    $result=$basis | ConvertTo-Json -Depth 12 | ConvertFrom-Json
+    $fresh=if ($incoming -and -not $transportFailure) {$incoming.announcements} else {$null}
+    $old=if ($previous) {$previous.announcements} else {$null}
+    $feed=if ($fresh) {$fresh | ConvertTo-Json -Depth 12 | ConvertFrom-Json} elseif ($old) {$old | ConvertTo-Json -Depth 12 | ConvertFrom-Json} else {[pscustomobject]@{status='unavailable';items=@();history=@();sourceUpdatedAt=$null;stale=$true}}
+    $entries=[ordered]@{}
+    foreach ($snapshot in @($old,$fresh)) {
+        if (-not $snapshot) { continue }
+        # A source may retain the same canonical row in both collections. Its
+        # active collection owns the 24-hour display lifecycle; history only
+        # wins when the newer source snapshot no longer includes it as active.
+        foreach ($bucket in @('history','items')) {
+            foreach ($row in @($snapshot.$bucket)) {
+                if (-not $row -or $row.kind -notin @('banked','regular')) { continue }
+                $identity=Get-WidgetAnnouncementKey $row
+                $copy=$row | ConvertTo-Json -Depth 8 | ConvertFrom-Json
+                if ($entries.Contains($identity)) {
+                    $known=$entries[$identity].row
+                    foreach ($field in @('deliveredAt','scheduledAt','scheduledDate','announcedAt','sourceUrl','deliverySourceUrl')) {
+                        if (-not $copy.$field -and $known.$field) { $copy | Add-Member -NotePropertyName $field -NotePropertyValue $known.$field -Force }
+                    }
+                }
+                $entries[$identity]=[pscustomobject]@{row=$copy;bucket=$bucket}
+            }
+        }
+    }
+    $feed | Add-Member -NotePropertyName items -NotePropertyValue @($entries.Values | Where-Object {$_.bucket -eq 'items'} | ForEach-Object {$_.row}) -Force
+    $feed | Add-Member -NotePropertyName history -NotePropertyValue @($entries.Values | Where-Object {$_.bucket -eq 'history'} | ForEach-Object {$_.row}) -Force
+    if ($transportFailure -or -not $fresh -or $fresh.status -ne 'ok') {
+        if ($transportFailure -or -not $incoming) {
+            $result | Add-Member -NotePropertyName status -NotePropertyValue 'unavailable' -Force
+            $result | Add-Member -NotePropertyName forecast -NotePropertyValue $null -Force
+        }
+        $feed | Add-Member -NotePropertyName stale -NotePropertyValue $true -Force
+        if ($entries.Count -gt 0) {$feed | Add-Member -NotePropertyName status -NotePropertyValue 'ok' -Force}
+    }
+    $result | Add-Member -NotePropertyName announcements -NotePropertyValue $feed -Force
+    return $result
+}
+
 function Format-WidgetResetDetails($data, [string]$language) {
     $lines = New-Object 'System.Collections.Generic.List[string]'
     if ($data -and $null -ne $data.resetCards) { $lines.Add((Get-WidgetText 'detailsCount' $language @($data.resetCards))) }

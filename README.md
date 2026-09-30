@@ -30,12 +30,14 @@ To run from source, install Node.js 24+ and follow the platform guide. macOS sou
 
 ## Use
 
-- Switch between a compact percentage ring and detailed view; drag to move or resize. Each mode remembers its position and size.
+- Switch between a compact percentage ring and detailed view; drag to move or resize. Each mode remembers its position and size. On macOS, the default detail height fits the content within the available screen; manually resizing keeps your chosen size.
 - Use the Windows tray menu or macOS menu bar to show the window, refresh, change language, or quit. The macOS Dock icon also shows remaining weekly quota.
 - Choose **Language → System / English / 简体中文**. System selects Chinese for a Chinese system language and English otherwise. The browser detail page and native UI share the saved choice.
-- Open **Reset details** to see the authoritative available count and any grant or expiry dates Codex provides. Missing dates are shown as unavailable. The widget never spends a reset credit or predicts future grants. Reset credits are separate from paid usage credits and the normal reset countdown.
+- Open the **Reset credits / Details** row to see the authoritative available count and any grant or expiry dates Codex provides. Missing dates are shown as unavailable. The widget never spends a reset credit or predicts future grants. Reset credits are separate from paid usage credits and the normal reset countdown.
 
 Quota queries and cache checks run every **60 seconds**. Manual refresh, reopening, and waking the computer refresh promptly; simultaneous requests are combined. Temporary query failures retry after **15, 30, then 60 seconds**. Unavailable, expired, or stale quota is shown as `—`, rather than continuing to present an old percentage as current.
+
+Confirmed reset-credit grants and global temporary reset announcements stay visible until delivery is confirmed, then remain for 24 hours before moving into history. Known pending announcements survive source outages and app restarts. Five-hour usage is shown only for a confirmed Plus plan; Pro and unknown plans hide that row.
 
 Public reset announcements and historical odds from [codexreset.ai](https://codexreset.ai/) and [whenreset.app](https://whenreset.app/) refresh separately every **10 minutes**. Historical odds do not promise a future reset time.
 

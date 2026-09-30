@@ -8,6 +8,90 @@ private let detailBackground = NSColor(srgbRed: 32 / 255, green: 37 / 255, blue:
 private let quotaAccent = NSColor(srgbRed: 36 / 255, green: 211 / 255, blue: 165 / 255, alpha: 1)
 private let quotaDanger = NSColor(srgbRed: 250 / 255, green: 125 / 255, blue: 121 / 255, alpha: 1)
 private let quotaTrack = NSColor(srgbRed: 61 / 255, green: 72 / 255, blue: 85 / 255, alpha: 1)
+private let headerMuted = NSColor(srgbRed: 161 / 255, green: 170 / 255, blue: 182 / 255, alpha: 1)
+
+private final class WidgetPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+}
+
+private final class ToolbarButton: NSButton {
+    enum Symbol { case refresh, compact, hide }
+    private let symbol: Symbol
+    private var hoverArea: NSTrackingArea?
+    private var hovered = false
+
+    init(symbol: Symbol, target: AnyObject?, action: Selector?) {
+        self.symbol = symbol
+        super.init(frame: .zero)
+        self.target = target
+        self.action = action
+        title = ""
+        isBordered = false
+        setButtonType(.momentaryPushIn)
+        focusRingType = .none
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func updateTrackingAreas() {
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        hoverArea = NSTrackingArea(rect: .zero,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
+        addTrackingArea(hoverArea!)
+        super.updateTrackingAreas()
+    }
+    override func mouseEntered(with event: NSEvent) { hovered = true; needsDisplay = true }
+    override func mouseExited(with event: NSEvent) { hovered = false; needsDisplay = true }
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        needsDisplay = true
+        return accepted
+    }
+    override func resignFirstResponder() -> Bool {
+        let accepted = super.resignFirstResponder()
+        needsDisplay = true
+        return accepted
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let focused = window?.firstResponder === self
+        let backdrop = NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 6, yRadius: 6)
+        if hovered || isHighlighted || focused {
+            NSColor.white.withAlphaComponent(isHighlighted ? 0.12 : 0.06).setFill()
+            backdrop.fill()
+        }
+        if focused {
+            NSColor.white.withAlphaComponent(0.4).setStroke()
+            backdrop.lineWidth = 1
+            backdrop.stroke()
+        }
+        let center = NSPoint(x: bounds.midX, y: bounds.midY)
+        let path = NSBezierPath()
+        switch symbol {
+        case .refresh:
+            path.appendArc(withCenter: center, radius: 6, startAngle: 40, endAngle: 340, clockwise: false)
+            let angle = CGFloat(340) * .pi / 180
+            let tip = NSPoint(x: center.x + cos(angle) * 6, y: center.y + sin(angle) * 6)
+            let tangent = NSPoint(x: -sin(angle), y: cos(angle))
+            let back = NSPoint(x: tip.x - tangent.x * 3.2, y: tip.y - tangent.y * 3.2)
+            path.move(to: NSPoint(x: back.x - tangent.y * 2.6, y: back.y + tangent.x * 2.6))
+            path.line(to: tip)
+            path.line(to: NSPoint(x: back.x + tangent.y * 2.6, y: back.y - tangent.x * 2.6))
+        case .compact:
+            path.move(to: NSPoint(x: center.x - 6.5, y: center.y))
+            path.line(to: NSPoint(x: center.x + 6.5, y: center.y))
+        case .hide:
+            path.move(to: NSPoint(x: center.x - 5, y: center.y - 5))
+            path.line(to: NSPoint(x: center.x + 5, y: center.y + 5))
+            path.move(to: NSPoint(x: center.x - 5, y: center.y + 5))
+            path.line(to: NSPoint(x: center.x + 5, y: center.y - 5))
+        }
+        path.lineWidth = 1.6
+        path.lineCapStyle = .round
+        path.lineJoinStyle = .round
+        (hovered || focused || isHighlighted ? NSColor.white : headerMuted).setStroke()
+        path.stroke()
+    }
+}
 
 private enum ResizeEdge: CaseIterable {
     case topLeft, topRight, bottomLeft, bottomRight, left, right, top, bottom
@@ -128,10 +212,12 @@ private final class DragBar: NSView {
 private final class ResizeGrip: NSView {
     var minimum = minimumDetail
     var edge: ResizeEdge = .bottomRight
+    var onResizeBegin: (() -> Void)?
     private var startFrame = NSRect.zero
     private var startMouse = NSPoint.zero
     private var resizeBounds = NSRect.zero
     private var hoverArea: NSTrackingArea?
+    private var didBeginResizing = false
 
     override func updateTrackingAreas() {
         if let hoverArea { removeTrackingArea(hoverArea) }
@@ -148,10 +234,15 @@ private final class ResizeGrip: NSView {
         startFrame = window?.frame ?? .zero
         startMouse = NSEvent.mouseLocation
         resizeBounds = boundsForWindow(window)
+        didBeginResizing = false
     }
 
     override func mouseDragged(with event: NSEvent) {
         guard let window else { return }
+        if !didBeginResizing {
+            didBeginResizing = true
+            onResizeBegin?()
+        }
         let mouse = NSEvent.mouseLocation
         let delta = NSPoint(x: mouse.x - startMouse.x, y: mouse.y - startMouse.y)
         window.setFrame(boundedResize(startFrame, from: edge, delta: delta,
@@ -287,7 +378,7 @@ private final class CompactView: NSView {
     }
 }
 
-private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate, WKNavigationDelegate, WKUIDelegate {
+private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
     private var panel: NSPanel!
     private var root: NSView!
     private var web: WKWebView!
@@ -310,6 +401,10 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
     private var isCompact = UserDefaults.standard.bool(forKey: "compact")
     private var transitioning = false
     private var pollTimer: Timer?
+    private var ageTimer: Timer?
+    private var automaticDetailHeight = UserDefaults.standard.object(forKey: "detailAutoHeight") as? Bool ?? true
+    private var detailMeasurement: NativeDetailMeasurement?
+    private var fittingDetailHeight = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         try? FileManager.default.createDirectory(at: stateDirectory(), withIntermediateDirectories: true)
@@ -318,18 +413,21 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
         let defaultFrame = NSRect(x: (NSScreen.main?.visibleFrame.maxX ?? 800) - 626,
                                   y: (NSScreen.main?.visibleFrame.maxY ?? 800) - 620,
                                   width: 606, height: 585)
-        if UserDefaults.standard.integer(forKey: "detailLayoutVersion") < 2 {
+        if UserDefaults.standard.integer(forKey: "detailLayoutVersion") < 3 {
             let previous = savedFrame("detailFrame", fallback: defaultFrame)
             let updated = NSRect(x: previous.minX, y: previous.maxY - 585, width: 606, height: 585)
             UserDefaults.standard.set(NSStringFromRect(visibleFrame(updated)), forKey: "detailFrame")
-            UserDefaults.standard.set(2, forKey: "detailLayoutVersion")
+            automaticDetailHeight = true
+            UserDefaults.standard.set(true, forKey: "detailAutoHeight")
+            UserDefaults.standard.set(3, forKey: "detailLayoutVersion")
         }
+        let detailFrame = visibleFrame(savedFrame("detailFrame", fallback: defaultFrame))
         let frame = isCompact
             ? savedFrame("compactFrame", fallback: NSRect(x: defaultFrame.maxX - 78,
                                                            y: defaultFrame.maxY - 86,
                                                            width: 78, height: 86))
-            : savedFrame("detailFrame", fallback: defaultFrame)
-        panel = NSPanel(contentRect: visibleFrame(frame), styleMask: [.borderless, .nonactivatingPanel],
+            : detailFrame
+        panel = WidgetPanel(contentRect: visibleFrame(frame), styleMask: [.borderless, .nonactivatingPanel],
                         backing: .buffered, defer: false)
         panel.delegate = self
         panel.level = .floating
@@ -348,10 +446,14 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
         root.layer?.masksToBounds = true
         panel.contentView = root
 
-        web = WKWebView(frame: .zero)
+        let configuration = WKWebViewConfiguration()
+        configuration.userContentController.add(self, name: "detailLayout")
+        web = WKWebView(frame: NSRect(x: 0, y: 0, width: detailFrame.width,
+                                      height: max(0, detailFrame.height - 60)), configuration: configuration)
         web.navigationDelegate = self
         web.uiDelegate = self
-        web.autoresizingMask = [.width, .height]
+        // Explicit layout keeps the hidden detail document at its detail width in Compact mode.
+        web.autoresizingMask = []
         web.underPageBackgroundColor = detailBackground
         var embeddedURL = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)!
         embeddedURL.queryItems = [URLQueryItem(name: "embedded", value: "1")]
@@ -368,27 +470,26 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
         brandLabel.textColor = .white
         root.addSubview(brandLabel)
         statusLabel = NSTextField(labelWithString: localizer.text("reading"))
-        statusLabel.font = NSFont.systemFont(ofSize: 17, weight: .medium)
-        statusLabel.textColor = NSColor(srgbRed: 161 / 255, green: 170 / 255, blue: 182 / 255, alpha: 1)
+        statusLabel.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+        statusLabel.textColor = headerMuted
         root.addSubview(statusLabel)
-        collapseButton = NSButton(title: localizer.text("compact"), target: self, action: #selector(collapse))
-        collapseButton.isBordered = false
-        collapseButton.font = NSFont.systemFont(ofSize: 17, weight: .semibold)
-        collapseButton.contentTintColor = NSColor(srgbRed: 36 / 255, green: 211 / 255, blue: 165 / 255, alpha: 1)
-        root.addSubview(collapseButton)
-        refreshButton = NSButton(title: localizer.text("refresh"), target: self, action: #selector(refresh))
-        refreshButton.isBordered = false
-        refreshButton.font = NSFont.systemFont(ofSize: 17, weight: .medium)
-        refreshButton.contentTintColor = NSColor(srgbRed: 161 / 255, green: 170 / 255, blue: 182 / 255, alpha: 1)
+        refreshButton = ToolbarButton(symbol: .refresh, target: self, action: #selector(refresh))
         root.addSubview(refreshButton)
-        hideButton = NSButton(title: "×", target: self, action: #selector(hide))
-        hideButton.isBordered = false
-        hideButton.font = NSFont.systemFont(ofSize: 22, weight: .regular)
-        hideButton.contentTintColor = NSColor(srgbRed: 161 / 255, green: 170 / 255, blue: 182 / 255, alpha: 1)
+        collapseButton = ToolbarButton(symbol: .compact, target: self, action: #selector(collapse))
+        root.addSubview(collapseButton)
+        hideButton = ToolbarButton(symbol: .hide, target: self, action: #selector(hide))
         root.addSubview(hideButton)
+        refreshButton.nextKeyView = collapseButton
+        collapseButton.nextKeyView = hideButton
+        hideButton.nextKeyView = web
+        web.nextKeyView = refreshButton
         for edge in ResizeEdge.allCases {
             let grip = ResizeGrip(frame: .zero)
             grip.edge = edge
+            grip.onResizeBegin = { [weak self] in
+                self?.automaticDetailHeight = false
+                UserDefaults.standard.set(false, forKey: "detailAutoHeight")
+            }
             grips[edge] = grip
             root.addSubview(grip)
         }
@@ -429,6 +530,9 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
         panel.orderFrontRegardless()
         poll()
         pollTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in self?.poll() }
+        ageTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            self?.updateStatusText()
+        }
         NotificationCenter.default.addObserver(self, selector: #selector(screenConfigurationChanged),
                                                name: NSApplication.didChangeScreenParametersNotification,
                                                object: nil)
@@ -442,6 +546,9 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        ageTimer?.invalidate()
+        pollTimer?.invalidate()
+        web.configuration.userContentController.removeScriptMessageHandler(forName: "detailLayout")
         let pidFile = stateDirectory().appendingPathComponent("widget.pid")
         if (try? String(contentsOf: pidFile, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
             == String(ProcessInfo.processInfo.processIdentifier) {
@@ -457,22 +564,23 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
         web.isHidden = isCompact
         dragBar.isHidden = isCompact
         brandLabel.isHidden = isCompact
-        statusLabel.isHidden = isCompact || w < 550
+        statusLabel.isHidden = isCompact
         collapseButton.isHidden = isCompact
         refreshButton.isHidden = isCompact
         hideButton.isHidden = isCompact
         for grip in grips.values { grip.isHidden = isCompact }
         if !isCompact {
-            web.frame = NSRect(x: 0, y: 0, width: w, height: max(0, h - 60))
-            dragBar.frame = NSRect(x: 0, y: h - 60, width: w, height: 60)
             brandLabel.font = NSFont.monospacedSystemFont(ofSize: w < 520 ? 17 : 20, weight: .bold)
-            brandLabel.frame = NSRect(x: w < 520 ? 12 : 30, y: h - 43, width: w < 520 ? max(100, w - 218) : 190, height: 28)
-            statusLabel.frame = NSRect(x: 235, y: h - 42, width: max(0, w - 445), height: 27)
-            collapseButton.font = NSFont.systemFont(ofSize: 15, weight: .semibold)
-            collapseButton.frame = NSRect(x: w - 192, y: h - 45, width: 78, height: 32)
-            refreshButton.font = NSFont.systemFont(ofSize: 15, weight: .medium)
-            refreshButton.frame = NSRect(x: w - 110, y: h - 45, width: 62, height: 32)
-            hideButton.frame = NSRect(x: w - 43, y: h - 45, width: 30, height: 32)
+            let brandWidth = ceil((brandLabel.stringValue as NSString).size(withAttributes: [.font: brandLabel.font!]).width) + 2
+            let statusWidth = ceil((statusLabel.stringValue as NSString).size(withAttributes: [.font: statusLabel.font!]).width) + 2
+            let header = NativeDetailHeaderLayout(size: root.bounds.size, brandWidth: brandWidth, statusWidth: statusWidth)
+            web.frame = header.content
+            dragBar.frame = header.header
+            brandLabel.frame = header.brand
+            statusLabel.frame = header.status
+            refreshButton.frame = header.refresh
+            collapseButton.frame = header.compact
+            hideButton.frame = header.hide
             let corner: CGFloat = 18, strip: CGFloat = 9
             grips[.topLeft]?.frame = NSRect(x: 0, y: h - corner, width: corner, height: corner)
             grips[.topRight]?.frame = NSRect(x: w - corner, y: h - corner, width: corner, height: corner)
@@ -489,6 +597,7 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
     func windowDidMove(_ notification: Notification) { saveFrame() }
     @objc private func screenConfigurationChanged() {
         panel.setFrame(visibleFrame(panel.frame), display: true)
+        fitDetailHeight()
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         panel.orderFrontRegardless()
@@ -508,7 +617,7 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
         let fallbackHeight: CGFloat = value ? 86 : 630
         let saved = savedFrame(value ? "compactFrame" : "detailFrame",
                                fallback: NSRect(x: current.minX, y: current.maxY - fallbackHeight,
-                                                width: value ? 78 : 440,
+                                                width: value ? 78 : 606,
                                                 height: fallbackHeight))
         let width = max(value ? minimumCompact.width : minimumDetail.width, saved.width)
         let height = max(value ? minimumCompact.height : minimumDetail.height, saved.height)
@@ -526,6 +635,7 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
             self?.transitioning = false
             self?.layoutViews()
             self?.saveFrame()
+            self?.fitDetailHeight()
         })
         panel.orderFrontRegardless()
     }
@@ -538,12 +648,12 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
     private func updateNativeText() {
         brandLabel.stringValue = localizer.text("brand")
         panel.title = localizer.text("brand")
-        statusLabel.stringValue = usage.status(localizer)
-        collapseButton.title = localizer.text("compact")
-        collapseButton.toolTip = localizer.text("compact")
-        refreshButton.title = localizer.text("refresh")
+        collapseButton.toolTip = localizer.text("return_compact")
+        collapseButton.setAccessibilityLabel(localizer.text("return_compact"))
         refreshButton.toolTip = localizer.text("refresh_quota")
+        refreshButton.setAccessibilityLabel(localizer.text("refresh_quota"))
         hideButton.toolTip = localizer.text("hide")
+        hideButton.setAccessibilityLabel(localizer.text("hide"))
         visibilityMenuItem.title = localizer.text(panel.isVisible ? "hide" : "show")
         for (key, item) in menuItems { item.title = localizer.text(key) }
         for item in languageMenu.items {
@@ -553,6 +663,40 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
         }
         statusItem.button?.toolTip = usage.tooltip(localizer)
         compact.toolTip = usage.tooltip(localizer)
+        updateStatusText()
+    }
+
+    private func updateStatusText() {
+        statusLabel.stringValue = usage.status(localizer)
+        statusLabel.toolTip = usage.tooltip(localizer)
+        layoutViews()
+        fitDetailHeight()
+    }
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard message.name == "detailLayout", message.webView === web, !transitioning,
+              message.frameInfo.securityOrigin.protocol == baseURL.scheme,
+              message.frameInfo.securityOrigin.host == baseURL.host,
+              message.frameInfo.securityOrigin.port == baseURL.port,
+              let measurement = NativeDetailMeasurement(object: message.body,
+                  documentURL: message.frameInfo.request.url, isMainFrame: message.frameInfo.isMainFrame,
+                  expectedURL: baseURL, viewWidth: web.bounds.width) else { return }
+        detailMeasurement = measurement
+        fitDetailHeight()
+    }
+
+    private func fitDetailHeight() {
+        guard !isCompact, automaticDetailHeight, !transitioning, !fittingDetailHeight,
+              let measurement = detailMeasurement,
+              abs(measurement.width - web.bounds.width) <= 2,
+              let fitted = nativeDetailFittedFrame(panel.frame, contentHeight: measurement.height,
+                  headerHeight: dragBar.frame.height, in: boundsForWindow(panel)),
+              abs(fitted.height - panel.frame.height) > 0.5 || abs(fitted.minY - panel.frame.minY) > 0.5 else { return }
+        fittingDetailHeight = true
+        panel.setFrame(fitted, display: true)
+        fittingDetailHeight = false
+        layoutViews()
+        saveFrame()
     }
 
     @objc private func selectLanguage(_ sender: NSMenuItem) {

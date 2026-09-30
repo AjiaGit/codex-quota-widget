@@ -50,7 +50,8 @@ $script:requestTask = $null
 $script:requestManual = $false
 $script:queuedManual = $false
 $script:externalTask = $null
-$script:externalData = $null
+$script:externalCachePath = Join-Path $script:dataDirectory 'native-public-cache.json'
+$script:externalData = Merge-WidgetExternalData (Read-WidgetJson $script:externalCachePath) $null $true
 $script:nextExternalPoll = [DateTime]::MinValue
 $script:nextPoll = [DateTime]::MinValue
 $script:lastRender = [DateTime]::MinValue
@@ -61,6 +62,11 @@ $script:message = (T 'reading')
 $script:reallyExit = $false
 $script:colors = @{}
 $script:layoutPlus = $null
+$script:layoutBusy = $false
+$script:historyExpanded = $false
+$script:announcementRenderKey = ''
+$script:announcementRows = @()
+$script:historyRows = @()
 $script:mode = 'Detail'
 $script:animating = $false
 $script:targetMode = 'Detail'
@@ -85,6 +91,7 @@ function New-Label([string]$text, [int]$x, [int]$y, [int]$width, [int]$height, [
     $style = if ($bold) { [System.Drawing.FontStyle]::Bold } else { [System.Drawing.FontStyle]::Regular }
     $label.Font = New-Object System.Drawing.Font('Segoe UI', $size, $style)
     $label.AutoEllipsis = $true
+    $label.UseMnemonic = $false
     return $label
 }
 
@@ -146,26 +153,61 @@ function Set-RoundedRegion {
 }
 Set-RoundedRegion
 
+function New-ToolbarButton([string]$kind) {
+    $button = New-Object Windows.Forms.Button
+    $button.Name = 'toolbar-' + $kind
+    $button.Tag = $kind
+    $button.Text = ''
+    $button.FlatStyle = [Windows.Forms.FlatStyle]::Flat
+    $button.FlatAppearance.BorderSize = 0
+    $button.Size = [Drawing.Size]::new(32,32)
+    $button.Cursor = [Windows.Forms.Cursors]::Hand
+    $button.TabStop = $true
+    $button.Add_Paint({
+        param($sender,$e)
+        $e.Graphics.SmoothingMode = [Drawing.Drawing2D.SmoothingMode]::AntiAlias
+        $pen = [Drawing.Pen]::new($script:colors.muted,1.5)
+        $pen.StartCap = [Drawing.Drawing2D.LineCap]::Round
+        $pen.EndCap = [Drawing.Drawing2D.LineCap]::Round
+        $cx=[single]($sender.Width/2); $cy=[single]($sender.Height/2)
+        try {
+            switch ([string]$sender.Tag) {
+                'refresh' {
+                    $e.Graphics.DrawArc($pen,([Drawing.RectangleF]::new($cx-6,$cy-6,12,12)),45,285)
+                    $e.Graphics.DrawLine($pen,([Drawing.PointF]::new($cx+6,$cy-7)),([Drawing.PointF]::new($cx+6,$cy-1)))
+                    $e.Graphics.DrawLine($pen,([Drawing.PointF]::new($cx+6,$cy-1)),([Drawing.PointF]::new($cx+1,$cy-1)))
+                }
+                'compact' { $e.Graphics.DrawLine($pen,([Drawing.PointF]::new($cx-5,$cy)),([Drawing.PointF]::new($cx+5,$cy))) }
+                'hide' {
+                    $e.Graphics.DrawLine($pen,([Drawing.PointF]::new($cx-4,$cy-4)),([Drawing.PointF]::new($cx+4,$cy+4)))
+                    $e.Graphics.DrawLine($pen,([Drawing.PointF]::new($cx-4,$cy+4)),([Drawing.PointF]::new($cx+4,$cy-4)))
+                }
+            }
+            if ($sender.Focused) { [Windows.Forms.ControlPaint]::DrawFocusRectangle($e.Graphics,[Drawing.Rectangle]::new(3,3,$sender.Width-6,$sender.Height-6),$script:colors.muted,$sender.BackColor) }
+        } finally { $pen.Dispose() }
+    })
+    return $button
+}
 $title = New-Label (T 'app') 18 10 132 30 11.5 $true
-$title.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
-$status = New-Label (T 'loading') 155 10 100 30 9
-$status.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
-$compactButton = New-Label (T 'compact') 261 10 46 30 9
-$compactButton.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
-$refresh = New-Object System.Windows.Forms.Button
-$refresh.Text = (T 'refresh')
-$refresh.Location = New-Object System.Drawing.Point(315, 10)
-$refresh.Size = New-Object System.Drawing.Size(48, 30)
-$refresh.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 9)
-$refresh.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
-$refresh.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-$refresh.FlatAppearance.BorderSize = 0
-$refresh.TabStop = $false
-$close = New-Label '×' 370 10 26 30 16
-$close.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
-$compactButton.Cursor = [System.Windows.Forms.Cursors]::Hand
-$refresh.Cursor = [System.Windows.Forms.Cursors]::Hand
-$close.Cursor = [System.Windows.Forms.Cursors]::Hand
+$title.TextAlign = [Drawing.ContentAlignment]::MiddleLeft; $title.Tag='strong'
+$status = New-Label (T 'loading') 18 42 364 24 9
+$status.TextAlign = [Drawing.ContentAlignment]::MiddleLeft; $status.Name='quota-updated-age'
+$refresh = New-ToolbarButton 'refresh'; $refresh.TabIndex=0
+$compactButton = New-ToolbarButton 'compact'; $compactButton.TabIndex=1
+$close = New-ToolbarButton 'hide'; $close.TabIndex=2
+$body = New-Object Windows.Forms.Panel
+$body.Name='detail-scroll-body'; $body.AutoScroll=$true; $body.TabStop=$false; $body.TabIndex=3
+$content = New-Object Windows.Forms.Panel
+$content.Name='detail-content'; [void]$body.Controls.Add($content)
+$script:sectionPanels=@{}
+foreach ($section in @('hero','fiveHour','credits','announcements','probability','history','sources')) {
+    $panel=New-Object Windows.Forms.Panel; $panel.Name='section-'+$section
+    $script:sectionPanels[$section]=$panel; [void]$content.Controls.Add($panel)
+}
+$heroPanel=$script:sectionPanels.hero; $fivePanel=$script:sectionPanels.fiveHour
+$creditsPanel=$script:sectionPanels.credits; $announcementPanel=$script:sectionPanels.announcements
+$probabilityPanel=$script:sectionPanels.probability; $historyPanel=$script:sectionPanels.history
+$sourcesPanel=$script:sectionPanels.sources
 
 $ring = New-Object System.Windows.Forms.Panel
 $ring.Location = New-Object System.Drawing.Point(20, 58)
@@ -201,45 +243,45 @@ $ring.Add_Paint({
     $track.Dispose(); $arc.Dispose()
 })
 
-$caption = New-Label (T 'weekly') 156 63 224 26 10.5
-$countdown = New-Label (T 'reading') 154 94 230 45 20 $true
-$reset = New-Label (T 'resetUnknown') 156 144 224 25 10
-$divider = New-Object System.Windows.Forms.Panel
-$divider.Location = New-Object System.Drawing.Point(20, 182)
-$divider.Size = New-Object System.Drawing.Size(364, 1)
-$updated = New-Label (T 'lastUpdated' @('—')) 20 194 240 25 9.5
-$cards = New-Label (T 'cardsUnknown') 281 194 103 25 9.5
-$cards.Cursor = [System.Windows.Forms.Cursors]::Hand
-$cards.Add_Click({ Show-ResetDetails })
-$cards.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
-
-$fiveDivider = New-Object System.Windows.Forms.Panel
-$fiveDivider.Location = New-Object System.Drawing.Point(20, 226)
-$fiveDivider.Size = New-Object System.Drawing.Size(364, 1)
-$fiveTitle = New-Label (T 'fiveHour') 20 238 138 26 10.5 $true
-$fiveValue = New-Label (T 'unavailable') 238 238 146 26 10.5 $true
-$fiveValue.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
-$fiveReset = New-Label (T 'resetUnknown') 20 267 364 22 9.5
-
-$externalDivider = New-Object System.Windows.Forms.Panel
-$externalDivider.Location = New-Object System.Drawing.Point(20, 226)
-$externalDivider.Size = New-Object System.Drawing.Size(364, 1)
-$externalTitle = New-Label (T 'external') 20 238 364 26 10.5 $true
-$lastGlobal = New-Label (T 'publicUnavailable') 20 270 364 24 9.5
-$delivery = New-Label (T 'deliveryEmpty') 20 297 364 24 9.5
-$odds = New-Label (T 'oddsUnknown') 20 326 364 26 9.5 $true
-$attribution = New-Object System.Windows.Forms.LinkLabel
-$attribution.Text = (T 'publicSource')
-$attribution.Location = New-Object System.Drawing.Point(20, 356)
-$attribution.Size = New-Object System.Drawing.Size(364, 22)
-$attribution.Font = New-Object System.Drawing.Font('Segoe UI', 9.5)
-$attribution.LinkBehavior = [System.Windows.Forms.LinkBehavior]::HoverUnderline
-$attribution.TabStop = $false
-
-foreach ($control in @($title, $status, $compactButton, $refresh, $close, $ring, $caption, $countdown, $reset, $divider, $updated, $cards,
-    $fiveDivider, $fiveTitle, $fiveValue, $fiveReset, $externalDivider, $externalTitle, $lastGlobal, $delivery, $odds, $attribution)) {
-    [void]$form.Controls.Add($control)
+$caption = New-Label (T 'untilReset') 136 4 210 26 10.5
+$countdown = New-Label (T 'reading') 136 35 210 45 20 $true; $countdown.Tag='strong'
+$reset = New-Label (T 'resetUnknown') 136 84 210 25 10
+$updated = New-Label '' 0 122 346 25 9.5
+foreach ($control in @($ring,$caption,$countdown,$reset,$updated)) { [void]$heroPanel.Controls.Add($control) }
+$fiveDivider=New-Object Windows.Forms.Panel; $fiveDivider.Tag='line'
+$fiveTitle=New-Label (T 'fiveHour') 0 12 136 26 10.5 $true; $fiveTitle.Tag='strong'
+$fiveValue=New-Label (T 'unavailable') 200 12 146 26 10.5 $true; $fiveValue.Tag='strong'
+$fiveValue.TextAlign=[Drawing.ContentAlignment]::MiddleRight
+$fiveReset=New-Label (T 'resetUnknown') 0 42 346 24 9.5
+foreach ($control in @($fiveDivider,$fiveTitle,$fiveValue,$fiveReset)) { [void]$fivePanel.Controls.Add($control) }
+$divider=New-Object Windows.Forms.Panel; $divider.Tag='line'; [void]$creditsPanel.Controls.Add($divider)
+$cards=New-Object Windows.Forms.LinkLabel; $cards.Name='reset-credit-details'
+$cards.Font=[Drawing.Font]::new('Segoe UI',10.5); $cards.LinkBehavior=[Windows.Forms.LinkBehavior]::HoverUnderline
+$cards.Cursor=[Windows.Forms.Cursors]::Hand; $cards.TabStop=$true; $cards.UseMnemonic=$false
+$cards.Add_LinkClicked({ Show-ResetDetails }); [void]$creditsPanel.Controls.Add($cards)
+$externalTitle=New-Label (T 'oddsTitle') 0 0 346 26 10.5 $true; $externalTitle.Tag='strong'
+[void]$probabilityPanel.Controls.Add($externalTitle)
+$odds=New-Object Windows.Forms.Panel; $odds.Name='three-column-probability'; [void]$probabilityPanel.Controls.Add($odds)
+$script:oddsValues=@(); $script:oddsCaptions=@()
+for ($i=0; $i -lt 3; $i++) {
+    $value=New-Label '—' 0 0 100 30 17 $true; $value.Tag='strong'; $value.Name='odds-value-'+$i
+    $value.TextAlign=[Drawing.ContentAlignment]::MiddleCenter
+    $label=New-Label '' 0 34 100 24 9.5; $label.TextAlign=[Drawing.ContentAlignment]::MiddleCenter
+    [void]$odds.Controls.Add($value); [void]$odds.Controls.Add($label)
+    $script:oddsValues+=,$value; $script:oddsCaptions+=,$label
 }
+$historyButton=New-Object Windows.Forms.Button; $historyButton.Name='announcement-history-toggle'
+$historyButton.FlatStyle=[Windows.Forms.FlatStyle]::Flat; $historyButton.FlatAppearance.BorderSize=0
+$historyButton.TextAlign=[Drawing.ContentAlignment]::MiddleLeft; $historyButton.Font=[Drawing.Font]::new('Segoe UI',10)
+$historyButton.Cursor=[Windows.Forms.Cursors]::Hand; $historyButton.TabStop=$true; $historyButton.UseMnemonic=$false
+[void]$historyPanel.Controls.Add($historyButton)
+$historyRowsPanel=New-Object Windows.Forms.Panel; [void]$historyPanel.Controls.Add($historyRowsPanel)
+$attribution=New-Object Windows.Forms.LinkLabel
+$attribution.Font=[Drawing.Font]::new('Segoe UI',9); $attribution.LinkBehavior=[Windows.Forms.LinkBehavior]::HoverUnderline
+$attribution.TabStop=$true; [void]$sourcesPanel.Controls.Add($attribution)
+$estimateNote=New-Label (T 'oddsNote') 0 28 346 44 9; [void]$probabilityPanel.Controls.Add($estimateNote)
+$cadence=New-Label (T 'refreshCadence') 0 28 346 24 9; [void]$sourcesPanel.Controls.Add($cadence)
+foreach ($control in @($title,$status,$refresh,$compactButton,$close,$body)) { [void]$form.Controls.Add($control) }
 $script:resizeEdges = @{}
 foreach ($edge in @('Top', 'Bottom', 'Left', 'Right', 'TopLeft', 'TopRight', 'BottomLeft', 'BottomRight')) {
     $zone = New-Object System.Windows.Forms.Panel
@@ -253,8 +295,7 @@ foreach ($edge in @('Top', 'Bottom', 'Left', 'Right', 'TopLeft', 'TopRight', 'Bo
     [void]$form.Controls.Add($zone)
     $script:resizeEdges[$edge] = $zone
 }
-$script:detailControls = @($title, $status, $compactButton, $refresh, $close, $caption, $countdown, $reset, $divider, $updated, $cards,
-    $fiveDivider, $fiveTitle, $fiveValue, $fiveReset, $externalDivider, $externalTitle, $lastGlobal, $delivery, $odds, $attribution)
+$script:detailControls = @($title,$status,$refresh,$compactButton,$close,$body)
 
 $tooltip = New-Object System.Windows.Forms.ToolTip
 $tooltip.SetToolTip($refresh, (T 'tipRefresh'))
@@ -283,107 +324,136 @@ function Update-ResizeEdges([int]$width, [int]$height, [bool]$compact, [double]$
     Set-ControlBox $script:resizeEdges.BottomRight ($width - $cornerSize) ($height - $cornerSize) $cornerSize $cornerSize
 }
 
+function Set-WrappedBox($control, [int]$x, [int]$y, [int]$width, [int]$minimumHeight = 22) {
+    $control.AutoEllipsis=$false
+    $measured=[Windows.Forms.TextRenderer]::MeasureText($control.Text,$control.Font,[Drawing.Size]::new([Math]::Max(1,$width),32767),([Windows.Forms.TextFormatFlags]::WordBreak -bor [Windows.Forms.TextFormatFlags]::NoPrefix))
+    $height=[Math]::Max($minimumHeight,$measured.Height+4)
+    Set-ControlBox $control $x $y $width $height
+    return $height
+}
+function Layout-AnnouncementRows($parent, $rows, [int]$width, [int]$startY=0) {
+    $y=$startY
+    foreach ($row in $rows) {
+        $row.Width=$width; $row.Location=[Drawing.Point]::new(0,$y)
+        $parts=$row.Tag; $insideY=0
+        $insideY+=(Set-WrappedBox $parts.title 0 $insideY $width 24)+3
+        $insideY+=(Set-WrappedBox $parts.details 0 $insideY $width 22)+3
+        if ($parts.summary) { $insideY+=(Set-WrappedBox $parts.summary 0 $insideY $width 22)+3 }
+        if ($parts.source) { $insideY+=(Set-WrappedBox $parts.source 0 $insideY $width 22)+3 }
+        if ($parts.retention) { $insideY+=(Set-WrappedBox $parts.retention 0 $insideY $width 22)+3 }
+        $row.Height=$insideY; $y+=$insideY+12
+    }
+    $parent.Height=[Math]::Max(1,$y)
+    return $y
+}
 function Update-ResponsiveLayout {
-    if ($script:animating) { return }
-    $width = $form.ClientSize.Width
-    $height = $form.ClientSize.Height
-    if ($script:mode -eq 'Compact') {
-        $ringSize = [Math]::Max(38, [Math]::Min($width - 10, $height - 20))
-        Set-ControlBox $ring (($width - $ringSize) / 2) (($height - $ringSize) / 2) $ringSize $ringSize
-        Update-ResizeEdges $width $height $true
-    } else {
-        $offset = if ($script:layoutPlus) { 62 } else { 0 }
-        $baseHeight = 390 + $offset
-        $scale = [Math]::Max(1, [Math]::Min(1.3, [Math]::Min(($width / 404.0), ($height / [double]$baseHeight))))
-        $vertical = $height / [double]$baseHeight
-        $margin = 20 * $scale
-        $contentWidth = $width - 2 * $margin
-        Set-ControlBox $title (18 * $scale) (10 * $scale) (132 * $scale) (30 * $scale)
-        Set-ControlBox $status ($width - 249 * $scale) (10 * $scale) (100 * $scale) (30 * $scale)
-        Set-ControlBox $compactButton ($width - 143 * $scale) (10 * $scale) (46 * $scale) (30 * $scale)
-        Set-ControlBox $refresh ($width - 89 * $scale) (10 * $scale) (48 * $scale) (30 * $scale)
-        Set-ControlBox $close ($width - 34 * $scale) (10 * $scale) (26 * $scale) (30 * $scale)
-        $ringSize = 110 * $scale
-        Set-ControlBox $ring $margin (58 * $vertical) $ringSize $ringSize
-        $rightX = 156 * $scale
-        $rightWidth = $width - $rightX - $margin
-        Set-ControlBox $caption $rightX (63 * $vertical) $rightWidth (26 * $scale)
-        Set-ControlBox $countdown (154 * $scale) (94 * $vertical) ($width - 154 * $scale - $margin) (45 * $scale)
-        Set-ControlBox $reset $rightX (144 * $vertical) $rightWidth (25 * $scale)
-        Set-ControlBox $divider $margin (182 * $vertical) $contentWidth 1
-        Set-ControlBox $updated $margin (194 * $vertical) ($width - 155 * $scale) (25 * $scale)
-        Set-ControlBox $cards ($width - 123 * $scale) (194 * $vertical) (103 * $scale) (25 * $scale)
-        Set-ControlBox $fiveDivider $margin (226 * $vertical) $contentWidth 1
-        Set-ControlBox $fiveTitle $margin (238 * $vertical) (138 * $scale) (26 * $scale)
-        Set-ControlBox $fiveValue ($width - 166 * $scale) (238 * $vertical) (146 * $scale) (26 * $scale)
-        Set-ControlBox $fiveReset $margin (267 * $vertical) $contentWidth (22 * $scale)
-        Set-ControlBox $externalDivider $margin ((226 + $offset) * $vertical) $contentWidth 1
-        Set-ControlBox $externalTitle $margin ((238 + $offset) * $vertical) $contentWidth (26 * $scale)
-        Set-ControlBox $lastGlobal $margin ((270 + $offset) * $vertical) $contentWidth (24 * $scale)
-        Set-ControlBox $delivery $margin ((297 + $offset) * $vertical) $contentWidth (24 * $scale)
-        Set-ControlBox $odds $margin ((326 + $offset) * $vertical) $contentWidth (26 * $scale)
-        Set-ControlBox $attribution $margin ((356 + $offset) * $vertical) $contentWidth (22 * $scale)
-        Update-ResizeEdges $width $height $false $scale
-    }
-    Set-RoundedRegion
-    $ring.Invalidate()
+    if ($script:animating -or $script:layoutBusy) { return }
+    $script:layoutBusy=$true
+    try {
+        $width=$form.ClientSize.Width; $height=$form.ClientSize.Height
+        if ($script:mode -eq 'Compact') {
+            if ($ring.Parent -ne $form) { $ring.Parent=$form }
+            $ringSize=[Math]::Max(38,[Math]::Min($width-10,$height-20))
+            Set-ControlBox $ring (($width-$ringSize)/2) (($height-$ringSize)/2) $ringSize $ringSize
+            Update-ResizeEdges $width $height $true
+        } else {
+            $titleWidth=[Windows.Forms.TextRenderer]::MeasureText($title.Text,$title.Font).Width+6
+            $statusWidth=[Windows.Forms.TextRenderer]::MeasureText($status.Text,$status.Font).Width+6
+            $header=Get-WidgetHeaderLayout $width $titleWidth $statusWidth
+            Set-ControlBox $title $header.titleX $header.titleY $header.titleWidth 30
+            Set-ControlBox $status $header.statusX $header.statusY $header.statusWidth 24
+            foreach ($button in $header.buttons) {
+                $control=switch($button.kind) {'refresh' {$refresh} 'compact' {$compactButton} 'hide' {$close}}
+                Set-ControlBox $control $button.x $button.y $button.width $button.height
+            }
+            $scrollY=[Math]::Max(0,-$body.AutoScrollPosition.Y)
+            Set-ControlBox $body 7 $header.height ($width-14) ($height-$header.height-10)
+            # Reserve scrollbar width even before it appears, avoiding a reflow
+            # loop and keeping every section free of horizontal scrolling.
+            $cw=[Math]::Max(1,$body.Width-26-[Windows.Forms.SystemInformation]::VerticalScrollBarWidth)
+            if ($ring.Parent -ne $heroPanel) { $ring.Parent=$heroPanel }
+            Set-ControlBox $ring 0 8 110 110
+            Set-ControlBox $caption 136 4 ($cw-136) 26
+            Set-ControlBox $countdown 136 34 ($cw-136) 45
+            $resetHeight=Set-WrappedBox $reset 136 83 ($cw-136) 25
+            $heroPanel.Height=[Math]::Max(126,83+$resetHeight+10)
+            if ($updated.Visible) { $heroPanel.Height+=(Set-WrappedBox $updated 0 $heroPanel.Height $cw 22)+8 }
+            Set-ControlBox $fiveDivider 0 0 $cw 1
+            $fiveRowHeight=[Math]::Max((Set-WrappedBox $fiveTitle 0 12 ($cw-90) 26),(Set-WrappedBox $fiveValue ($cw-80) 12 80 26))
+            $fiveResetY=12+$fiveRowHeight+4
+            $fivePanel.Height=$fiveResetY+(Set-WrappedBox $fiveReset 0 $fiveResetY $cw 22)+10
+            Set-ControlBox $divider 0 0 $cw 1
+            $creditsPanel.Height=10+(Set-WrappedBox $cards 0 10 $cw 26)+10
+            $noticeHeight=0
+            if ($script:announcementStale) { $noticeHeight=(Set-WrappedBox $script:announcementStale 0 0 $cw 22)+8 }
+            $aHeight=Layout-AnnouncementRows $announcementPanel $script:announcementRows $cw $noticeHeight
+            if ($script:announcementEmpty) { $aHeight=Set-WrappedBox $script:announcementEmpty 0 0 $cw 22 }
+            $announcementPanel.Height=[Math]::Max(1,$aHeight)
+            $oddsTitleHeight=Set-WrappedBox $externalTitle 0 0 $cw 24
+            Set-ControlBox $odds 0 ($oddsTitleHeight+6) $cw 62
+            $columns=@(Get-WidgetOddsColumns $cw)
+            for ($i=0; $i -lt 3; $i++) {
+                Set-ControlBox $script:oddsValues[$i] $columns[$i].x 0 $columns[$i].width 32
+                Set-ControlBox $script:oddsCaptions[$i] $columns[$i].x 35 $columns[$i].width 24
+            }
+            $noteY=$oddsTitleHeight+76
+            $probabilityPanel.Height=$noteY+(Set-WrappedBox $estimateNote 0 $noteY $cw 22)
+            $historyHeight=Set-WrappedBox $historyButton 0 0 $cw 34
+            $historyRowsPanel.Visible=$script:historyExpanded
+            if ($script:historyExpanded) {
+                Set-ControlBox $historyRowsPanel 0 ($historyHeight+6) $cw 1
+                $rowsHeight=Layout-AnnouncementRows $historyRowsPanel $script:historyRows $cw
+                if ($script:historyEmpty) { $rowsHeight=Set-WrappedBox $script:historyEmpty 0 0 $cw 22 }
+                $historyRowsPanel.Height=[Math]::Max(1,$rowsHeight); $historyHeight+=$rowsHeight+6
+            }
+            $historyPanel.Height=$historyHeight
+            $sourceHeight=Set-WrappedBox $attribution 0 0 $cw 22
+            $sourcesPanel.Height=$sourceHeight+4+(Set-WrappedBox $cadence 0 ($sourceHeight+4) $cw 22)
+            $order=@(Get-WidgetDetailSectionOrder ([bool]$script:layoutPlus))
+            foreach ($name in $script:sectionPanels.Keys) { $script:sectionPanels[$name].Visible=$name -in $order }
+            $y=0
+            foreach ($name in $order) {
+                $panel=$script:sectionPanels[$name]; $panel.Location=[Drawing.Point]::new(0,$y); $panel.Width=$cw
+                $y+=$panel.Height+12
+            }
+            Set-ControlBox $content 13 0 $cw ($y+8)
+            $body.AutoScrollMinSize=[Drawing.Size]::new(0,$y+8)
+            $body.AutoScrollPosition=[Drawing.Point]::new(0,[int]$scrollY)
+            Update-ResizeEdges $width $height $false
+        }
+        Set-RoundedRegion; $ring.Invalidate()
+    } finally { $script:layoutBusy=$false }
 }
-
-$script:fontScale = 1.0
-$script:fontSpecs = @(
-    @{ Control = $title; Size = 11.5; Bold = $true; Family = 'Segoe UI' },
-    @{ Control = $status; Size = 9; Bold = $false; Family = 'Segoe UI' },
-    @{ Control = $compactButton; Size = 9; Bold = $false; Family = 'Segoe UI' },
-    @{ Control = $refresh; Size = 9; Bold = $false; Family = 'Microsoft YaHei UI' },
-    @{ Control = $close; Size = 16; Bold = $false; Family = 'Segoe UI' },
-    @{ Control = $caption; Size = 10.5; Bold = $false; Family = 'Segoe UI' },
-    @{ Control = $countdown; Size = 20; Bold = $true; Family = 'Segoe UI' },
-    @{ Control = $reset; Size = 10; Bold = $false; Family = 'Segoe UI' },
-    @{ Control = $updated; Size = 9.5; Bold = $false; Family = 'Segoe UI' },
-    @{ Control = $cards; Size = 9.5; Bold = $false; Family = 'Segoe UI' },
-    @{ Control = $fiveTitle; Size = 10.5; Bold = $true; Family = 'Segoe UI' },
-    @{ Control = $fiveValue; Size = 10.5; Bold = $true; Family = 'Segoe UI' },
-    @{ Control = $fiveReset; Size = 9.5; Bold = $false; Family = 'Segoe UI' },
-    @{ Control = $externalTitle; Size = 10.5; Bold = $true; Family = 'Segoe UI' },
-    @{ Control = $lastGlobal; Size = 9.5; Bold = $false; Family = 'Segoe UI' },
-    @{ Control = $delivery; Size = 9.5; Bold = $false; Family = 'Segoe UI' },
-    @{ Control = $odds; Size = 9.5; Bold = $true; Family = 'Segoe UI' },
-    @{ Control = $attribution; Size = 9.5; Bold = $false; Family = 'Segoe UI' }
-)
-
 function Update-DetailFonts {
-    if ($script:mode -ne 'Detail' -or $script:animating) { return }
-    $offset = if ($script:layoutPlus) { 62 } else { 0 }
-    $scale = [Math]::Max(1, [Math]::Min(1.3, [Math]::Min(($form.ClientSize.Width / 404.0), ($form.ClientSize.Height / [double](390 + $offset)))))
-    if ([Math]::Abs($scale - $script:fontScale) -lt 0.025) { return }
-    foreach ($spec in $script:fontSpecs) {
-        $style = if ($spec.Bold) { [System.Drawing.FontStyle]::Bold } else { [System.Drawing.FontStyle]::Regular }
-        $newFont = [System.Drawing.Font]::new($spec.Family, [float]($spec.Size * $scale), $style)
-        $oldFont = $spec.Control.Font
-        $spec.Control.Font = $newFont
-        if ($oldFont) { $oldFont.Dispose() }
-    }
-    $script:fontScale = $scale
+    # Text stays readable at the minimum width. Wrapped section heights, rather
+    # than reduced font sizes or compressed rows, absorb content changes.
+    Update-ResponsiveLayout
 }
-
 function Set-Layout([bool]$plus) {
     if ($null -ne $script:layoutPlus -and $script:layoutPlus -eq $plus) { return }
-    $script:layoutPlus = $plus
-    $offset = if ($plus) { 62 } else { 0 }
-    foreach ($control in @($fiveDivider, $fiveTitle, $fiveValue, $fiveReset)) { $control.Visible = $plus }
-    $externalDivider.Top = 226 + $offset
-    $externalTitle.Top = 238 + $offset
-    $lastGlobal.Top = 270 + $offset
-    $delivery.Top = 297 + $offset
-    $odds.Top = 326 + $offset
-    $attribution.Top = 356 + $offset
+    $script:layoutPlus=$plus
+    $fivePanel.Visible=$plus
     if ($script:mode -eq 'Detail' -and -not $script:animating) {
-        $form.ClientSize = New-Object System.Drawing.Size($script:detailSize.Width, ($script:detailSize.Height + $offset))
-        $screen = [System.Windows.Forms.Screen]::FromControl($form).WorkingArea
-        if ($form.Bottom -gt $screen.Bottom) { $form.Top = $screen.Bottom - $form.Height }
+        $offset=if ($plus) {62} else {0}
+        $form.ClientSize=[Drawing.Size]::new($script:detailSize.Width,$script:detailSize.Height+$offset)
+        $screen=[Windows.Forms.Screen]::FromControl($form).WorkingArea
+        if ($form.Bottom -gt $screen.Bottom) { $form.Top=[Math]::Max($screen.Top,$screen.Bottom-$form.Height) }
     }
     Update-ResponsiveLayout
-    Update-DetailFonts
+}
+function Set-ControlTheme($control) {
+    $control.BackColor=$script:colors.back
+    $control.ForeColor=if ($control.Tag -eq 'strong') {$script:colors.text} else {$script:colors.muted}
+    if ($control.Tag -eq 'line') { $control.BackColor=$script:colors.line }
+    if ($control -is [Windows.Forms.LinkLabel]) {
+        $control.LinkColor=$script:colors.accent; $control.ActiveLinkColor=$script:colors.text; $control.VisitedLinkColor=$script:colors.accent
+    }
+    if ($control -is [Windows.Forms.Button]) {
+        $control.FlatAppearance.MouseOverBackColor=$script:colors.hover
+        $control.FlatAppearance.MouseDownBackColor=$script:colors.pressed
+    }
+    foreach ($child in $control.Controls) { Set-ControlTheme $child }
+    $control.Invalidate()
 }
 
 function Set-Theme {
@@ -395,27 +465,15 @@ function Set-Theme {
     if ($light) {
         $script:colors = @{
             back = (New-Color '#F7F8FB'); text = (New-Color '#17202D'); muted = (New-Color '#637083')
-            accent = (New-Color '#1CA887'); track = (New-Color '#DFE5EB'); line = (New-Color '#DDE3E8')
+            accent = (New-Color '#1CA887'); track = (New-Color '#DFE5EB'); line = (New-Color '#DDE3E8'); hover = (New-Color '#EBEEF2'); pressed = (New-Color '#E1E6EC')
         }
     } else {
         $script:colors = @{
             back = (New-Color '#20242C'); text = (New-Color '#F3F5F7'); muted = (New-Color '#AFB8C5')
-            accent = (New-Color '#32D5A6'); track = (New-Color '#3C4550'); line = (New-Color '#3B444E')
+            accent = (New-Color '#32D5A6'); track = (New-Color '#3C4550'); line = (New-Color '#3B444E'); hover = (New-Color '#313843'); pressed = (New-Color '#3B4652')
         }
     }
-    $form.BackColor = $script:colors.back
-    $ring.BackColor = $script:colors.back
-    foreach ($zone in $script:resizeEdges.Values) { $zone.BackColor = $script:colors.back }
-    $divider.BackColor = $script:colors.line
-    $fiveDivider.BackColor = $script:colors.line
-    $externalDivider.BackColor = $script:colors.line
-    foreach ($control in @($title, $countdown, $fiveTitle, $fiveValue, $externalTitle, $odds)) { $control.ForeColor = $script:colors.text; $control.BackColor = $script:colors.back }
-    foreach ($control in @($status, $refresh, $close, $caption, $reset, $updated, $cards, $fiveReset, $lastGlobal, $delivery, $attribution)) { $control.ForeColor = $script:colors.muted; $control.BackColor = $script:colors.back }
-    $compactButton.ForeColor = $script:colors.accent
-    $compactButton.BackColor = $script:colors.back
-    $attribution.LinkColor = $script:colors.accent
-    $attribution.ActiveLinkColor = $script:colors.text
-    $attribution.VisitedLinkColor = $script:colors.accent
+    Set-ControlTheme $form
     $ring.Invalidate()
     Set-Tray-QuotaIcon
 }
@@ -423,7 +481,9 @@ function Set-Theme {
 function Show-Quota {
     $now = [DateTimeOffset]::UtcNow
     $value = $script:data
-    Set-Layout ($value -and $value.status -eq 'ok' -and $value.plan -eq 'plus')
+    $fiveView=Get-WidgetFiveHourView $value $script:language $now
+    Set-Layout $fiveView.visible
+    $fiveValue.Text=$fiveView.percentText; $fiveReset.Text=$fiveView.resetText
     $valid = $false
     if ($value -and $value.status -eq 'ok') {
         try {
@@ -441,66 +501,121 @@ function Show-Quota {
         $minutes = $span.Minutes
         $countdown.Text = Format-WidgetCountdown $span $script:language
         $reset.Text = (T 'reset' @((Format-WidgetDate $resetAt $script:language)))
-        $updated.Text = (T 'lastUpdated' @((Format-WidgetDate ([DateTimeOffset]::FromUnixTimeMilliseconds([long]$value.updatedAt)) $script:language)))
+        $updated.Text = ''; $updated.Visible=$false
         $cards.Text = if ($null -ne $value.resetCards) { (T 'cards' @($value.resetCards)) } else { (T 'cardsUnknown') }
-        $status.Text = (T 'updated')
+        $status.Text = Format-WidgetRelativeUpdate $value.updatedAt $script:language $now
         $caption.Text = (T 'untilReset')
-        if ($value.plan -eq 'plus') {
-            $five = $value.fiveHour
-            try {
-                $fiveTime = [DateTimeOffset]::FromUnixTimeSeconds([long]$five.resetsAt)
-                if ($fiveTime -gt $now -and [double]$five.remainingPercent -ge 0 -and [double]$five.remainingPercent -le 100) {
-                    $fiveValue.Text = (T 'percentRemaining' @([int]$five.remainingPercent))
-                    $fiveReset.Text = (T 'reset' @((Format-WidgetDate $fiveTime $script:language)))
-                } else { $fiveValue.Text = (T 'unavailable'); $fiveReset.Text = (T 'resetUnknown') }
-            } catch { $fiveValue.Text = (T 'unavailable'); $fiveReset.Text = (T 'resetUnknown') }
-        }
+
     } else {
         $script:remaining = $null
         $countdown.Text = (T 'unavailable')
         $reset.Text = (T 'resetUnknown')
         $updated.Text = if ($value -and $value.status -eq 'ok') { (T 'stale') } else { $script:message }
         $cards.Text = (T 'cardsUnknown')
-        $status.Text = (T 'unavailable')
+        $status.Text = if ($value -and $null -ne $value.updatedAt) { Format-WidgetRelativeUpdate $value.updatedAt $script:language $now } else { T 'unavailable' }
+        $updated.Visible=$true
         $caption.Text = (T 'weekly')
     }
     $ringTip = if ($script:mode -eq 'Compact') {
         if ($null -eq $script:remaining) { (T 'tipUnavailable') } else { (T 'tipRemaining' @($script:remaining)) }
     } else { (T 'tipDrag') }
     $tooltip.SetToolTip($ring, $ringTip)
+    $countText=$cards.Text
+    $cards.Text=T 'creditDetailsRow' @($countText)
+    $cards.AccessibleName=$cards.Text
+    $cards.Links.Clear(); [void]$cards.Links.Add($countText.Length+3,$cards.Text.Length-$countText.Length-3)
     $tooltip.SetToolTip($cards, (T 'openDetails'))
     $tooltip.SetToolTip($updated, $updated.Text)
+    $tooltip.SetToolTip($status, $status.Text)
     if ($script:detailsText -and -not $script:detailsText.IsDisposed) { $script:detailsText.Text = Format-WidgetResetDetails $script:data $script:language }
     $script:setupCode = if ($value -and $value.errorCode -in @('cli_missing','signed_out')) { [string]$value.errorCode } else { $null }
     if ($setupItem) { $setupItem.Visible = $null -ne $script:setupCode }
     $ring.Invalidate()
     Set-Tray-QuotaIcon
+    Update-ResponsiveLayout
 }
 
+function New-AnnouncementControl($row) {
+    $panel=New-Object Windows.Forms.Panel
+    $rowTitle=New-Label $row.title 0 0 346 24 10.5 $true; $rowTitle.Tag='strong'
+    $rowDetails=New-Label $row.details 0 28 346 24 9.5
+    [void]$panel.Controls.Add($rowTitle); [void]$panel.Controls.Add($rowDetails)
+    $rowSummary=$null; $rowSource=$null; $rowRetention=$null
+    if ($row.summary) {
+        $rowSummary=New-Label $row.summary 0 56 346 24 9.5
+        [void]$panel.Controls.Add($rowSummary)
+    }
+    $links=@()
+    if ($row.sourceUrl) { $links+=,@((T 'announcementSource'),$row.sourceUrl) }
+    if ($row.deliverySourceUrl) { $links+=,@((T 'deliverySource'),$row.deliverySourceUrl) }
+    if ($links.Count) {
+        $rowSource=New-Object Windows.Forms.LinkLabel; $rowSource.Font=[Drawing.Font]::new('Segoe UI',9)
+        $rowSource.LinkBehavior=[Windows.Forms.LinkBehavior]::HoverUnderline; $rowSource.TabStop=$true; $rowSource.UseMnemonic=$false
+        $rowSource.Text=($links | ForEach-Object { $_[0] }) -join ' · '
+        $rowSource.Links.Clear()
+        foreach ($link in $links) { [void]$rowSource.Links.Add($rowSource.Text.IndexOf($link[0]),$link[0].Length,$link[1]) }
+        $rowSource.Add_LinkClicked({ param($sender,$e); $url=[string]$e.Link.LinkData; if (Test-WidgetHttpsUrl $url) { try { Start-Process -FilePath $url | Out-Null } catch { } } })
+        [void]$panel.Controls.Add($rowSource)
+    }
+    if ($row.retentionText) {
+        $rowRetention=New-Label $row.retentionText 0 0 346 24 9
+        [void]$panel.Controls.Add($rowRetention)
+    }
+    $panel.Tag=@{title=$rowTitle;details=$rowDetails;summary=$rowSummary;source=$rowSource;retention=$rowRetention}
+    Set-ControlTheme $panel
+    return $panel
+}
+function Clear-PanelControls($panel) {
+    foreach ($control in @($panel.Controls)) {
+        # Every dynamically created label/link has its own Font; dispose those
+        # after the control tree so repeated phase/source updates do not leak GDI.
+        $fonts=@()
+        if ($control -is [Windows.Forms.Label]) { $fonts+=,$control.Font }
+        foreach ($child in $control.Controls) { if ($child -is [Windows.Forms.Label]) { $fonts+=,$child.Font } }
+        $panel.Controls.Remove($control); $control.Dispose()
+        foreach ($font in $fonts) { $font.Dispose() }
+    }
+}
 function Show-External {
-    $value = $script:externalData
-    $last = if ($value -and $value.status -eq 'ok') { $value.lastGlobal } else { $null }
-    $forecast = if ($value -and $value.status -eq 'ok') { $value.forecast } else { $null }
-    if ($last) {
-        try {
-            $time = [DateTimeOffset]::Parse([string]$last.announcedAt).ToLocalTime()
-            $scope = if ($last.scope -eq 'paid') { (T 'paid') } elseif ($last.scope -eq 'all') { (T 'all') } else { (T 'unknownScope') }
-            $lastGlobal.Text = (T 'lastAnnouncement' @((Format-WidgetDate $time $script:language), $scope))
-            $delivery.Text = if ($last.deliveredAt) {
-                (T 'delivered' @((Format-WidgetDate ([DateTimeOffset]::Parse([string]$last.deliveredAt)) $script:language)))
-            } else { (T 'deliveryUnknown') }
-        } catch { $lastGlobal.Text = (T 'publicUnavailable'); $delivery.Text = (T 'deliveryEmpty') }
-    } else {
-        $lastGlobal.Text = (T 'publicUnavailable')
-        $delivery.Text = (T 'deliveryEmpty')
+    $view=Get-WidgetAnnouncementView $script:externalData $script:language ([DateTimeOffset]::UtcNow)
+    $key=$view | ConvertTo-Json -Depth 8 -Compress
+    if ($key -cne $script:announcementRenderKey) {
+        Clear-PanelControls $announcementPanel; Clear-PanelControls $historyRowsPanel
+        $script:announcementRows=@(); $script:historyRows=@()
+        $script:announcementEmpty=$null; $script:announcementStale=$null; $script:historyEmpty=$null
+        foreach ($row in $view.active) { $panel=New-AnnouncementControl $row; [void]$announcementPanel.Controls.Add($panel); $script:announcementRows+=,$panel }
+        if (-not $view.active.Count) {
+            $script:announcementEmpty=New-Label $view.emptyText 0 0 346 24 9.5
+            [void]$announcementPanel.Controls.Add($script:announcementEmpty)
+        }
+        if ($view.staleText) {
+            $pendingText=$view.staleText+' · '+$view.sourceUpdateText
+            $script:announcementStale=New-Label $pendingText 0 0 346 24 9
+            [void]$announcementPanel.Controls.Add($script:announcementStale)
+        }
+        foreach ($row in $view.history) { $panel=New-AnnouncementControl $row; [void]$historyRowsPanel.Controls.Add($panel); $script:historyRows+=,$panel }
+        if (-not $view.history.Count) {
+            $script:historyEmpty=New-Label (T 'historyEmpty') 0 0 346 24 9.5
+            [void]$historyRowsPanel.Controls.Add($script:historyEmpty)
+        }
+        Set-ControlTheme $announcementPanel; Set-ControlTheme $historyRowsPanel
+        $script:announcementRenderKey=$key
     }
-    if ($forecast) {
-        $odds.Text = (T 'probability' @($forecast.next24h, $forecast.next48h, $forecast.next7d))
-        Set-AttributionLinks (T 'attribution')
-    } else {
-        $odds.Text = (T 'oddsUnknown')
-        Set-AttributionLinks (T 'publicSource')
+    $historyButton.Text=$(if ($script:historyExpanded) {'⌄ '} else {'› '})+(T 'announcementHistory')
+    $historyButton.AccessibleName=T $(if ($script:historyExpanded) {'collapseHistory'} else {'expandHistory'})
+    $externalTitle.Text=T 'oddsTitle'; $estimateNote.Text=T 'oddsNote'
+    $forecastView=Get-WidgetForecastView $script:externalData $script:language ([DateTimeOffset]::UtcNow)
+    if ($forecastView.pendingText -and -not $view.staleText) {$estimateNote.Text+=' '+$forecastView.pendingText}
+    $fields=@('next24h','next48h','next7d'); $captionKeys=@('odds24','odds48','odds7d')
+    for ($i=0; $i -lt 3; $i++) {
+        $number=$forecastView.values[$i]
+        $script:oddsValues[$i].Text=if ($null -ne $number -and [double]$number -ge 0 -and [double]$number -le 100) { [string]$number+'%' } else {'—'}
+        $script:oddsCaptions[$i].Text=T $captionKeys[$i]
+        $tooltip.SetToolTip($script:oddsValues[$i],(T 'tipOdds'))
     }
+    Set-AttributionLinks (T 'sourceLinks')
+    $cadence.Text=T 'refreshCadence'
+    Update-ResponsiveLayout
 }
 
 function Set-AttributionLinks([string]$text) {
@@ -530,7 +645,8 @@ function Save-WidgetLanguage([string]$setting) {
 }
 function Set-Language {
     $script:language = Resolve-WidgetLanguage $script:languageSetting
-    $form.Text = T 'app'; $title.Text = T 'app'; $compactButton.Text = T 'compact'; $refresh.Text = T 'refresh'; $fiveTitle.Text = T 'fiveHour'; $externalTitle.Text = T 'external'
+    $form.Text = T 'app'; $title.Text = T 'app'; $fiveTitle.Text = T 'fiveHour'
+    $refresh.AccessibleName=T 'tipRefresh'; $compactButton.AccessibleName=T 'tipCompact'; $close.AccessibleName=T 'tipHide'
     $showItem.Text = T 'show'; $modeItem.Text = T 'mode'; $hideItem.Text = T 'hide'; $refreshItem.Text = T 'refreshNow'; $topItem.Text = T 'onTop'; $exitItem.Text = T 'quit'
     $languageMenu.Text = T 'language'; $autoLanguageItem.Text = T 'languageAuto'; $englishLanguageItem.Text = T 'languageEn'; $chineseLanguageItem.Text = T 'languageZh'
     foreach ($item in @($autoLanguageItem,$englishLanguageItem,$chineseLanguageItem)) { $item.Checked = $item.Tag -eq $script:languageSetting }
@@ -570,10 +686,12 @@ function Start-ExternalRequest {
     if ($script:externalTask -and -not $script:externalTask.IsCompleted) { return }
     try {
         $script:externalTask = $script:client.GetAsync("$script:baseUrl/api/external")
-        $script:nextExternalPoll = [DateTime]::UtcNow.AddMinutes(10)
+        $script:nextExternalPoll = [DateTime]::UtcNow.AddSeconds(60)
     } catch {
         $script:externalTask = $null
-        $script:externalData = $null
+        $script:externalData = Merge-WidgetExternalData $script:externalData $null $true
+        Save-PublicSnapshot
+        $script:nextExternalPoll = [DateTime]::UtcNow.AddSeconds(60)
         Show-External
     }
 }
@@ -590,7 +708,7 @@ function Start-Request([bool]$manual) {
         }
         $script:nextPoll = [DateTime]::UtcNow.AddSeconds(60)
         Start-SettingsRequest
-        $status.Text = (T 'refreshing')
+        $status.Text = if ($script:data -and $null -ne $script:data.updatedAt) { Format-WidgetRelativeUpdate $script:data.updatedAt $script:language } else { T 'refreshing' }
     } catch {
         $script:requestTask = $null
         $script:data = $null
@@ -641,16 +759,14 @@ function Set-Tray-QuotaIcon {
     }
 }
 
+function Save-PublicSnapshot {
+    try { Write-WidgetJson $script:externalCachePath $script:externalData } catch { }
+}
 function Set-ModeVisual([bool]$compact) {
-    foreach ($control in $script:detailControls) { $control.Visible = -not $compact }
-    if (-not $compact -and $script:layoutPlus -ne $true) {
-        foreach ($control in @($fiveDivider, $fiveTitle, $fiveValue, $fiveReset)) { $control.Visible = $false }
-    }
-    foreach ($zone in $script:resizeEdges.Values) { $zone.Visible = $true }
-    $modeTip = if ($compact) { (T 'tipExpand') } else { (T 'tipDrag') }
-    $tooltip.SetToolTip($ring, $modeTip)
+    foreach ($control in $script:detailControls) { $control.Visible=-not $compact }
+    foreach ($zone in $script:resizeEdges.Values) { $zone.Visible=$true }
+    $tooltip.SetToolTip($ring,$(if ($compact) {T 'tipExpand'} else {T 'tipDrag'}))
     Update-ResponsiveLayout
-    Update-DetailFonts
 }
 
 function Start-ModeTransition([string]$nextMode) {
@@ -666,15 +782,15 @@ function Start-ModeTransition([string]$nextMode) {
     $y = [Math]::Max($screen.Top, [Math]::Min($y, $screen.Bottom - $size.Height))
     $script:animationFrom = $form.Bounds
     $script:animationTo = [System.Drawing.Rectangle]::new([int]$x, [int]$y, $size.Width, $size.Height)
+    $ringOrigin=$form.PointToClient($ring.Parent.PointToScreen($ring.Location))
+    $ring.Parent=$form; $ring.Location=$ringOrigin; $ring.BringToFront()
     $script:ringFrom = $ring.Bounds
     if ($compact) {
         $targetRingSize = [Math]::Max(38, [Math]::Min($size.Width - 10, $size.Height - 20))
         $script:ringTo = [System.Drawing.Rectangle]::new([int](($size.Width - $targetRingSize) / 2), [int](($size.Height - $targetRingSize) / 2), [int]$targetRingSize, [int]$targetRingSize)
     } else {
-        $offset = if ($script:layoutPlus) { 62 } else { 0 }
-        $targetScale = [Math]::Max(1, [Math]::Min(1.3, [Math]::Min(($size.Width / 404.0), ($size.Height / [double](390 + $offset)))))
-        $targetVertical = $size.Height / [double](390 + $offset)
-        $script:ringTo = [System.Drawing.Rectangle]::new([int][Math]::Round(20 * $targetScale), [int][Math]::Round(58 * $targetVertical), [int][Math]::Round(110 * $targetScale), [int][Math]::Round(110 * $targetScale))
+        $targetHeader=Get-WidgetHeaderLayout $size.Width ([Windows.Forms.TextRenderer]::MeasureText($title.Text,$title.Font).Width+6) ([Windows.Forms.TextRenderer]::MeasureText($status.Text,$status.Font).Width+6)
+        $script:ringTo=[Drawing.Rectangle]::new(20,$targetHeader.height+8,110,110)
     }
     $script:targetMode = $nextMode
     $script:animationStart = [DateTime]::UtcNow
@@ -717,6 +833,7 @@ $script:animationTimer.Add_Tick({
 $refresh.Add_Click({ Start-Request $true })
 $compactButton.Add_Click({ Start-ModeTransition 'Compact' })
 $close.Add_Click({ $form.Hide() })
+$historyButton.Add_Click({ $script:historyExpanded=-not $script:historyExpanded; Show-External })
 $attribution.Add_LinkClicked({
     param($sender, $e)
     $url = [string]$e.Link.LinkData
@@ -731,8 +848,7 @@ $drag = {
         [void][WidgetDrag]::SendMessage($form.Handle, 0xA1, 2, [IntPtr]::Zero)
     }
 }
-foreach ($control in @($form, $title, $status, $ring, $caption, $countdown, $reset, $divider, $updated, $cards,
-    $fiveDivider, $fiveTitle, $fiveValue, $fiveReset, $externalDivider, $externalTitle, $lastGlobal, $delivery, $odds)) {
+foreach ($control in @($form,$title,$status,$ring,$caption,$countdown,$reset,$updated,$heroPanel,$fiveTitle,$fiveValue,$fiveReset)) {
     $control.Add_MouseDown($drag)
 }
 $compactDown = {
@@ -958,10 +1074,12 @@ $timer.Add_Tick({
             $response = $script:externalTask.GetAwaiter().GetResult()
             try {
                 $response.EnsureSuccessStatusCode() | Out-Null
-                $script:externalData = ($response.Content.ReadAsStringAsync().GetAwaiter().GetResult() | ConvertFrom-Json)
+                $incoming=($response.Content.ReadAsStringAsync().GetAwaiter().GetResult() | ConvertFrom-Json)
+                $script:externalData=Merge-WidgetExternalData $script:externalData $incoming $false
             } finally { $response.Dispose() }
-        } catch { $script:externalData = $null }
+        } catch { $script:externalData=Merge-WidgetExternalData $script:externalData $null $true }
         $script:externalTask = $null
+        Save-PublicSnapshot
         Show-External
     }
     $now = [DateTime]::UtcNow
@@ -970,7 +1088,7 @@ $timer.Add_Tick({
     }
     if (-not $script:requestTask -and $now -ge $script:nextPoll) { Start-Request $false }
     if (-not $script:externalTask -and $now -ge $script:nextExternalPoll) { Start-ExternalRequest }
-    if (($now - $script:lastRender).TotalSeconds -ge 30) { Show-Quota; $script:lastRender = $now }
+    if (($now - $script:lastRender).TotalSeconds -ge 30) { Show-Quota; Show-External; $script:lastRender = $now }
     if (($now - $script:lastThemeCheck).TotalMinutes -ge 1) { Set-Theme; $script:lastThemeCheck = $now }
 })
 

@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 import Darwin
 
 let nativeProcessGuardVersion = "CodexQuotaProcessGuard/1"
@@ -109,10 +110,13 @@ struct NativeLocalizer {
         case "brand": pair = ("Codex Quota", "Codex 周额度")
         case "reading": pair = ("Reading…", "正在读取")
         case "updated": pair = ("Updated", "已更新")
+        case "updated_just_now": pair = ("Updated just now", "刚刚更新")
+        case "updated_minutes": pair = ("Updated {value} min ago", "{value} 分钟前更新")
         case "unavailable": pair = ("Unavailable", "暂不可用")
         case "sign_in": pair = ("Sign in", "请登录")
         case "install_cli": pair = ("Install CLI", "请安装 CLI")
         case "compact": pair = ("Compact", "极简")
+        case "return_compact": pair = ("Return to Compact", "返回极简模式")
         case "refresh": pair = ("Refresh", "刷新")
         case "hide": pair = ("Hide Widget", "隐藏悬浮窗")
         case "show": pair = ("Show Widget", "显示悬浮窗")
@@ -141,13 +145,84 @@ struct NativeLocalizer {
     }
 }
 
+/// Keep the fixed header separate from the scrolling detail content at every supported width.
+struct NativeDetailHeaderLayout {
+    let isStacked: Bool
+    let header: CGRect
+    let content: CGRect
+    let brand: CGRect
+    let status: CGRect
+    let refresh: CGRect
+    let compact: CGRect
+    let hide: CGRect
+
+    init(size: CGSize, brandWidth: CGFloat, statusWidth: CGFloat) {
+        let width = size.width, height = size.height
+        let inset: CGFloat = width < 520 ? 16 : 30
+        let target: CGFloat = 32, gap: CGFloat = 4, rightInset: CGFloat = 16
+        let toolbarX = width - rightInset - 3 * target - 2 * gap
+        let textWidth = max(0, toolbarX - 12 - inset)
+        isStacked = brandWidth + 18 + statusWidth > textWidth
+        let headerHeight: CGFloat = isStacked ? 84 : 60
+        header = CGRect(x: 0, y: max(0, height - headerHeight), width: width, height: min(height, headerHeight))
+        content = CGRect(x: 0, y: 0, width: width, height: max(0, height - headerHeight))
+        brand = CGRect(x: inset, y: height - 45, width: min(brandWidth, textWidth), height: 28)
+        status = isStacked
+            ? CGRect(x: inset, y: height - 72, width: max(0, width - 2 * inset), height: 20)
+            : CGRect(x: brand.maxX + 18, y: height - 42,
+                     width: max(0, toolbarX - 12 - brand.maxX - 18), height: 22)
+        refresh = CGRect(x: toolbarX, y: height - 46, width: target, height: target)
+        compact = refresh.offsetBy(dx: target + gap, dy: 0)
+        hide = compact.offsetBy(dx: target + gap, dy: 0)
+    }
+}
+
+/// Only the current, local top-level document can change the native detail size.
+struct NativeDetailMeasurement {
+    let height: CGFloat
+    let width: CGFloat
+
+    init?(object: Any, documentURL: URL?, isMainFrame: Bool, expectedURL: URL, viewWidth: CGFloat) {
+        guard isMainFrame, let documentURL,
+              documentURL.scheme == expectedURL.scheme, documentURL.host == expectedURL.host,
+              documentURL.port == expectedURL.port, documentURL.path == expectedURL.path,
+              documentURL.user == nil, documentURL.password == nil,
+              let object = object as? [String: Any],
+              let height = object["height"] as? Double, let width = object["width"] as? Double,
+              height.isFinite, height > 0, width.isFinite, width > 0,
+              viewWidth.isFinite, viewWidth > 0, abs(width - Double(viewWidth)) <= 2 else { return nil }
+        self.height = CGFloat(min(20_000, ceil(height)))
+        self.width = CGFloat(width)
+    }
+}
+
+/// Resize downward from the saved top edge, moving that edge only when the screen requires it.
+func nativeDetailFittedFrame(_ frame: CGRect, contentHeight: CGFloat, headerHeight: CGFloat,
+                             in screen: CGRect, isCompact: Bool = false, automatic: Bool = true) -> CGRect? {
+    guard contentHeight.isFinite, contentHeight > 0, headerHeight.isFinite, headerHeight >= 0,
+          [frame.minX, frame.minY, frame.width, frame.height,
+           screen.minX, screen.minY, screen.width, screen.height].allSatisfy({ $0.isFinite }),
+          frame.width > 0, frame.height > 0, screen.width > 0, screen.height > 0 else { return nil }
+    if isCompact || !automatic { return frame }
+    let width = min(frame.width, screen.width)
+    let height = min(max(430, ceil(contentHeight + headerHeight + 12)), screen.height)
+    let x = min(max(frame.minX, screen.minX), screen.maxX - width)
+    let y = min(max(frame.maxY - height, screen.minY), screen.maxY - height)
+    return CGRect(x: x, y: y, width: width, height: height)
+}
+
 struct NativeUsage {
     let percent: Int?
     let errorCode: String?
     let loading: Bool
+    let updatedAt: Date?
 
     init(object: [String: Any]?, now: Date = Date()) {
         loading = object?["status"] as? String == "loading"
+        if let updated = object?["updatedAt"] as? Double,
+           updated.isFinite, updated <= now.timeIntervalSince1970 * 1000 + 60_000 {
+            updatedAt = Date(timeIntervalSince1970: updated / 1000)
+        } else { updatedAt = nil }
         let allowed = ["cli_missing", "signed_out", "timeout", "network", "unsupported", "service_unavailable", "query_failed"]
         let suppliedCode = object?["errorCode"] as? String
         errorCode = suppliedCode.flatMap { allowed.contains($0) ? $0 : "query_failed" }
@@ -166,8 +241,11 @@ struct NativeUsage {
         percent = max(0, min(100, remaining))
     }
 
-    func status(_ localizer: NativeLocalizer) -> String {
-        if percent != nil { return localizer.text("updated") }
+    func status(_ localizer: NativeLocalizer, now: Date = Date()) -> String {
+        if percent != nil, let updatedAt {
+            let minutes = max(0, Int(now.timeIntervalSince(updatedAt) / 60))
+            return localizer.text(minutes == 0 ? "updated_just_now" : "updated_minutes", value: minutes)
+        }
         if loading { return localizer.text("reading") }
         if errorCode == "signed_out" { return localizer.text("sign_in") }
         if errorCode == "cli_missing" { return localizer.text("install_cli") }

@@ -27,3 +27,22 @@ test('missing CLI and hung CLI have distinct safe error categories',async()=>{
   await assert.rejects(queryAppServer({command:'/definitely/not/a/codex-cli',timeoutMs:1000}),{code:'cli_missing'});
   await assert.rejects(queryAppServer({command:process.execPath,args:['-e','setInterval(()=>{},1000)'],timeoutMs:50}),{code:'timeout'});
 });
+
+test('external API restores confirmed announcements after a service restart and source failure',async()=>{
+  const directory=await mkdtemp(join(tmpdir(),'quota-announcement-http-'));
+  const settingsFile=join(directory,'settings.json');
+  const at=new Date(Date.now()-60000).toISOString();
+  const item={id:'fixture',kind:'banked',sourceUrl:'https://x.com/thsottiaux/status/fixture',announcedAt:at,scheduledDate:'2026-10-01'};
+  let running;
+  try {
+    running=await startMonitor({port:0,settingsFile,query:async()=>({}),externalQuery:async()=>({status:'ok',announcements:{status:'ok',items:[item],history:[],sourceUpdatedAt:at}})});
+    let base=`http://127.0.0.1:${running.server.address().port}`;
+    assert.equal((await(await fetch(base+'/api/external')).json()).announcements.items.length,1);
+    await running.stop();running=null;
+    running=await startMonitor({port:0,settingsFile,query:async()=>({}),externalQuery:async()=>{throw Error('offline');}});
+    base=`http://127.0.0.1:${running.server.address().port}`;
+    const restored=(await(await fetch(base+'/api/external')).json()).announcements;
+    assert.equal(restored.items.length,1);assert.equal(restored.stale,true);assert.equal(restored.status,'unavailable');
+    assert.equal(restored.items[0].sourceUrl,item.sourceUrl);
+  }finally { if(running)await running.stop();await rm(directory,{recursive:true,force:true}); }
+});

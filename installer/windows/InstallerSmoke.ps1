@@ -271,28 +271,47 @@ child.on('exit',(code)=>process.exit(code??1));
     $uiFixture = @'
 const http=require('node:http'),fs=require('node:fs'),path=require('node:path');
 const settingsFile=path.join(process.env.LOCALAPPDATA,'CodexWeeklyMonitor','settings.json');
+const refreshFile=path.join(__dirname,'ui-refreshes.txt');
+const fixtureNow=Date.now(),sourceUpdatedAt=fixtureNow-180000;
+const completed={id:'fixture-announcement-regular-id',kind:'regular',announcedAt:new Date(fixtureNow-86400000).toISOString(),scheduledAt:new Date(fixtureNow-3600000).toISOString(),scheduledDate:null,deliveredAt:new Date(fixtureNow-600000).toISOString(),scope:'all',scopeLabel:null,sourceUrl:'https://example.org/regular-announcement',deliverySourceUrl:'https://example.org/regular-delivery',summary:'Confirmed public reset delivery record',summaryZh:'已确认全局临时重置送达记录'};
 http.createServer(async(req,res)=>{
   res.setHeader('Content-Type','application/json');
   if(req.url==='/api/settings') {
     if(req.method==='POST'){let text='';for await(const chunk of req)text+=chunk;fs.writeFileSync(settingsFile,text);res.end(text);}
     else res.end(fs.readFileSync(settingsFile,'utf8'));
-  } else if(req.url==='/api/external')res.end(JSON.stringify({status:'unavailable',lastGlobal:null,forecast:null}));
-  else {const now=Math.floor(Date.now()/1000);res.end(JSON.stringify({status:'ok',plan:'plus',remainingPercent:39,resetsAt:now+259200,updatedAt:Date.now(),resetCards:2,resetDetails:[{title:'Sample grant / 示例发放',description:'Fabricated test data / 虚构测试数据',grantedAt:now-86400,expiresAt:now+86400}],fiveHour:{remainingPercent:75,resetsAt:now+3600}}));}
+  } else if(req.url==='/api/external') {
+    const now=fixtureNow;
+    res.end(JSON.stringify({status:'ok',lastGlobal:null,forecast:{next24h:12,next48h:25,next7d:61,sourceUpdatedAt:new Date(now).toISOString()},announcements:{status:'ok',stale:false,sourceUpdatedAt:new Date(now).toISOString(),history:[completed],items:[
+      {id:'fixture-announcement-banked-id',kind:'banked',announcedAt:new Date(now-86400000).toISOString(),scheduledAt:new Date(now+86400000).toISOString(),scheduledDate:null,deliveredAt:null,scope:'paid',scopeLabel:null,sourceUrl:'https://example.org/banked-announcement',deliverySourceUrl:null,summary:'Confirmed credit grant for paid accounts',summaryZh:'已确认向付费账号赠送重置卡'},
+      completed
+    ]}}));
+  }
+  else {if(req.url==='/api/refresh'&&req.method==='POST')fs.appendFileSync(refreshFile,'1\n');const now=Math.floor(fixtureNow/1000);res.end(JSON.stringify({status:'ok',plan:'plus',remainingPercent:39,resetsAt:now+259200,updatedAt:sourceUpdatedAt,resetCards:2,resetDetails:[{title:'Sample grant / 示例发放',description:'Fabricated test data / 虚构测试数据',grantedAt:now-86400,expiresAt:now+86400}],fiveHour:{remainingPercent:75,resetsAt:now+3600}}));}
 }).listen(39225,'127.0.0.1');
 '@
     [IO.File]::WriteAllText($uiFixturePath, $uiFixture, [Text.UTF8Encoding]::new($false))
     $uiService = Start-Process -FilePath (Join-Path $installDir 'runtime/node.exe') -ArgumentList ('"'+$uiFixturePath+'"') -PassThru -WindowStyle Hidden
     $testProcesses.Add($uiService)
     Wait-Until { (Invoke-RestMethod 'http://127.0.0.1:39225/api/usage' -TimeoutSec 1).status -eq 'ok' } 'UI fixture failed.'
+    $uiExpected=Invoke-RestMethod 'http://127.0.0.1:39225/api/external' -TimeoutSec 3
+    $uiExpectedQuota=Invoke-RestMethod 'http://127.0.0.1:39225/api/usage' -TimeoutSec 3
     Add-Type -AssemblyName System.Drawing
+    Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName UIAutomationClient
     Add-Type -AssemblyName UIAutomationTypes
     Add-Type -TypeDefinition @'
-using System; using System.Runtime.InteropServices; using System.Text;
+using System; using System.Runtime.InteropServices; using System.Text; using System.Collections.Generic;
 public static class QuotaSmokeWindows {
     private delegate bool EnumProc(IntPtr hWnd, IntPtr param);
     [DllImport("user32.dll")] private static extern bool EnumWindows(EnumProc callback, IntPtr param);
     [DllImport("user32.dll")] private static extern bool EnumChildWindows(IntPtr parent, EnumProc callback, IntPtr param);
+    [StructLayout(LayoutKind.Sequential)] public struct WindowBounds {
+        public int Left, Top, Right, Bottom;
+        public int Width { get { return Right-Left; } }
+        public int Height { get { return Bottom-Top; } }
+    }
+    public sealed class HeaderButton { public IntPtr Handle; public WindowBounds Bounds; }
+    [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hWnd, out WindowBounds bounds);
     [DllImport("user32.dll")] private static extern bool IsChild(IntPtr parent, IntPtr child);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetClassName(IntPtr hWnd, StringBuilder text, int count);
     [DllImport("user32.dll", EntryPoint="GetWindowLongW", ExactSpelling=true)] private static extern int GetWindowStyle(IntPtr hWnd, int index);
@@ -334,6 +353,36 @@ public static class QuotaSmokeWindows {
         }, IntPtr.Zero);
         return result;
     }
+    public static WindowBounds OwnedBounds(IntPtr window, int pid) {
+        WindowBounds bounds;
+        if (!IsOwned(window,pid) || !GetWindowRect(window,out bounds)) throw new InvalidOperationException("Unowned fixture window");
+        return bounds;
+    }
+    public static HeaderButton[] Toolbar(IntPtr parent, int pid) {
+        var root=OwnedBounds(parent,pid);
+        var found=new List<HeaderButton>();
+        EnumChildWindows(parent,delegate(IntPtr child,IntPtr unused) {
+            if (!IsChild(parent,child) || !IsOwned(child,pid)) return true;
+            var name=new StringBuilder(256); GetClassName(child,name,name.Capacity);
+            WindowBounds bounds;
+            if (IsWindowVisible(child) && name.ToString().StartsWith("WindowsForms10.BUTTON.",StringComparison.OrdinalIgnoreCase) && GetWindowRect(child,out bounds)
+                && bounds.Top >= root.Top && bounds.Bottom <= root.Top+54) found.Add(new HeaderButton {Handle=child,Bounds=bounds});
+            return true;
+        },IntPtr.Zero);
+        found.Sort(delegate(HeaderButton a,HeaderButton b) {return a.Bounds.Left.CompareTo(b.Bounds.Left);});
+        return found.ToArray();
+    }
+    public static IntPtr ScrollBody(IntPtr parent, int pid) {
+        if (!IsOwned(parent,pid)) return IntPtr.Zero;
+        IntPtr result=IntPtr.Zero;
+        EnumChildWindows(parent,delegate(IntPtr child,IntPtr unused) {
+            if (!IsChild(parent,child) || !IsOwned(child,pid)) return true;
+            var name=new StringBuilder(256); GetClassName(child,name,name.Capacity);
+            if (name.ToString().StartsWith("WindowsForms10.Window.",StringComparison.OrdinalIgnoreCase)
+                && (unchecked((uint)GetWindowStyle(child,-16)) & 0x00200000) != 0) {result=child;return false;}
+            return true;
+        },IntPtr.Zero); return result;
+    }
     public static IntPtr Find(int pid, string title) {
         IntPtr result=IntPtr.Zero;
         EnumWindows(delegate(IntPtr window, IntPtr unused) {
@@ -347,6 +396,8 @@ public static class QuotaSmokeWindows {
 }
 '@
     foreach ($language in @('en','zh-CN')) {
+        # Screenshots must contain only the completely fabricated UI response.
+        Remove-Item -LiteralPath (Join-Path $dataDir 'native-public-cache.json') -ErrorAction SilentlyContinue
         [void](Invoke-RestMethod 'http://127.0.0.1:39225/api/settings' -Method Post -ContentType 'application/json' -Body ('{"language":"'+$language+'"}'))
         $ui = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe') -ArgumentList @('-NoProfile','-Sta','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',('"'+(Join-Path $installDir 'Floating.ps1')+'"'),'-BaseUrl','http://127.0.0.1:39225') -PassThru -WindowStyle Hidden
         $testProcesses.Add($ui)
@@ -355,19 +406,73 @@ public static class QuotaSmokeWindows {
         $handle = [QuotaSmokeWindows]::Find($ui.Id,$title)
         [void][QuotaSmokeWindows]::SetForegroundWindow($handle)
         $element = [Windows.Automation.AutomationElement]::FromHandle($handle)
-        $creditText = Get-WidgetText 'cards' $language @(2)
+        $creditText = Get-WidgetText 'creditDetailsRow' $language @((Get-WidgetText 'cards' $language @(2)))
         $creditCondition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty,$creditText)
         Wait-Until { $null -ne $element.FindFirst([Windows.Automation.TreeScope]::Descendants,$creditCondition) } "Native quota failed to render: $language"
         $labels = $element.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)
         $names = @($labels | ForEach-Object { $_.Current.Name }) -join "`n"
         Assert-True ($names.Contains((Get-WidgetText 'fiveHour' $language))) "5-hour title untranslated: $language"
-        Assert-True (-not $names.Contains('fixture-id-must-never-be-shown')) 'Native UI leaked an ID.'
+        Assert-True (-not $names.Contains('fixture-id-must-never-be-shown') -and -not $names.Contains('fixture-announcement-banked-id') -and -not $names.Contains('fixture-announcement-regular-id')) 'Native UI leaked an ID.'
+        Wait-Until {
+            $script:layoutNames=@($element.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition) | ForEach-Object {$_.Current.Name}) -join "`n"
+            $script:layoutNames.Contains((Get-WidgetText 'confirmedBanked' $language)) -and $script:layoutNames.Contains((Get-WidgetText 'confirmedRegular' $language))
+        } "Confirmed announcement rows did not render: $language"
         Save-UiEvidence $element $language 'native'
-        # Label click opens the actual scrollable credit details window.
+        Assert-True ($script:layoutNames -match $(if ($language -eq 'en') {'Updated \d+ minutes ago'} else {'\d+分钟前更新'})) 'Header used paint time instead of quota source age.'
+        $completedExpected=@($uiExpected.announcements.items | Where-Object {$_.kind -eq 'regular'})[0]
+        $plannedText=Get-WidgetText 'originalScheduled' $language @((Format-WidgetDate ([DateTimeOffset]$completedExpected.scheduledAt) $language))
+        $completedText=Get-WidgetText 'deliveredOn' $language @((Format-WidgetDate ([DateTimeOffset]$completedExpected.deliveredAt) $language))
+        Assert-True ($script:layoutNames.Contains($plannedText) -and $script:layoutNames.Contains($completedText) -and $script:layoutNames.Contains((Get-WidgetText 'all' $language))) 'Completed announcement omitted original plan, completion timestamp or scope.'
+        $displayedNames=@($element.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition) | ForEach-Object {$_.Current.Name})
+        Assert-True (@($displayedNames | Where-Object {$_ -ceq (Get-WidgetText 'confirmedRegular' $language)}).Count -eq 1) 'Service active/history duplicate hid or duplicated the completed announcement.'
+        Assert-True ($script:layoutNames.Contains((Get-WidgetText 'announcementSource' $language)) -and $script:layoutNames.Contains((Get-WidgetText 'deliverySource' $language))) 'Announcement or delivery record link missing.'
+        $fiveExpected=Get-WidgetFiveHourView $uiExpectedQuota $language
+        Assert-True ($script:layoutNames.Contains($fiveExpected.percentText) -and $script:layoutNames.Contains($fiveExpected.resetText)) 'Plus five-hour percentage or reset time missing.'
+        Assert-True ($script:layoutNames.Contains((Get-WidgetText 'sourceLinks' $language)) -and $script:layoutNames.Contains((Get-WidgetText 'refreshCadence' $language))) 'Source links or separate quota/public cadence missing.'
+        $buttons=@([QuotaSmokeWindows]::Toolbar($handle,$ui.Id))
+        Assert-True ($buttons.Count -eq 3) 'Fixed header did not contain exactly three icon buttons.'
+        foreach ($button in $buttons) { Assert-True ($button.Bounds.Width -eq 32 -and $button.Bounds.Height -eq 32) 'Toolbar hit targets were inconsistent.' }
+        $beforeRefresh=if (Test-Path (Join-Path $fixtureRoot 'ui-refreshes.txt')) {[IO.File]::ReadAllText((Join-Path $fixtureRoot 'ui-refreshes.txt')).Length} else {0}
+        [void][QuotaSmokeWindows]::SendMessage($buttons[0].Handle,0xF5,[IntPtr]::Zero,[IntPtr]::Zero)
+        Wait-Until { [IO.File]::ReadAllText((Join-Path $fixtureRoot 'ui-refreshes.txt')).Length -gt $beforeRefresh } 'First toolbar icon did not refresh quota.'
+        $scrollBody=[QuotaSmokeWindows]::ScrollBody($handle,$ui.Id)
+        Assert-True ($scrollBody -ne [IntPtr]::Zero) 'Two announcements and Plus quota did not have a scrollable body.'
+        $oddsControls=@()
+        foreach ($percent in @('12%','25%','61%')) {
+            $condition=[Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty,$percent)
+            $oddsControl=$element.FindFirst([Windows.Automation.TreeScope]::Descendants,$condition)
+            Assert-True ($null -ne $oddsControl) 'Permanent probability column was missing.'
+            $oddsControls+=,[QuotaSmokeWindows]::OwnedBounds([IntPtr]$oddsControl.Current.NativeWindowHandle,$ui.Id)
+        }
+        Assert-True ($oddsControls[0].Top -eq $oddsControls[1].Top -and $oddsControls[1].Top -eq $oddsControls[2].Top -and $oddsControls[0].Right -le $oddsControls[1].Left -and $oddsControls[1].Right -le $oddsControls[2].Left) 'Probability columns overlapped or stacked.'
+        $footerBounds=@()
+        foreach ($text in @((Get-WidgetText 'sourceLinks' $language),(Get-WidgetText 'refreshCadence' $language))) {
+            $condition=[Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty,$text)
+            $control=$element.FindFirst([Windows.Automation.TreeScope]::Descendants,$condition)
+            Assert-True ($null -ne $control) 'Readable footer line was missing.'
+            $footerBounds+=,[QuotaSmokeWindows]::OwnedBounds([IntPtr]$control.Current.NativeWindowHandle,$ui.Id)
+        }
+        Assert-True ($footerBounds[0].Bottom -le $footerBounds[1].Top) 'Source links and refresh cadence overlapped instead of using separate lines.'
+        $noteCondition=[Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty,(Get-WidgetText 'oddsNote' $language))
+        $noteElement=$element.FindFirst([Windows.Automation.TreeScope]::Descendants,$noteCondition)
+        Assert-True ($null -ne $noteElement) 'Historical estimate explanation missing.'
+        $noteBounds=[QuotaSmokeWindows]::OwnedBounds([IntPtr]$noteElement.Current.NativeWindowHandle,$ui.Id)
+        Assert-True ($oddsControls[0].Bottom -le $noteBounds.Top -and $noteBounds.Bottom -le $footerBounds[0].Top) 'Estimate explanation was not below probability and before the source footer.'
+        [void][QuotaSmokeWindows]::SendMessage($scrollBody,0x115,[IntPtr]7,[IntPtr]::Zero)
+        Save-UiEvidence $element $language 'native-content-bottom'
+        [void][QuotaSmokeWindows]::SendMessage($scrollBody,0x115,[IntPtr]6,[IntPtr]::Zero)
+        # Click the disclosure portion of the merged credit row.
         $creditElement = $element.FindFirst([Windows.Automation.TreeScope]::Descendants,$creditCondition)
         $creditHandle = [IntPtr]$creditElement.Current.NativeWindowHandle
-        [void][QuotaSmokeWindows]::SendMessage($creditHandle,0x201,[IntPtr]1,[IntPtr]0x00050005)
-        [void][QuotaSmokeWindows]::SendMessage($creditHandle,0x202,[IntPtr]0,[IntPtr]0x00050005)
+        $fontHandle=[QuotaSmokeWindows]::SendMessage($creditHandle,0x31,[IntPtr]::Zero,[IntPtr]::Zero)
+        $linkFont=if ($fontHandle -ne [IntPtr]::Zero) {[Drawing.Font]::FromHfont($fontHandle)} else {[Drawing.Font]::new('Segoe UI',10.5)}
+        try {
+            $prefix=$creditText.Substring(0,$creditText.IndexOf(' · ')+3)
+            $linkX=[Windows.Forms.TextRenderer]::MeasureText($prefix,$linkFont).Width+4
+        } finally {$linkFont.Dispose()}
+        $linkPoint=[IntPtr]((10 -shl 16) -bor $linkX)
+        [void][QuotaSmokeWindows]::SendMessage($creditHandle,0x201,[IntPtr]1,$linkPoint)
+        [void][QuotaSmokeWindows]::SendMessage($creditHandle,0x202,[IntPtr]0,$linkPoint)
         $detailsTitle = Get-WidgetText 'detailsTitle' $language
         Wait-Until { [QuotaSmokeWindows]::Find($ui.Id,$detailsTitle) -ne [IntPtr]::Zero } "Reset details window missing: $language"
         $detailsHandle = [QuotaSmokeWindows]::Find($ui.Id,$detailsTitle)
@@ -409,6 +514,20 @@ public static class QuotaSmokeWindows {
         Assert-True ($detailValue.Contains($expectedGrant) -and $detailValue.Contains($expectedExpiry)) 'Grant or expiry fields were not localized.'
         Assert-True (-not $detailValue.Contains('fixture-id-must-never-be-shown')) 'Reset details exposed an ID.'
         Save-UiEvidence $detailsElement $language 'reset-details'
+        [void][QuotaSmokeWindows]::SendMessage($detailsHandle,0x10,[IntPtr]::Zero,[IntPtr]::Zero)
+        [void][QuotaSmokeWindows]::SendMessage($buttons[1].Handle,0xF5,[IntPtr]::Zero,[IntPtr]::Zero)
+        Wait-Until { [QuotaSmokeWindows]::OwnedBounds($handle,$ui.Id).Width -le 160 } 'Dash did not return to the compact widget.'
+        Start-Sleep -Milliseconds 300 # Let the existing 260ms transition finish before clicking the compact surface.
+        [void][QuotaSmokeWindows]::SendMessage($handle,0x201,[IntPtr]1,[IntPtr]0x001A001A)
+        [void][QuotaSmokeWindows]::SendMessage($handle,0x202,[IntPtr]::Zero,[IntPtr]0x001A001A)
+        Wait-Until { [QuotaSmokeWindows]::OwnedBounds($handle,$ui.Id).Width -ge 404 -and @([QuotaSmokeWindows]::Toolbar($handle,$ui.Id)).Count -eq 3 } 'Compact click did not restore the detail window.'
+        $buttons=@([QuotaSmokeWindows]::Toolbar($handle,$ui.Id))
+        [void][QuotaSmokeWindows]::SendMessage($buttons[2].Handle,0xF5,[IntPtr]::Zero,[IntPtr]::Zero)
+        Wait-Until { [QuotaSmokeWindows]::Find($ui.Id,$title) -eq [IntPtr]::Zero } 'X did not hide the widget.'
+        Assert-True (-not $ui.HasExited) 'Hide terminated the native widget process.'
+        [IO.File]::WriteAllText((Join-Path $dataDir 'show.request'),'')
+        Wait-Until { [QuotaSmokeWindows]::Find($ui.Id,$title) -ne [IntPtr]::Zero } 'Hidden widget did not reopen.'
+        Save-UiEvidence ([Windows.Automation.AutomationElement]::FromHandle($handle)) $language 'native-restored'
         Stop-Process -Id $ui.Id -Force
         $ui.WaitForExit(10000) | Out-Null
     }
