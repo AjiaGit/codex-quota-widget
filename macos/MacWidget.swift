@@ -13,6 +13,14 @@ private enum ResizeEdge: CaseIterable {
     case topLeft, topRight, bottomLeft, bottomRight, left, right, top, bottom
 
     var cursor: NSCursor {
+        if #unavailable(macOS 15.0) {
+            switch self {
+            case .left, .right: return .resizeLeftRight
+            case .top, .bottom: return .resizeUpDown
+            default: return .crosshair
+            }
+        }
+        if #available(macOS 15.0, *) {
         let position: NSCursor.FrameResizePosition
         switch self {
         case .topLeft: position = .topLeft
@@ -25,6 +33,8 @@ private enum ResizeEdge: CaseIterable {
         case .bottom: position = .bottom
         }
         return NSCursor.frameResize(position: position, directions: .all)
+        }
+        return .arrow
     }
 
     var movesLeft: Bool { self == .left || self == .topLeft || self == .bottomLeft }
@@ -45,8 +55,7 @@ private func resizedFrame(_ frame: NSRect, from edge: ResizeEdge, delta: NSPoint
 }
 
 private func stateDirectory() -> URL {
-    FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/Application Support/CodexWeeklyMonitor", isDirectory: true)
+    nativeStateDirectory()
 }
 
 private func savedFrame(_ key: String, fallback: NSRect) -> NSRect {
@@ -292,6 +301,12 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
     private var hideButton: NSButton!
     private var statusItem: NSStatusItem!
     private var visibilityMenuItem: NSMenuItem!
+    private var languageMenu: NSMenu!
+    private var menuItems: [String: NSMenuItem] = [:]
+    private let client = NativeServiceClient()
+    private var localizer = NativeLocalizer(setting: NativeLanguage.saved(at: nativeStateDirectory()))
+    private var usage = NativeUsage(object: ["status": "loading"])
+    private var didPresentSetupNotice = false
     private var isCompact = UserDefaults.standard.bool(forKey: "compact")
     private var transitioning = false
     private var pollTimer: Timer?
@@ -338,7 +353,9 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
         web.uiDelegate = self
         web.autoresizingMask = [.width, .height]
         web.underPageBackgroundColor = detailBackground
-        web.load(URLRequest(url: baseURL))
+        var embeddedURL = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)!
+        embeddedURL.queryItems = [URLQueryItem(name: "embedded", value: "1")]
+        web.load(URLRequest(url: embeddedURL.url!))
         root.addSubview(web)
 
         compact = CompactView(frame: .zero)
@@ -346,20 +363,20 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
         root.addSubview(compact)
         dragBar = DragBar(frame: .zero)
         root.addSubview(dragBar)
-        brandLabel = NSTextField(labelWithString: "Codex 周额度")
+        brandLabel = NSTextField(labelWithString: localizer.text("brand"))
         brandLabel.font = NSFont.monospacedSystemFont(ofSize: 20, weight: .bold)
         brandLabel.textColor = .white
         root.addSubview(brandLabel)
-        statusLabel = NSTextField(labelWithString: "正在读取")
+        statusLabel = NSTextField(labelWithString: localizer.text("reading"))
         statusLabel.font = NSFont.systemFont(ofSize: 17, weight: .medium)
         statusLabel.textColor = NSColor(srgbRed: 161 / 255, green: 170 / 255, blue: 182 / 255, alpha: 1)
         root.addSubview(statusLabel)
-        collapseButton = NSButton(title: "极简", target: self, action: #selector(collapse))
+        collapseButton = NSButton(title: localizer.text("compact"), target: self, action: #selector(collapse))
         collapseButton.isBordered = false
         collapseButton.font = NSFont.systemFont(ofSize: 17, weight: .semibold)
         collapseButton.contentTintColor = NSColor(srgbRed: 36 / 255, green: 211 / 255, blue: 165 / 255, alpha: 1)
         root.addSubview(collapseButton)
-        refreshButton = NSButton(title: "刷新", target: self, action: #selector(refresh))
+        refreshButton = NSButton(title: localizer.text("refresh"), target: self, action: #selector(refresh))
         refreshButton.isBordered = false
         refreshButton.font = NSFont.systemFont(ofSize: 17, weight: .medium)
         refreshButton.contentTintColor = NSColor(srgbRed: 161 / 255, green: 170 / 255, blue: 182 / 255, alpha: 1)
@@ -378,15 +395,31 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.title = "—"
-        statusItem.button?.toolTip = "Codex 本周额度"
+        statusItem.button?.toolTip = localizer.text("quota_tooltip")
         let menu = NSMenu()
-        visibilityMenuItem = NSMenuItem(title: "隐藏悬浮窗", action: #selector(toggleVisibility), keyEquivalent: "")
+        visibilityMenuItem = NSMenuItem(title: localizer.text("hide"), action: #selector(toggleVisibility), keyEquivalent: "")
         menu.addItem(visibilityMenuItem)
-        menu.addItem(NSMenuItem(title: "切换极简／详细", action: #selector(toggle), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "刷新额度", action: #selector(refresh), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "在浏览器中打开详细页", action: #selector(openPage), keyEquivalent: ""))
+        for (key, action) in [("toggle", #selector(toggle)), ("refresh_quota", #selector(refresh)),
+                              ("open_page", #selector(openPage))] {
+            let item = NSMenuItem(title: localizer.text(key), action: action, keyEquivalent: "")
+            menuItems[key] = item
+            menu.addItem(item)
+        }
+        let languageItem = NSMenuItem(title: localizer.text("language"), action: nil, keyEquivalent: "")
+        menuItems["language"] = languageItem
+        languageMenu = NSMenu()
+        for language in NativeLanguage.allCases {
+            let item = NSMenuItem(title: localizer.text(language.rawValue), action: #selector(selectLanguage(_:)), keyEquivalent: "")
+            item.representedObject = language.rawValue
+            item.target = self
+            languageMenu.addItem(item)
+        }
+        languageItem.submenu = languageMenu
+        menu.addItem(languageItem)
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "退出监控工具", action: #selector(quitAll), keyEquivalent: ""))
+        let quitItem = NSMenuItem(title: localizer.text("quit"), action: #selector(quitAll), keyEquivalent: "")
+        menuItems["quit"] = quitItem
+        menu.addItem(quitItem)
         for item in menu.items { item.target = self }
         menu.delegate = self
         statusItem.menu = menu
@@ -395,10 +428,17 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
         saveFrame()
         panel.orderFrontRegardless()
         poll()
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in self?.poll() }
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in self?.poll() }
         NotificationCenter.default.addObserver(self, selector: #selector(screenConfigurationChanged),
                                                name: NSApplication.didChangeScreenParametersNotification,
                                                object: nil)
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(wokeFromSleep),
+                                                          name: NSWorkspace.didWakeNotification, object: nil)
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(settingsChanged),
+            name: NSNotification.Name("local.codex.weeklymonitor.settingsChanged"), object: nil)
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(cacheRefreshed),
+            name: NSNotification.Name("local.codex.weeklymonitor.cacheRefreshed"), object: nil)
+        updateNativeText()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -417,7 +457,7 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
         web.isHidden = isCompact
         dragBar.isHidden = isCompact
         brandLabel.isHidden = isCompact
-        statusLabel.isHidden = isCompact || w < 520
+        statusLabel.isHidden = isCompact || w < 550
         collapseButton.isHidden = isCompact
         refreshButton.isHidden = isCompact
         hideButton.isHidden = isCompact
@@ -425,11 +465,14 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
         if !isCompact {
             web.frame = NSRect(x: 0, y: 0, width: w, height: max(0, h - 60))
             dragBar.frame = NSRect(x: 0, y: h - 60, width: w, height: 60)
-            brandLabel.frame = NSRect(x: w < 520 ? 12 : 30, y: h - 43, width: w < 520 ? 136 : 190, height: 28)
-            statusLabel.frame = NSRect(x: 235, y: h - 42, width: max(0, w - 410), height: 27)
-            collapseButton.frame = NSRect(x: w - 202, y: h - 45, width: 62, height: 32)
-            refreshButton.frame = NSRect(x: w - 127, y: h - 45, width: 62, height: 32)
-            hideButton.frame = NSRect(x: w - 51, y: h - 45, width: 32, height: 32)
+            brandLabel.font = NSFont.monospacedSystemFont(ofSize: w < 520 ? 17 : 20, weight: .bold)
+            brandLabel.frame = NSRect(x: w < 520 ? 12 : 30, y: h - 43, width: w < 520 ? max(100, w - 218) : 190, height: 28)
+            statusLabel.frame = NSRect(x: 235, y: h - 42, width: max(0, w - 445), height: 27)
+            collapseButton.font = NSFont.systemFont(ofSize: 15, weight: .semibold)
+            collapseButton.frame = NSRect(x: w - 192, y: h - 45, width: 78, height: 32)
+            refreshButton.font = NSFont.systemFont(ofSize: 15, weight: .medium)
+            refreshButton.frame = NSRect(x: w - 110, y: h - 45, width: 62, height: 32)
+            hideButton.frame = NSRect(x: w - 43, y: h - 45, width: 30, height: 32)
             let corner: CGFloat = 18, strip: CGFloat = 9
             grips[.topLeft]?.frame = NSRect(x: 0, y: h - corner, width: corner, height: corner)
             grips[.topRight]?.frame = NSRect(x: w - corner, y: h - corner, width: corner, height: corner)
@@ -449,6 +492,7 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         panel.orderFrontRegardless()
+        refresh()
         return true
     }
     private func saveFrame() {
@@ -487,8 +531,61 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
-        visibilityMenuItem.title = panel.isVisible ? "隐藏悬浮窗" : "显示悬浮窗"
+        localizer.setting = NativeLanguage.saved(at: stateDirectory())
+        updateNativeText()
     }
+
+    private func updateNativeText() {
+        brandLabel.stringValue = localizer.text("brand")
+        panel.title = localizer.text("brand")
+        statusLabel.stringValue = usage.status(localizer)
+        collapseButton.title = localizer.text("compact")
+        collapseButton.toolTip = localizer.text("compact")
+        refreshButton.title = localizer.text("refresh")
+        refreshButton.toolTip = localizer.text("refresh_quota")
+        hideButton.toolTip = localizer.text("hide")
+        visibilityMenuItem.title = localizer.text(panel.isVisible ? "hide" : "show")
+        for (key, item) in menuItems { item.title = localizer.text(key) }
+        for item in languageMenu.items {
+            guard let value = item.representedObject as? String else { continue }
+            item.title = localizer.text(value)
+            item.state = value == localizer.setting.rawValue ? .on : .off
+        }
+        statusItem.button?.toolTip = usage.tooltip(localizer)
+        compact.toolTip = usage.tooltip(localizer)
+    }
+
+    @objc private func selectLanguage(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let language = NativeLanguage(rawValue: raw) else { return }
+        client.setLanguage(language) { [weak self] saved in
+            guard let self else { return }
+            if saved {
+                self.localizer.setting = language
+                self.updateNativeText()
+                self.web.reload()
+                DistributedNotificationCenter.default().postNotificationName(
+                    NSNotification.Name("local.codex.weeklymonitor.settingsChanged"), object: nil,
+                    userInfo: nil, deliverImmediately: true)
+            } else { self.presentNotice("settings_failed") }
+        }
+    }
+
+    private func presentNotice(_ key: String) {
+        let alert = NSAlert()
+        alert.messageText = localizer.text("brand")
+        alert.informativeText = localizer.text(key)
+        alert.addButton(withTitle: localizer.text("ok"))
+        alert.runModal()
+    }
+
+    @objc private func wokeFromSleep() { refresh() }
+    @objc private func settingsChanged() {
+        localizer.setting = NativeLanguage.saved(at: stateDirectory())
+        updateNativeText()
+        web.reload()
+    }
+    @objc private func cacheRefreshed() { poll(force: true); web.reload() }
 
     @objc private func toggleVisibility() {
         if panel.isVisible { hide() } else { show() }
@@ -499,18 +596,13 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
     @objc private func toggle() { setCompact(!isCompact) }
     @objc private func openPage() { NSWorkspace.shared.open(baseURL) }
     @objc private func refresh() {
-        var request = URLRequest(url: baseURL.appendingPathComponent("api/refresh"))
-        request.httpMethod = "POST"
-        URLSession.shared.dataTask(with: request) { [weak self] _, _, _ in
-            DispatchQueue.main.async {
-                self?.poll()
-                self?.web.reload()
-            }
-        }.resume()
+        client.refresh { [weak self] in
+            self?.poll(force: true, notifyDock: true)
+            self?.web.reload()
+        }
     }
     @objc private func quitAll() {
-        let package = Bundle.main.bundleURL.deletingLastPathComponent()
-        let stop = package.appendingPathComponent("Stop.command")
+        let stop = nativeServiceDirectory().appendingPathComponent("Stop.command")
         if FileManager.default.fileExists(atPath: stop.path) {
             let task = Process()
             task.executableURL = URL(fileURLWithPath: "/bin/bash")
@@ -519,26 +611,25 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
         } else { NSApp.terminate(nil) }
     }
 
-    private func poll() {
-        let url = baseURL.appendingPathComponent("api/usage")
-        URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
-            var percent: Int? = nil
-            if let data, let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               object["status"] as? String == "ok",
-               let updated = object["updatedAt"] as? Double,
-               let reset = object["resetsAt"] as? Double,
-               Date().timeIntervalSince1970 * 1000 - updated <= 600_000,
-               reset > Date().timeIntervalSince1970,
-               let value = object["remainingPercent"] as? Int {
-                percent = max(0, min(100, value))
+    private func poll(force: Bool = false, notifyDock: Bool = false) {
+        client.fetch(force: force) { [weak self] usage, language in
+            guard let self else { return }
+            self.usage = usage
+            self.localizer.setting = language ?? NativeLanguage.saved(at: stateDirectory())
+            self.compact.percent = usage.percent
+            self.statusItem.button?.title = usage.percent.map { "\($0)%" } ?? "—"
+            self.updateNativeText()
+            if notifyDock {
+                DistributedNotificationCenter.default().postNotificationName(
+                    NSNotification.Name("local.codex.weeklymonitor.usageUpdated"), object: nil,
+                    userInfo: nil, deliverImmediately: true)
             }
-            DispatchQueue.main.async {
-                self?.compact.percent = percent
-                self?.statusItem.button?.title = percent.map { "\($0)%" } ?? "—"
-                self?.statusItem.button?.toolTip = percent.map { "本周剩余 \($0)%" } ?? "Codex 额度暂不可用"
-                self?.statusLabel.stringValue = percent == nil ? "暂不可用" : "数据已更新"
+            if !self.didPresentSetupNotice, let code = usage.errorCode,
+               code == "cli_missing" || code == "signed_out" {
+                self.didPresentSetupNotice = true
+                self.presentNotice(code)
             }
-        }.resume()
+        }
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,

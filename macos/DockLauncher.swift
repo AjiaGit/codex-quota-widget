@@ -49,28 +49,41 @@ private func dockImage(percent: Int?) -> (NSImage, NSBitmapImageRep) {
     return (image, bitmap)
 }
 
-private final class DockLauncher: NSObject, NSApplicationDelegate {
+private final class DockLauncher: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var pollTimer: Timer?
     private var percent: Int?
-    private let root = Bundle.main.bundleURL.deletingLastPathComponent()
-    private let state = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/Application Support/CodexWeeklyMonitor", isDirectory: true)
+    private let root = nativeServiceDirectory()
+    private let state = nativeStateDirectory()
+    private let client = NativeServiceClient()
+    private var localizer = NativeLocalizer(setting: NativeLanguage.saved(at: nativeStateDirectory()))
+    private var appMenu: NSMenu!
+    private var languageMenu: NSMenu!
+    private var menuItems: [String: NSMenuItem] = [:]
+    private var starter: Process?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         try? FileManager.default.createDirectory(at: state, withIntermediateDirectories: true)
         try? String(ProcessInfo.processInfo.processIdentifier).write(
             to: state.appendingPathComponent("launcher.pid"), atomically: true, encoding: .utf8)
         updateIcon(nil)
+        configureMenu()
         startWidget()
         poll()
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             self?.poll()
         }
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(wokeFromSleep),
+                                                          name: NSWorkspace.didWakeNotification, object: nil)
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(usageUpdated),
+            name: NSNotification.Name("local.codex.weeklymonitor.usageUpdated"), object: nil)
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(settingsChanged),
+            name: NSNotification.Name("local.codex.weeklymonitor.settingsChanged"), object: nil)
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication,
                                         hasVisibleWindows flag: Bool) -> Bool {
         startWidget()
+        poll(force: true)
         return false
     }
 
@@ -84,7 +97,7 @@ private final class DockLauncher: NSObject, NSApplicationDelegate {
         if FileManager.default.fileExists(atPath: stop.path) {
             let task = Process()
             task.executableURL = URL(fileURLWithPath: "/bin/bash")
-            task.arguments = [stop.path]
+            task.arguments = [stop.path, "--from-launcher"]
             task.standardOutput = FileHandle.nullDevice
             task.standardError = FileHandle.nullDevice
             try? task.run()
@@ -92,13 +105,20 @@ private final class DockLauncher: NSObject, NSApplicationDelegate {
     }
 
     private func startWidget() {
+        guard starter?.isRunning != true else { return }
         let script = root.appendingPathComponent("Start.command")
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/bin/bash")
-        task.arguments = [script.path]
+        task.arguments = [script.path, "--widget-only"]
         task.standardOutput = FileHandle.nullDevice
         task.standardError = FileHandle.nullDevice
-        try? task.run()
+        task.terminationHandler = { [weak self] task in
+            if task.terminationStatus == 0 {
+                DispatchQueue.main.async { self?.poll(force: true) }
+            }
+        }
+        do { try task.run(); starter = task }
+        catch { presentNotice("service_unavailable") }
     }
 
     private func updateIcon(_ value: Int?) {
@@ -108,22 +128,105 @@ private final class DockLauncher: NSObject, NSApplicationDelegate {
         NSApp.dockTile.display()
     }
 
-    private func poll() {
-        let url = URL(string: "http://127.0.0.1:39224/api/usage")!
-        URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
-            var value: Int?
-            if let data,
-               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               object["status"] as? String == "ok",
-               let updated = object["updatedAt"] as? Double,
-               let reset = object["resetsAt"] as? Double,
-               Date().timeIntervalSince1970 * 1000 - updated <= 600_000,
-               reset > Date().timeIntervalSince1970,
-               let remaining = object["remainingPercent"] as? Int {
-                value = max(0, min(100, remaining))
-            }
-            DispatchQueue.main.async { self?.updateIcon(value) }
-        }.resume()
+    private func poll(force: Bool = false) {
+        client.fetch(force: force) { [weak self] usage, language in
+            guard let self else { return }
+            self.localizer.setting = language ?? NativeLanguage.saved(at: self.state)
+            self.updateIcon(usage.percent)
+            self.updateMenu()
+        }
+    }
+
+    private func configureMenu() {
+        let main = NSMenu()
+        let item = NSMenuItem()
+        appMenu = NSMenu()
+        item.submenu = appMenu
+        main.addItem(item)
+        for (key, action, shortcut) in [("show", #selector(showWidget), ""),
+                                        ("refresh_quota", #selector(refresh), "r"),
+                                        ("open_page", #selector(openPage), "")] {
+            let entry = NSMenuItem(title: localizer.text(key), action: action, keyEquivalent: shortcut)
+            entry.target = self
+            menuItems[key] = entry
+            appMenu.addItem(entry)
+        }
+        let languages = NSMenuItem(title: localizer.text("language"), action: nil, keyEquivalent: "")
+        menuItems["language"] = languages
+        languageMenu = NSMenu()
+        for language in NativeLanguage.allCases {
+            let entry = NSMenuItem(title: localizer.text(language.rawValue), action: #selector(selectLanguage(_:)), keyEquivalent: "")
+            entry.representedObject = language.rawValue
+            entry.target = self
+            languageMenu.addItem(entry)
+        }
+        languages.submenu = languageMenu
+        appMenu.addItem(languages)
+        appMenu.addItem(.separator())
+        let quit = NSMenuItem(title: localizer.text("quit"), action: #selector(quit), keyEquivalent: "q")
+        quit.target = self
+        menuItems["quit"] = quit
+        appMenu.addItem(quit)
+        appMenu.delegate = self
+        NSApp.mainMenu = main
+        updateMenu()
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        localizer.setting = NativeLanguage.saved(at: state)
+        updateMenu()
+    }
+
+    private func updateMenu() {
+        appMenu.title = localizer.text("brand")
+        NSApp.mainMenu?.items.first?.title = localizer.text("brand")
+        for (key, item) in menuItems { item.title = localizer.text(key) }
+        for item in languageMenu.items {
+            guard let value = item.representedObject as? String else { continue }
+            item.title = localizer.text(value)
+            item.state = value == localizer.setting.rawValue ? .on : .off
+        }
+    }
+
+    @objc private func selectLanguage(_ sender: NSMenuItem) {
+        guard let value = sender.representedObject as? String,
+              let language = NativeLanguage(rawValue: value) else { return }
+        client.setLanguage(language) { [weak self] saved in
+            guard let self else { return }
+            if saved {
+                self.localizer.setting = language
+                self.updateMenu()
+                DistributedNotificationCenter.default().postNotificationName(
+                    NSNotification.Name("local.codex.weeklymonitor.settingsChanged"), object: nil,
+                    userInfo: nil, deliverImmediately: true)
+            } else { self.presentNotice("settings_failed") }
+        }
+    }
+
+    private func presentNotice(_ key: String) {
+        let alert = NSAlert()
+        alert.messageText = localizer.text("brand")
+        alert.informativeText = localizer.text(key)
+        alert.addButton(withTitle: localizer.text("ok"))
+        alert.runModal()
+    }
+
+    @objc private func showWidget() { startWidget() }
+    @objc private func openPage() { NSWorkspace.shared.open(NativeServiceClient.baseURL) }
+    @objc private func quit() { NSApp.terminate(nil) }
+    @objc private func usageUpdated() { poll(force: true) }
+    @objc private func settingsChanged() {
+        localizer.setting = NativeLanguage.saved(at: state)
+        updateMenu()
+    }
+    @objc private func wokeFromSleep() { poll(force: true) }
+    @objc private func refresh() {
+        client.refresh { [weak self] in
+            self?.poll(force: true)
+            DistributedNotificationCenter.default().postNotificationName(
+                NSNotification.Name("local.codex.weeklymonitor.cacheRefreshed"), object: nil,
+                userInfo: nil, deliverImmediately: true)
+        }
     }
 }
 

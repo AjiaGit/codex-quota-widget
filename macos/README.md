@@ -2,41 +2,37 @@
 
 English | [简体中文](README.zh-CN.md)
 
-The macOS widget shows remaining weekly Codex quota in the menu bar and provides compact and detailed floating windows. The current application interface is in Simplified Chinese.
+## Prebuilt app
 
-## Requirements
+1. Use macOS **13.5 or later**. In **Apple menu → About This Mac**, choose the `arm64` ZIP for Apple Silicon or `x64` ZIP for Intel.
+2. Install the official [Codex desktop app](https://learn.chatgpt.com/docs/app) or [Codex CLI](https://learn.chatgpt.com/docs/codex/cli), and sign in. If the widget cannot find the desktop app's CLI, install the CLI separately and run `codex login`.
+3. Verify the ZIP against the supplied `SHA256SUMS` with `shasum -a 256 <filename>`. Extract it and move **Codex Quota Widget.app** to `/Applications` or `~/Applications`.
+4. Open the app, then drag it to the Dock if desired. Its bundled Node.js 24.19.0 runs the local service; no Node installation or compiler is needed.
 
-- Node.js 24 or later.
-- Codex CLI installed and signed in with the ChatGPT account to monitor.
-- Apple Command Line Tools for compiling the native widget on first launch.
+This app is ad hoc signed, without Developer ID signing or notarization. If macOS blocks it, verify the source and checksum, then use the system's **Privacy & Security → Open Anyway** control if available. Do not disable system-wide security protections.
 
-A Codex desktop-app session does not necessarily establish a separate CLI login. Check `node -v`, `codex --version`, and `codex login status`; run `codex login` if needed.
-
-## Install and start
-
-1. Download **Code → Download ZIP** from the repository and extract it.
-2. Move the complete `codex-quota-widget-main` folder into `~/Applications/` or another permanent folder. Keep the generated apps, scripts, and source files together.
-3. Run `xcode-select --install` if Apple Command Line Tools are missing.
-4. Open the `macos` subfolder in Finder and double-click `Start.command`. It compiles the widget and Dock launcher on first launch. If the script opens as text, run `bash ` in Terminal, drag the script into Terminal, and press Return. Resolve any macOS security prompt through the normal system controls.
-5. The script creates `启动 Codex 周额度.app` in the `macos` folder. Drag this launcher to the Dock. Clicking it starts the widget or shows its window again.
-
-The repository does not include a ready-to-install, signed and notarized app. Source builds currently require the steps above.
+Only run one copy. The service uses `127.0.0.1:39224`.
 
 ## Daily use
 
-- Click the menu-bar percentage to show/hide the floating window, switch compact/detail mode, refresh, open the detailed page in a browser, or quit.
-- Click the compact ring to expand. Drag the window to move it; drag its edges or corners to resize it. The minimum compact size is 36×36.
-- In detailed mode, click “极简” (Compact) to collapse, “刷新” (Refresh) to query quota, or `×` to hide the window.
-- Each mode remembers its own position and size. Moving and resizing are constrained to the screen's usable area. The detailed content can scroll.
-- The Dock icon displays remaining weekly quota. Unavailable data displays `—`.
-- Double-click `Stop.command` to stop the tool, or use the menu's quit command. Start it again through `Start.command` or the Dock launcher. Startup at login is not configured.
+- Click the menu-bar percentage to show or hide the window, select compact/detail mode, refresh, open the browser detail page, change language, or quit.
+- Choose **Language → System / English / 简体中文**. The choice is saved and shared with the browser detail page.
+- Click the compact ring to expand. Drag the window to move it, or its edges/corners to resize. Each mode remembers its geometry; detailed content can scroll.
+- Open **Reset details** for available credits and any provided grant/expiry dates. The widget only reads this information.
+- The Dock icon shows remaining weekly quota, or `—` when data is unavailable. Clicking it reopens the widget.
 
-## Refresh and troubleshooting
+Quota and cache checks run every 60 seconds. Refresh, reopening, and wake trigger a prompt update. Temporary failures retry at 15/30/60 seconds; public data refreshes separately every 10 minutes.
 
-The service queries Codex every five minutes. The detailed page reads the cache every minute; the menu bar and Dock read it every thirty seconds. Public-source data is checked every ten minutes. Account data is not sent to those sources.
+## Update, quit, and uninstall
 
-If the widget displays `—`, check `codex login status` and refresh. If necessary, stop and start the tool. Logs are stored in `~/Library/Application Support/CodexWeeklyMonitor/`: `monitor.log`, `build.log`, and `launcher-build.log`.
+Choose **Quit** before replacing the app with a newer copy in the same location. Reopen it afterwards; saved language and window geometry remain in `~/Library/Application Support/CodexWeeklyMonitor/`.
 
-Keep the installation folder in place: the Dock launcher relies on its neighboring scripts and service files. Only run one installation at a time because the service uses `127.0.0.1:39224`.
+To uninstall, quit and move the app to Trash. To remove saved preferences and logs as well, delete `~/Library/Application Support/CodexWeeklyMonitor/` after quitting. The widget does not configure startup at login.
 
-The native widget has been compiled and exercised on Apple Silicon. Intel Macs and other macOS versions require separate verification.
+## Troubleshooting and source use
+
+If the UI asks you to sign in, check `codex login status`, run `codex login` if needed, then refresh. For startup errors, inspect `monitor.log` in `~/Library/Application Support/CodexWeeklyMonitor/`; source compilation logs are `build.log` and `launcher-build.log`. Share only sanitized excerpts.
+
+Source use requires [Node.js 24+](https://nodejs.org/en/download), signed-in Codex, and Apple Command Line Tools (`xcode-select --install`). Keep the whole repository together and double-click [Start.command](Start.command); use [Stop.command](Stop.command) to stop it. The source launcher compiles locally and its generated launcher depends on neighboring service files. If Finder opens a script as text, run it with `bash` in Terminal.
+
+See [CONTRIBUTING.md](../CONTRIBUTING.md) to build a standalone app. Native CI covers Apple Silicon and Intel runner builds; it does not certify physical Intel hardware or real-account login on every macOS version.

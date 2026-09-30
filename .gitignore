@@ -13,3 +13,6 @@ auth.json
 *.pfx
 *.pem
 macos/*.app/
+dist/
+build/
+*.app/

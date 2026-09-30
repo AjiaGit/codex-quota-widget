@@ -2,36 +2,49 @@
 
 [English](README.md) | 简体中文
 
-一个在 Windows 和 macOS 桌面查看 Codex 额度的小工具。它显示本周剩余百分比、重置时间和倒计时、最近更新时间、可用重置卡数量；Plus 账号还显示 5 小时额度，Pro 账号只显示周额度。悬浮窗有极简和详细两种模式，可拖动与调整大小。Windows 可收进系统托盘，macOS 可从菜单栏打开。
+在 Windows 和 macOS 桌面查看 Codex 额度的小工具：显示本周剩余、重置时间与倒计时、最近成功更新时间、可用重置卡数量；Plus 账号在 Codex 提供数据时另显示 5 小时额度。
 
-详细窗还读取 [codexreset.ai](https://codexreset.ai/) 的公开全局临时重置记录，以及 [whenreset.app](https://whenreset.app/) 的历史频率估计。这些公开记录与个人账号的固定额度周期不同；**未来概率不是已确定的重置时间或承诺**。
+这是独立的非官方工具，与 OpenAI 无关联，也未获其背书。
 
-## 开始使用
+## 安装
 
-| 系统 | 准备 | 启动 | 停止 |
-| --- | --- | --- | --- |
-| Windows | Node.js 24+；已用 ChatGPT 账号登录 Codex CLI | 双击 [`windows/Start.cmd`](windows/Start.cmd) | 双击 [`windows/Stop.cmd`](windows/Stop.cmd) |
-| macOS | Node.js 24+；已登录 Codex CLI；Apple 命令行工具 | 双击 [`macos/Start.command`](macos/Start.command) | 双击 [`macos/Stop.command`](macos/Stop.command) |
+**0.1.0** 安装包内置 Node.js **24.19.0** 及其许可证。使用预编译安装包无需另装 Node 或开发工具。
 
-第一次使用，请先阅读 [Windows 步骤](windows/README.zh-CN.md)或 [macOS 步骤](macos/README.zh-CN.md)。下载时在 GitHub 页面点 **Code → Download ZIP**，解压后保留整个文件夹。不要同时运行同一台电脑上的两份副本：本机服务固定使用 `127.0.0.1:39224`。
+| 系统 | 文件 | 安装步骤 |
+| --- | --- | --- |
+| macOS 13.5+，Apple Silicon | `CodexQuotaWidget-0.1.0-macos-arm64.zip` | [macOS](macos/README.zh-CN.md) |
+| macOS 13.5+，Intel | `CodexQuotaWidget-0.1.0-macos-x64.zip` | [macOS](macos/README.zh-CN.md) |
+| Windows x64 | `CodexQuotaWidget-0.1.0-windows-x64.exe` | [Windows](windows/README.zh-CN.md) |
 
-macOS 版支持从窗口的上下左右边缘及四角拖动缩放，极简窗最小可缩到 36×36。两种模式各自记住位置与尺寸，窗口不会移出屏幕。首次运行后会生成可放入程序坞的启动图标，图标显示当前剩余额度。
+请使用同一次构建提供的安装包与 `SHA256SUMS`。仓库协作者可在 **Actions → Build packages → 成功的运行 → Artifacts** 下载私有构建产物；工作流不会发布 GitHub Release。
 
-## 工作方式
+先安装官方 [Codex 桌面应用](https://learn.chatgpt.com/docs/app)或 [Codex CLI](https://learn.chatgpt.com/docs/codex/cli)，并用要监控的 ChatGPT 账号登录。工具需要找到 Codex CLI／App Server；若未识别桌面安装，请按官方说明安装 CLI 后运行 `codex login`。安装包不包含 Codex 程序或任何登录凭据。
 
-- 本机 Node.js 服务通过 Codex CLI `app-server` 的只读 `account/read` 与 `account/rateLimits/read` 获取账号额度；不需要 API Key，也不修改 Codex 客户端文件。
-- 额度每 5 分钟读取一次；超过 10 分钟未更新、旧重置时间已到或登录失效时，旧百分比不再当作当前数据展示。
-- 外部公开站点的记录单独读取，不发送你的登录信息或个人额度。工具只显示重置卡数量，不使用重置卡。
-- 没有开机启动、主动提醒或远程同步。运行记录保存在本机。
+macOS 应用仅有临时签名，没有 Developer ID 签名或 Apple 公证；Windows 安装程序未签名。系统可能显示安全提示，请核对来源和校验值后再决定打开。
 
-## 验证状态
+从源码启动需安装 Node.js 24+；macOS 还需 Apple 命令行工具，详见系统指南。同一台电脑只运行一份：本机服务使用 `127.0.0.1:39224`。
 
-Windows 版本已在本机运行验证。两套 Node 核心代码和页面测试可分别在 `windows`、`macos` 文件夹运行：
+## 使用
 
-```sh
-node --test test/quota.test.mjs test/rpc.test.mjs test/presentation.test.mjs test/external.test.mjs
-```
+- 在极简百分比圆环与详细窗之间切换，拖动移动或缩放；两种模式各自记住位置和尺寸。
+- 从 Windows 托盘或 macOS 菜单栏显示窗口、刷新、切换语言或退出；macOS 程序坞图标也显示本周剩余。
+- 在**语言 → 跟随系统 / English / 简体中文**中选择。跟随系统在中文系统语言下显示中文，其余显示英文。浏览器详细页与原生界面共用已保存的选择。
+- 打开**重置详情**查看可用数量，以及 Codex 提供的发放／到期时间。未提供的日期会明确说明；工具不会使用重置卡，也不推测未来发放。重置卡与付费使用额度、固定额度重置倒计时分别显示。
 
-macOS 原生悬浮窗已在 Apple Silicon Mac 上完成编译和交互验收；其他 Mac 配置尚需分别验证。首次运行时会在该 Mac 上编译；若编译失败，可查看 `~/Library/Application Support/CodexWeeklyMonitor/build.log` 或 `launcher-build.log`。
+账号额度查询和缓存检查均每 **60 秒**进行。手动刷新、重新打开和电脑唤醒后及时刷新，同时发起的请求会合并。临时查询失败后按 **15、30、60 秒**重试。不可用、已到重置时间或过旧的额度显示为 `—`，旧百分比不会继续当作当前数据。
 
-这是独立的非官方工具，与 OpenAI 无关联。Codex `app-server` 当前为实验性命令；客户端升级后请重新核对实际额度显示。
+[codexreset.ai](https://codexreset.ai/) 和 [whenreset.app](https://whenreset.app/) 的公开重置记录及历史概率单独每 **10 分钟**更新。历史概率不代表未来必然重置，也不是时间承诺。
+
+## 隐私与故障排查
+
+本机服务通过 [Codex App Server](https://learn.chatgpt.com/docs/app-server) 的只读 `account/read` 和 `account/rateLimits/read` 获取数据，只监听本机回环地址，无需 OpenAI API Key。不会向公开重置站点发送个人额度或登录信息；设置与日志留在本机。
+
+若显示不可用，请按界面提示处理，检查 `codex login status` 后点击**刷新**。系统指南列出日志位置、重新启动及卸载步骤。反馈问题时不要上传凭据、原始账号响应、未脱敏日志或个人账号截图。
+
+Codex 更新可能改变 App Server。托管运行环境测试使用虚构数据，不代表已验证真实账号登录或实体 Intel Mac／Windows 桌面兼容性。Windows 安装程序提供可选的登录时启动，默认不勾选。本版没有主动通知或远程同步。
+
+## 开发与许可证
+
+开发和构建说明见 [CONTRIBUTING.md](CONTRIBUTING.md)，版本说明见 [CHANGELOG.md](CHANGELOG.md)。
+
+项目代码和文档采用 [MIT](LICENSE)，版权归 2026 AjiaGit。内置依赖和外部服务遵循各自条款，见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

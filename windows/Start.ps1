@@ -1,117 +1,105 @@
-﻿$ErrorActionPreference = 'Stop'
-
-$port = 39224
-$url = "http://127.0.0.1:$port/"
-$healthUrl = "${url}health"
-$runtimeDir = Join-Path $env:TEMP 'CodexWeeklyMonitor'
-$statePath = Join-Path $runtimeDir 'state.json'
-$scriptPath = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'monitor.mjs'))
-$floatingScript = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'Floating.ps1'))
-$showRequest = Join-Path $runtimeDir 'show.request'
-$state = if (Test-Path -LiteralPath $statePath) { Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json } else { $null }
-if ($state -and -not [string]::Equals([string]$state.script, $scriptPath, [System.StringComparison]::OrdinalIgnoreCase)) {
-    throw '运行记录指向另一份工具，已停止操作。'
-}
-
-function Get-MonitorHealth {
-    try {
-        return Invoke-RestMethod -Uri $healthUrl -TimeoutSec 2
-    } catch {
-        return $null
+﻿param([switch]$NoUi)
+$ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'Native.ps1')
+$runtimeDir = Get-WidgetDataDirectory
+$language = Resolve-WidgetLanguage (Get-WidgetLanguageSetting $runtimeDir)
+$mutex = $null
+try {
+    $mutex = Enter-WidgetLifecycleLock $runtimeDir $language
+    Initialize-WidgetStorage $PSScriptRoot $runtimeDir
+    $language = Resolve-WidgetLanguage (Get-WidgetLanguageSetting $runtimeDir)
+    $port = 39224
+    $url = "http://127.0.0.1:$port/"
+    $statePath = Join-Path $runtimeDir 'state.json'
+    $scriptPath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'monitor.mjs'))
+    $floatingScript = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'Floating.ps1'))
+    $state = Read-WidgetJson $statePath
+    if ($state -and -not [string]::Equals([string]$state.script, $scriptPath, [StringComparison]::OrdinalIgnoreCase)) {
+        Throw-WidgetError 'foreignState' $language
     }
-}
-
-$health = Get-MonitorHealth
-if ($health -and $health.app -eq 'codex-weekly-monitor') {
-    if (-not $state) { throw '服务已运行，但缺少本工具的运行记录。' }
-    # A service launched before a Codex session/environment change can keep failing
-    # while a fresh App Server query succeeds. Recover it once per 20 minutes.
-    $usage = try { Invoke-RestMethod -Uri "${url}api/usage" -TimeoutSec 3 } catch { $null }
-    if ($usage -and $usage.status -eq 'unavailable') {
-        $lastRecovery = [DateTimeOffset]::MinValue
-        try { if ($state.lastRecoveryAt) { $lastRecovery = [DateTimeOffset]::Parse([string]$state.lastRecoveryAt) } } catch { }
-        if (([DateTimeOffset]::Now - $lastRecovery).TotalMinutes -ge 20) {
-            $existingService = Get-CimInstance Win32_Process -Filter "ProcessId = $($state.pid)"
-            if (-not $existingService -or
-                -not [string]::Equals([string]$existingService.ExecutablePath, [string]$state.node, [System.StringComparison]::OrdinalIgnoreCase) -or
-                ([string]$existingService.CommandLine).IndexOf($scriptPath, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
-                throw '旧服务进程身份与运行记录不符，未自动恢复。'
-            }
-            Stop-Process -Id ([int]$state.pid) -ErrorAction Stop
-            $state | Add-Member -NotePropertyName lastRecoveryAt -NotePropertyValue ([DateTimeOffset]::Now.ToString('o')) -Force
-            $state | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8
-            $health = $null
+    function Get-MonitorHealth {
+        try { Invoke-RestMethod -Uri "${url}health" -TimeoutSec 2 } catch { $null }
+    }
+    $health = Get-MonitorHealth
+    $existingService = $null
+    if ($state -and $state.pid -and [int]$state.pid -gt 0) {
+        $existingService = Get-CimInstance Win32_Process -Filter "ProcessId = $([int]$state.pid)" -ErrorAction SilentlyContinue
+        if ($existingService -and -not (Test-WidgetProcessOwnership $existingService $state.node $scriptPath $state.startedAt)) {
+            Throw-WidgetError 'foreignService' $language
         }
     }
-}
-if (-not ($health -and $health.app -eq 'codex-weekly-monitor')) {
-    $socket = New-Object System.Net.Sockets.TcpClient
-    $portBusy = $false
-    try {
-        $socket.Connect('127.0.0.1', $port)
-        $portBusy = $true
-    } catch [System.Net.Sockets.SocketException] {
+    if ($state -and $state.storageVersion -ne 2) {
+        # Legacy clients read TEMP. Restart only validated owned processes after migration.
+        $oldFloating = if ($state.floatingPid -and [int]$state.floatingPid -gt 0) { Get-CimInstance Win32_Process -Filter "ProcessId = $([int]$state.floatingPid)" -ErrorAction SilentlyContinue } else { $null }
+        if ($oldFloating -and -not (Test-WidgetProcessOwnership $oldFloating $state.powershell $floatingScript $state.floatingStartedAt)) { Throw-WidgetError 'foreignFloating' $language }
+        if ($oldFloating) { Stop-Process -Id ([int]$state.floatingPid) -ErrorAction Stop }
+        if ($existingService) { Stop-Process -Id ([int]$state.pid) -ErrorAction Stop; $existingService = $null; $health = $null }
+        if ($state.floatingPid) { $state.floatingPid = $null }
+    }
+    if ($health -and $health.app -eq 'codex-weekly-monitor') {
+        if (-not $state -or -not $existingService) { Throw-WidgetError 'missingState' $language }
+    } else {
+        # A healthy owned process may still be finishing startup. Never launch a duplicate.
+        if ($existingService) { Throw-WidgetError 'startFailed' $language @((Join-Path $runtimeDir 'stderr.log')) }
+        $socket = New-Object Net.Sockets.TcpClient
         $portBusy = $false
-    } finally {
-        $socket.Dispose()
+        try { $socket.Connect('127.0.0.1', $port); $portBusy = $true } catch [Net.Sockets.SocketException] { } finally { $socket.Dispose() }
+        if ($portBusy) { Throw-WidgetError 'portBusy' $language @($port) }
+        $node = Find-WidgetNode $PSScriptRoot
+        if (-not $node) { Throw-WidgetError 'nodeMissing' $language }
+        $codex = Find-WidgetCodex
+        if ($codex) { $env:CODEX_CLI_PATH = $codex }
+        $stdout = Join-Path $runtimeDir 'stdout.log'
+        $stderr = Join-Path $runtimeDir 'stderr.log'
+        $process = Start-Process -FilePath $node -ArgumentList ('"' + $scriptPath + '"') -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+        if (-not $state) { $state = [pscustomobject]@{} }
+        $state | Add-Member -NotePropertyName storageVersion -NotePropertyValue 2 -Force
+        $state | Add-Member -NotePropertyName pid -NotePropertyValue $process.Id -Force
+        $state | Add-Member -NotePropertyName node -NotePropertyValue $node -Force
+        $state | Add-Member -NotePropertyName script -NotePropertyValue $scriptPath -Force
+        $state | Add-Member -NotePropertyName startedAt -NotePropertyValue $process.StartTime.ToUniversalTime().ToString('o') -Force
+        Write-WidgetJson $statePath $state
+        for ($i = 0; $i -lt 40; $i++) {
+            Start-Sleep -Milliseconds 250
+            $health = Get-MonitorHealth
+            if ($health -and $health.app -eq 'codex-weekly-monitor') { break }
+            if ($process.HasExited) { break }
+        }
+        if (-not ($health -and $health.app -eq 'codex-weekly-monitor')) { Throw-WidgetError 'startFailed' $language @($stderr) }
     }
-    if ($portBusy) { throw "端口 $port 已被其他程序占用。" }
-
-    $node = (Get-Command node.exe -ErrorAction Stop).Source
-    New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
-    $stdoutPath = Join-Path $runtimeDir 'stdout.log'
-    $stderrPath = Join-Path $runtimeDir 'stderr.log'
-    $process = Start-Process -FilePath $node -ArgumentList ('"' + $scriptPath + '"') `
-        -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -PassThru `
-        -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
-    if (-not $state) { $state = [PSCustomObject]@{} }
-    $state | Add-Member -NotePropertyName pid -NotePropertyValue $process.Id -Force
-    $state | Add-Member -NotePropertyName node -NotePropertyValue $node -Force
-    $state | Add-Member -NotePropertyName script -NotePropertyValue $scriptPath -Force
-    $state | Add-Member -NotePropertyName startedAt -NotePropertyValue (Get-Date).ToString('o') -Force
-    $state | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8
-
-    for ($i = 0; $i -lt 40; $i++) {
-        Start-Sleep -Milliseconds 250
-        $health = Get-MonitorHealth
-        if ($health -and $health.app -eq 'codex-weekly-monitor') { break }
-        if ($process.HasExited) { break }
+    if (-not $NoUi) {
+        $floatingActive = $false
+        if ($state.floatingPid -and [int]$state.floatingPid -gt 0) {
+            $existing = Get-CimInstance Win32_Process -Filter "ProcessId = $([int]$state.floatingPid)" -ErrorAction SilentlyContinue
+            if ($existing) {
+                if (-not (Test-WidgetProcessOwnership $existing $state.powershell $floatingScript $state.floatingStartedAt)) {
+                    Throw-WidgetError 'foreignFloating' $language
+                }
+                $floatingActive = $true
+            }
+        }
+        if (-not $floatingActive) {
+            $powershell = Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
+            $floatingOut = Join-Path $runtimeDir 'floating-stdout.log'; $floatingErr = Join-Path $runtimeDir 'floating-stderr.log'
+            $floating = Start-Process -FilePath $powershell -ArgumentList @('-NoProfile','-Sta','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',('"' + $floatingScript + '"')) -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput $floatingOut -RedirectStandardError $floatingErr
+            $state | Add-Member -NotePropertyName floatingPid -NotePropertyValue $floating.Id -Force
+            $state | Add-Member -NotePropertyName powershell -NotePropertyValue $powershell -Force
+            $state | Add-Member -NotePropertyName floatingScript -NotePropertyValue $floatingScript -Force
+            $state | Add-Member -NotePropertyName floatingStartedAt -NotePropertyValue $floating.StartTime.ToUniversalTime().ToString('o') -Force
+            Write-WidgetJson $statePath $state
+            Start-Sleep -Milliseconds 1200
+            if ($floating.HasExited) { Throw-WidgetError 'floatingFailed' $language @($floatingErr) }
+        }
+        [IO.File]::WriteAllText((Join-Path $runtimeDir 'show.request'), [DateTimeOffset]::UtcNow.ToString('o'))
     }
-    if (-not ($health -and $health.app -eq 'codex-weekly-monitor')) {
-        $diagnostic = if (Test-Path -LiteralPath $stderrPath) { Get-Content -LiteralPath $stderrPath -Tail 5 } else { @() }
-        throw "服务启动失败。请查看 $stderrPath。$($diagnostic -join ' ')"
-    }
+    # Reopening also requests an immediate remote refresh. The service coalesces it.
+    if ($NoUi) { try { Invoke-RestMethod -Method Post -Uri "${url}api/refresh" -TimeoutSec 25 | Out-Null } catch { } }
+    Write-Output (Get-WidgetText 'opened' $language)
+} catch {
+    $safeMessage = if ($_.Exception.Data['widgetSafeMessage']) { $_.Exception.Message } else { Get-WidgetText 'startFailed' $language @((Join-Path $runtimeDir 'stderr.log')) }
+    if (-not $NoUi) { Show-WidgetFailure $safeMessage $language }
+    else { Write-Error $safeMessage -ErrorAction Continue }
+    exit 1
+} finally {
+    if ($mutex) { $mutex.ReleaseMutex(); $mutex.Dispose() }
 }
-
-$floatingActive = $false
-if ($state.floatingPid) {
-    $existing = Get-CimInstance Win32_Process -Filter "ProcessId = $($state.floatingPid)"
-    if ($existing) {
-        $sameExecutable = [string]::Equals([string]$existing.ExecutablePath, [string]$state.powershell, [System.StringComparison]::OrdinalIgnoreCase)
-        $sameScript = ([string]$existing.CommandLine).IndexOf($floatingScript, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
-        if (-not ($sameExecutable -and $sameScript)) { throw '悬浮窗进程身份与运行记录不符。' }
-        $floatingActive = $true
-    }
-}
-
-if (-not $floatingActive) {
-    $powershell = (Get-Command powershell.exe -ErrorAction Stop).Source
-    $floatingOut = Join-Path $runtimeDir 'floating-stdout.log'
-    $floatingErr = Join-Path $runtimeDir 'floating-stderr.log'
-    $floating = Start-Process -FilePath $powershell `
-        -ArgumentList @('-NoProfile', '-Sta', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', ('"' + $floatingScript + '"')) `
-        -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -PassThru `
-        -RedirectStandardOutput $floatingOut -RedirectStandardError $floatingErr
-    Start-Sleep -Milliseconds 1200
-    if ($floating.HasExited) {
-        $diagnostic = if (Test-Path -LiteralPath $floatingErr) { Get-Content -LiteralPath $floatingErr -Tail 8 } else { @() }
-        throw "悬浮窗启动失败。请查看 $floatingErr。$($diagnostic -join ' ')"
-    }
-    $state | Add-Member -NotePropertyName floatingPid -NotePropertyValue $floating.Id -Force
-    $state | Add-Member -NotePropertyName powershell -NotePropertyValue $powershell -Force
-    $state | Add-Member -NotePropertyName floatingScript -NotePropertyValue $floatingScript -Force
-    $state | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8
-}
-
-(Get-Date).ToString('o') | Set-Content -LiteralPath $showRequest -Encoding ASCII
-Write-Output 'Codex 周额度悬浮窗已打开。'

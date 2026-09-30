@@ -1,134 +1,52 @@
+import { t, resolveLanguage, formatDate } from './i18n.mjs';
 const TEN_MINUTES = 10 * 60 * 1000;
-
-function formatDateTime(milliseconds, timeZone) {
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', hour12: false,
-  }).format(new Date(milliseconds));
+function formatCountdown(milliseconds, language) {
+  const minutes=Math.max(0,Math.ceil(milliseconds/60000));
+  const days=Math.floor(minutes/1440),hours=Math.floor((minutes%1440)/60),rest=minutes%60;
+  return days?t(language,'daysHours',{days,hours}):hours?t(language,rest?'hoursMinutes':'hoursOnly',{hours,minutes:rest}):t(language,'minutesOnly',{minutes:rest});
 }
-
-function formatCountdown(milliseconds) {
-  const minutes = Math.max(0, Math.ceil(milliseconds / 60000));
-  const days = Math.floor(minutes / 1440);
-  const hours = Math.floor((minutes % 1440) / 60);
-  const rest = minutes % 60;
-  if (days) return `${days}天 ${hours}小时`;
-  if (hours) return rest ? `${hours}小时 ${rest}分钟` : `${hours}小时`;
-  return `${rest}分钟`;
+export function deriveView(state,now=Date.now(),timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone,language='zh-CN') {
+  const unavailable=(statusText,message)=>({statusText,message,percentText:'—',ringPercent:0,tone:'muted',resetText:'—',countdownText:'—',updatedText:'—',cardsText:'—',showFiveHour:false,fiveHourText:'—',fiveHourResetText:'—'});
+  if(state?.status==='loading')return unavailable(t(language,'loading'),t(language,'querying'));
+  if(state?.status!=='ok')return unavailable(t(language,'unavailable'),t(language,state?.errorCode||'query_failed'));
+  const resetMs=state.resetsAt*1000;
+  if(!Number.isFinite(state.updatedAt)||now-state.updatedAt>TEN_MINUTES)return unavailable(t(language,'stale'),t(language,'waitingData'));
+  if(!Number.isFinite(resetMs)||now>=resetMs)return unavailable(t(language,'waiting'),t(language,'resetPassed'));
+  const percent=Math.max(0,Math.min(100,Math.round(state.remainingPercent))),shortReset=state.fiveHour?.resetsAt*1000;
+  const shortValid=state.plan==='plus'&&Number.isFinite(shortReset)&&shortReset>now&&Number.isFinite(state.fiveHour?.remainingPercent)&&state.fiveHour.remainingPercent>=0&&state.fiveHour.remainingPercent<=100;
+  return {statusText:t(language,'updated'),message:t(language,'weekly'),percentText:`${percent}%`,ringPercent:percent,tone:percent<=10?'danger':percent<=50?'warning':'healthy',resetText:formatDate(resetMs,timeZone,language),countdownText:formatCountdown(resetMs-now,language),updatedText:formatDate(state.updatedAt,timeZone,language),cardsText:Number.isSafeInteger(state.resetCards)&&state.resetCards>=0?t(language,state.resetCards===1?'resetOne':'resetCount',{count:state.resetCards}):'—',showFiveHour:state.plan==='plus',fiveHourText:shortValid?t(language,'percentRemaining',{percent:Math.round(state.fiveHour.remainingPercent)}):t(language,'unavailable'),fiveHourResetText:shortValid?formatDate(shortReset,timeZone,language):'—'};
 }
-
-export function deriveView(state, now = Date.now(), timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone) {
-  const unavailable = (statusText, message) => ({
-    statusText, message, percentText: '—', ringPercent: 0, tone: 'muted',
-    resetText: '—', countdownText: '—', updatedText: '—', cardsText: '—',
-    showFiveHour: false, fiveHourText: '—', fiveHourResetText: '—',
-  });
-  if (state?.status === 'loading') return unavailable('正在读取', '正在查询 Codex 额度');
-  if (state?.status !== 'ok') return unavailable('暂不可用', state?.message || '无法读取额度');
-
-  const resetMs = state.resetsAt * 1000;
-  if (!Number.isFinite(state.updatedAt) || now - state.updatedAt > TEN_MINUTES) {
-    return unavailable('数据已过期', '正在等待新的额度数据');
-  }
-  if (!Number.isFinite(resetMs) || now >= resetMs) {
-    return unavailable('等待新周期数据', '重置时间已到，正在等待更新');
-  }
-
-  const percent = Math.max(0, Math.min(100, Math.round(state.remainingPercent)));
-  const shortReset = state.fiveHour?.resetsAt * 1000;
-  const shortValid = state.plan === 'plus' && Number.isFinite(shortReset) && shortReset > now &&
-    Number.isFinite(state.fiveHour?.remainingPercent) && state.fiveHour.remainingPercent >= 0 &&
-    state.fiveHour.remainingPercent <= 100;
-  return {
-    statusText: '数据已更新', message: '本周剩余',
-    percentText: `${percent}%`, ringPercent: percent,
-    tone: percent <= 10 ? 'danger' : percent <= 50 ? 'warning' : 'healthy',
-    resetText: formatDateTime(resetMs, timeZone),
-    countdownText: formatCountdown(resetMs - now),
-    updatedText: formatDateTime(state.updatedAt, timeZone),
-    cardsText: Number.isSafeInteger(state.resetCards) && state.resetCards >= 0 ? `${state.resetCards} 张` : '—',
-    showFiveHour: state.plan === 'plus',
-    fiveHourText: shortValid ? `${Math.round(state.fiveHour.remainingPercent)}% 剩余` : '暂不可用',
-    fiveHourResetText: shortValid ? formatDateTime(shortReset, timeZone) : '—',
-  };
+export function deriveExternalView(state,timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone,language='zh-CN') {
+  const last=state?.status==='ok'?state.lastGlobal:null,forecast=state?.status==='ok'?state.forecast:null,scope=t(language,last?.scope==='paid'?'paid':last?.scope==='all'?'all':'unknownScope');
+  return {announcementText:last?.announcedAt?`${formatDate(Date.parse(last.announcedAt),timeZone,language)} · ${scope}`:t(language,'unavailable'),deliveryText:last?.deliveredAt?`${formatDate(Date.parse(last.deliveredAt),timeZone,language)} · ${t(language,'delivered')}`:t(language,'deliveryUnknown'),oddsText:forecast?t(language,'oddsValue',{a:forecast.next24h,b:forecast.next48h,c:forecast.next7d}):t(language,'unavailable'),sourceText:forecast?.sourceUpdatedAt?`${t(language,'dataTime')} ${formatDate(Date.parse(forecast.sourceUpdatedAt),timeZone,language)}`:t(language,'sourceUnavailable')};
 }
-
-export function deriveExternalView(state, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone) {
-  const last = state?.status === 'ok' ? state.lastGlobal : null;
-  const forecast = state?.status === 'ok' ? state.forecast : null;
-  const scope = last?.scope === 'paid' ? '付费账号' : last?.scope === 'all' ? '所有账号' : '范围未明';
-  return {
-    announcementText: last?.announcedAt ? `${formatDateTime(Date.parse(last.announcedAt), timeZone)} · ${scope}` : '暂不可用',
-    deliveryText: last?.deliveredAt ? `${formatDateTime(Date.parse(last.deliveredAt), timeZone)} · 站点记录已送达` : '送达时间未确认',
-    oddsText: forecast ? `24 小时 ${forecast.next24h}% · 48 小时 ${forecast.next48h}% · 7 天 ${forecast.next7d}%` : '暂不可用',
-    sourceText: forecast?.sourceUpdatedAt ? `数据时间 ${formatDateTime(Date.parse(forecast.sourceUpdatedAt), timeZone)}` : '站点数据暂不可用',
-  };
+export function deriveResetDetails(state,language='en',timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone) {
+  const rows=state?.status==='ok'&&Array.isArray(state.resetDetails)?state.resetDetails:null;
+  return {note:t(language,rows===null?'detailsUnknown':rows.length?'detailsPartial':'detailsEmpty'),rows:(rows||[]).map(row=>({title:row.title||t(language,'genericReset'),description:row.description||'',granted:t(language,'granted')+': '+(row.grantedAt?formatDate(row.grantedAt*1000,timeZone,language):t(language,'dateUnknown')),expires:t(language,'expires')+': '+(row.expiresAt?formatDate(row.expiresAt*1000,timeZone,language):t(language,'dateUnknown'))}))};
 }
-
-if (typeof document !== 'undefined') {
-  const byId = id => document.getElementById(id);
-  const root = byId('card');
-  const refreshButton = byId('refresh');
-  let state = { status: 'loading' };
-  let externalState = { status: 'loading' };
-  let loading = false;
-
+if(typeof document!=='undefined') {
+  document.body.dataset.embedded=String(new URLSearchParams(location.search).get('embedded')==='1');
+  const byId=id=>document.getElementById(id),root=byId('card'),refreshButton=byId('refresh');
+  let state={status:'loading'},externalState={status:'loading'},loading=false,setting='auto';
+  const language=()=>resolveLanguage(setting,navigator.language);
   function render() {
-    const view = deriveView(state);
-    root.dataset.tone = view.tone;
-    root.style.setProperty('--ring-value', `${view.ringPercent}%`);
-    byId('percent').textContent = view.percentText;
-    byId('status').textContent = view.statusText;
-    byId('caption').textContent = view.message;
-    byId('reset').textContent = view.resetText;
-    byId('countdown').textContent = view.countdownText;
-    byId('updated').textContent = view.updatedText;
-    byId('cards').textContent = view.cardsText;
-    byId('five-hour').hidden = !view.showFiveHour;
-    byId('five-hour-value').textContent = view.fiveHourText;
-    byId('five-hour-reset').textContent = view.fiveHourResetText;
-    const external = deriveExternalView(externalState);
-    byId('global-announcement').textContent = external.announcementText;
-    byId('global-delivery').textContent = external.deliveryText;
-    byId('global-odds').textContent = external.oddsText;
-    byId('external-updated').textContent = external.sourceText;
-    byId('ring').setAttribute('aria-valuenow', String(view.ringPercent));
-    byId('ring').setAttribute('aria-valuetext', view.percentText === '—' ? view.statusText : `${view.percentText} 剩余`);
-    refreshButton.disabled = loading;
+    const lang=language(),view=deriveView(state,Date.now(),undefined,lang);
+    document.documentElement.lang=lang;document.title=t(lang,'brand');
+    document.querySelectorAll('[data-i18n]').forEach(node=>node.textContent=t(lang,node.dataset.i18n));
+    root.dataset.tone=view.tone;root.style.setProperty('--ring-value',`${view.ringPercent}%`);
+    for(const[id,key]of Object.entries({percent:'percentText',status:'statusText',caption:'message',reset:'resetText',countdown:'countdownText',updated:'updatedText',cards:'cardsText','five-hour-value':'fiveHourText','five-hour-reset':'fiveHourResetText'}))byId(id).textContent=view[key];
+    byId('caption').hidden=view.percentText!=='—';
+    byId('five-hour').hidden=!view.showFiveHour;
+    const external=deriveExternalView(externalState,undefined,lang);
+    for(const[id,key]of Object.entries({'global-announcement':'announcementText','global-delivery':'deliveryText','global-odds':'oddsText','external-updated':'sourceText'}))byId(id).textContent=external[key];
+    const details=deriveResetDetails(state,lang);byId('reset-details-note').textContent=details.note;
+    byId('reset-details-list').replaceChildren(...details.rows.map(row=>{const item=document.createElement('li'),title=document.createElement('strong');title.textContent=row.title;item.append(title);for(const text of[row.description,row.granted,row.expires].filter(Boolean)){const line=document.createElement('p');line.textContent=text;item.append(line);}return item;}));
+    byId('ring').setAttribute('aria-label',t(lang,'weekly'));byId('ring').setAttribute('aria-valuenow',String(view.ringPercent));byId('ring').setAttribute('aria-valuetext',view.percentText==='—'?view.statusText:t(lang,'percentRemaining',{percent:view.ringPercent}));
+    byId('language').value=setting;refreshButton.disabled=loading;byId('setup-link').hidden=state.errorCode!=='cli_missing';
   }
-
-  async function loadExternal() {
-    try {
-      const response = await fetch('/api/external', { cache: 'no-store' });
-      if (!response.ok) throw new Error('服务未连接');
-      externalState = await response.json();
-    } catch { externalState = { status: 'unavailable' }; }
-    render();
-  }
-
-  async function load(force = false) {
-    if (loading) return;
-    loading = true;
-    render();
-    try {
-      const response = await fetch(force ? '/api/refresh' : '/api/usage', {
-        method: force ? 'POST' : 'GET', cache: 'no-store',
-      });
-      if (!response.ok) throw new Error('服务未连接');
-      state = await response.json();
-    } catch {
-      state = { status: 'unavailable', message: '本机监控服务未连接' };
-    } finally {
-      loading = false;
-      render();
-      loadExternal();
-    }
-  }
-
-  refreshButton.addEventListener('click', () => load(true));
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
-  setInterval(() => load(), 60 * 1000);
-  setInterval(render, 30 * 1000);
-  render();
-  load();
+  async function loadExternal(){try{const response=await fetch('/api/external',{cache:'no-store'});if(!response.ok)throw Error();externalState=await response.json();}catch{externalState={status:'unavailable'};}render();}
+  async function loadSettings(){try{const response=await fetch('/api/settings',{cache:'no-store'});if(response.ok)setting=(await response.json()).language;}catch{}render();}
+  async function load(force=false){if(loading)return;loading=true;render();try{const response=await fetch(force?'/api/refresh':'/api/usage',{method:force?'POST':'GET',cache:'no-store'});if(!response.ok)throw Error();state=await response.json();}catch{state={status:'unavailable',errorCode:'service_unavailable'};}finally{loading=false;render();loadExternal();loadSettings();}}
+  byId('language').addEventListener('change',async event=>{try{const response=await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({language:event.target.value})});if(response.ok)setting=(await response.json()).language;}catch{}render();});
+  refreshButton.addEventListener('click',()=>load(true));document.addEventListener('visibilitychange',()=>{if(!document.hidden)load();});setInterval(()=>load(),60000);setInterval(render,30000);render();load();
 }

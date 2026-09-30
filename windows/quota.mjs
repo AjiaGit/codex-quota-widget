@@ -31,5 +31,12 @@ export function normalizeQuota(response, accountPlanType = null) {
     plan,
     fiveHour: plan === 'plus' ? pickWindow(codex, 300) : null,
     resetCards: Number.isSafeInteger(availableCount) && availableCount >= 0 ? availableCount : null,
+    resetDetails: Array.isArray(response.rateLimitResetCredits?.credits)
+      ? response.rateLimitResetCredits.credits.filter(row => row && typeof row === 'object').slice(0, 100).map(row => ({
+        title: typeof row.title === 'string' ? row.title.slice(0, 200) : null,
+        description: typeof row.description === 'string' ? row.description.slice(0, 1000) : null,
+        grantedAt: Number.isSafeInteger(row.grantedAt) && row.grantedAt > 0 && row.grantedAt < 8640000000000 ? row.grantedAt : null,
+        expiresAt: Number.isSafeInteger(row.expiresAt) && row.expiresAt > 0 && row.expiresAt < 8640000000000 ? row.expiresAt : null,
+      })) : null,
   };
 }

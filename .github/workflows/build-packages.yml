@@ -1,0 +1,208 @@
+name: Build packages
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, release-preparation]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-packages-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '24.19.0'
+
+jobs:
+  macos:
+    name: macOS ${{ matrix.package_arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+            package_arch: arm64
+            node_arch: arm64
+            node_sha256: 8294b7aa9b03997481c06babf1e8b270c859358f27da57a11509afe537ac381d
+          - runner: macos-15-intel
+            arch: x86_64
+            package_arch: x64
+            node_arch: x64
+            node_sha256: d1b5e999db158c62fe8f7267a4476b035d8bd93b1a605bac24a3f0dd166e3316
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Download and verify the official Node distribution
+        env:
+          NODE_ARCH: ${{ matrix.node_arch }}
+          NODE_SHA256: ${{ matrix.node_sha256 }}
+        run: |
+          set -euo pipefail
+          runtime_dir="$RUNNER_TEMP/codex-quota-node"
+          mkdir -p "$runtime_dir"
+          cd "$runtime_dir"
+          archive="node-v${NODE_VERSION}-darwin-${NODE_ARCH}.tar.gz"
+          base="https://nodejs.org/dist/v${NODE_VERSION}"
+          curl --fail --location --retry 3 --output SHASUMS256.txt "$base/SHASUMS256.txt"
+          official="$(awk -v file="$archive" '$2 == file { print $1 }' SHASUMS256.txt)"
+          test "$official" = "$NODE_SHA256"
+          curl --fail --location --retry 3 --output "$archive" "$base/$archive"
+          printf '%s  %s\n' "$NODE_SHA256" "$archive" | shasum -a 256 -c -
+          tar -xzf "$archive"
+          node_root="$runtime_dir/node-v${NODE_VERSION}-darwin-${NODE_ARCH}"
+          test -f "$node_root/LICENSE"
+          test "$("$node_root/bin/node" --version)" = "v${NODE_VERSION}"
+          printf 'NODE_ROOT=%s\n' "$node_root" >> "$GITHUB_ENV"
+          printf '%s\n' "$node_root/bin" >> "$GITHUB_PATH"
+      - name: Check documentation and both core test suites
+        run: |
+          node scripts/check-docs.mjs
+          node scripts/core-test.mjs
+      - name: Test native macOS behavior and source contracts
+        run: node --test macos/test/native*.mjs
+      - name: Build and inspect the app
+        id: build
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          VERSION="$(tr -d '\r\n' < VERSION)"
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          export VERSION OUTPUT_DIR="$RUNNER_TEMP/codex-quota-dist"
+          bash scripts/build-macos.sh
+          app="$OUTPUT_DIR/Codex Quota Widget.app"
+          helper="$app/Contents/Helpers/QuotaWidget.app"
+          service="$app/Contents/Resources/service"
+          plutil -lint "$app/Contents/Info.plist" "$helper/Contents/Info.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$VERSION"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$app/Contents/Info.plist")" = 13.5
+          codesign --verify --deep --strict "$app"
+          for executable in "$app/Contents/MacOS/Launch" "$helper/Contents/MacOS/CodexQuota" "$service/runtime/node"; do
+            test -x "$executable"
+            lipo -verify_arch "$ARCH" "$executable"
+          done
+          cmp "$NODE_ROOT/LICENSE" "$service/runtime/LICENSE"
+          cmp LICENSE "$app/Contents/Resources/LICENSE"
+          cmp THIRD_PARTY_NOTICES.md "$app/Contents/Resources/THIRD_PARTY_NOTICES.md"
+          test "$("$service/runtime/node" --version)" = "v${NODE_VERSION}"
+          "$app/Contents/MacOS/Launch" --icon-png "$RUNNER_TEMP/quota-icon.png"
+          test -s "$RUNNER_TEMP/quota-icon.png"
+          package="CodexQuotaWidget-${VERSION}-macos-${{ matrix.package_arch }}.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$app" "$OUTPUT_DIR/$package"
+          cd "$OUTPUT_DIR"
+          shasum -a 256 "$package" > SHA256SUMS
+          shasum -a 256 -c SHA256SUMS
+          printf 'version=%s\n' "$VERSION" >> "$GITHUB_OUTPUT"
+          printf 'package=%s\n' "$package" >> "$GITHUB_OUTPUT"
+      - name: Upload app package and checksum
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: CodexQuotaWidget-${{ steps.build.outputs.version }}-macos-${{ matrix.package_arch }}
+          path: |
+            ${{ runner.temp }}/codex-quota-dist/${{ steps.build.outputs.package }}
+            ${{ runner.temp }}/codex-quota-dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Download and verify the official Node distribution
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $runtimeDir = Join-Path $env:RUNNER_TEMP 'codex-quota-node'
+          [void][IO.Directory]::CreateDirectory($runtimeDir)
+          $archive = "node-v$env:NODE_VERSION-win-x64.zip"
+          $expected = '57f71ab3652e797d84acddc79c81cc9ff1c6ddb2a1974cdb83f00fee9bff4c73'
+          $base = "https://nodejs.org/dist/v$env:NODE_VERSION"
+          $checksums = (Invoke-WebRequest "$base/SHASUMS256.txt" -UseBasicParsing).Content
+          $entry = @($checksums -split "`n" | Where-Object { $_.Trim() -match ('^[a-f0-9]{64}\s+' + [regex]::Escape($archive) + '$') })
+          if ($entry.Count -ne 1 -or ($entry[0].Trim() -split '\s+')[0] -ne $expected) { throw 'Official Node checksum does not match the pinned release.' }
+          $archivePath = Join-Path $runtimeDir $archive
+          Invoke-WebRequest "$base/$archive" -OutFile $archivePath -UseBasicParsing
+          if ((Get-FileHash $archivePath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw 'Node archive checksum failed.' }
+          Expand-Archive -LiteralPath $archivePath -DestinationPath $runtimeDir
+          $nodeRoot = Join-Path $runtimeDir "node-v$env:NODE_VERSION-win-x64"
+          if (-not (Test-Path (Join-Path $nodeRoot 'LICENSE'))) { throw 'Node LICENSE is missing.' }
+          $actualVersion = & (Join-Path $nodeRoot 'node.exe') --version
+          if ($LASTEXITCODE -ne 0 -or $actualVersion -ne "v$env:NODE_VERSION") { throw 'Unexpected Node version.' }
+          "NODE_ROOT=$nodeRoot" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          $nodeRoot | Out-File $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Check documentation and both core test suites
+        run: |
+          node scripts/check-docs.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Documentation check failed.' }
+          node scripts/core-test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Core tests failed.' }
+      - name: Test native Windows helpers
+        run: |
+          $tests = @(Get-ChildItem windows/test/native*.ps1)
+          if (-not $tests.Count) { throw 'No native tests were found.' }
+          foreach ($test in $tests) {
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $test.FullName
+            if ($LASTEXITCODE -ne 0) { throw "Native test failed: $($test.Name)" }
+          }
+      - name: Install verified Inno Setup 6.7.3
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = Join-Path $env:RUNNER_TEMP 'innosetup-6.7.3.exe'
+          Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe' -OutFile $setup -UseBasicParsing
+          $expected = '9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732'
+          if ((Get-FileHash $setup -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw 'Inno Setup checksum failed.' }
+          $signature = Get-AuthenticodeSignature $setup
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Pyrsys B\.V\.') { throw 'Inno Setup publisher signature failed.' }
+          $innoRoot = Join-Path $env:RUNNER_TEMP 'Inno Setup 6'
+          $install = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',('/DIR="' + $innoRoot + '"')) -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw 'Inno Setup installation failed.' }
+          $iscc = Join-Path $innoRoot 'ISCC.exe'
+          if (-not (Test-Path $iscc)) { throw 'ISCC.exe is missing.' }
+          "ISCC_PATH=$iscc" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Build installer and test install, upgrade, and uninstall
+        id: build
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Get-Content VERSION -Raw).Trim()
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid VERSION.' }
+          $output = Join-Path $env:RUNNER_TEMP 'codex-quota-dist'
+          & installer/windows/Build.ps1 -NodeRoot $env:NODE_ROOT -OutputDir $output -Version $version -IsccPath $env:ISCC_PATH
+          $components = $version.Split('.')
+          $upgradeVersion = "$($components[0]).$($components[1]).$([int]$components[2] + 1)"
+          $upgradeOutput = Join-Path $env:RUNNER_TEMP 'codex-quota-upgrade-test'
+          & installer/windows/Build.ps1 -NodeRoot $env:NODE_ROOT -OutputDir $upgradeOutput -Version $upgradeVersion -IsccPath $env:ISCC_PATH
+          $package = "CodexQuotaWidget-$version-windows-x64.exe"
+          $installer = Join-Path $output $package
+          $upgrade = Join-Path $upgradeOutput "CodexQuotaWidget-$upgradeVersion-windows-x64.exe"
+          & installer/windows/InstallerSmoke.ps1 -Installer $installer -UpgradeInstaller $upgrade -OutputDir (Join-Path $env:RUNNER_TEMP 'codex-quota-smoke')
+          $hash = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          [IO.File]::WriteAllText((Join-Path $output 'SHA256SUMS'), "$hash  $package`n", [Text.Encoding]::ASCII)
+          "version=$version" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "package=$package" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      - name: Upload installer and checksum
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: CodexQuotaWidget-${{ steps.build.outputs.version }}-windows-x64
+          path: |
+            ${{ runner.temp }}/codex-quota-dist/${{ steps.build.outputs.package }}
+            ${{ runner.temp }}/codex-quota-dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

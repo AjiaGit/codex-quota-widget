@@ -6,12 +6,31 @@
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'Native.ps1')
+$script:dataDirectory = Get-WidgetDataDirectory
+Initialize-WidgetStorage $PSScriptRoot $script:dataDirectory
+$script:languageSetting = Get-WidgetLanguageSetting $script:dataDirectory
+$script:language = Resolve-WidgetLanguage $script:languageSetting
+$script:settingsTask = $null
+$script:detailsForm = $null
+$script:detailsText = $null
+function T([string]$key, [object[]]$values = @()) { Get-WidgetText $key $script:language $values }
+
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Net.Http
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
+public static class WidgetPower {
+    private static int resumed;
+    public static void Enable() { Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged; }
+    public static void Disable() { Microsoft.Win32.SystemEvents.PowerModeChanged -= OnPowerModeChanged; }
+    private static void OnPowerModeChanged(object sender, Microsoft.Win32.PowerModeChangedEventArgs e) {
+        if (e.Mode == Microsoft.Win32.PowerModes.Resume) System.Threading.Interlocked.Exchange(ref resumed, 1);
+    }
+    public static bool ConsumeResume() { return System.Threading.Interlocked.Exchange(ref resumed, 0) != 0; }
+}
 public static class WidgetDrag {
     [DllImport("user32.dll")] public static extern bool ReleaseCapture();
     [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, int msg, int wParam, IntPtr lParam);
@@ -21,14 +40,15 @@ public static class WidgetDrag {
 
 [System.Windows.Forms.Application]::EnableVisualStyles()
 $script:baseUrl = $BaseUrl
-$script:showRequest = Join-Path (Join-Path $env:TEMP 'CodexWeeklyMonitor') 'show.request'
-$script:positionPath = Join-Path (Join-Path $env:TEMP 'CodexWeeklyMonitor') 'window.json'
+$script:showRequest = Join-Path $script:dataDirectory 'show.request'
+$script:positionPath = Join-Path $script:dataDirectory 'window.json'
 $script:positionDirty = $false
 $script:lastPositionSave = [DateTime]::MinValue
 $script:client = New-Object System.Net.Http.HttpClient
 $script:client.Timeout = [TimeSpan]::FromSeconds(25)
 $script:requestTask = $null
 $script:requestManual = $false
+$script:queuedManual = $false
 $script:externalTask = $null
 $script:externalData = $null
 $script:nextExternalPoll = [DateTime]::MinValue
@@ -37,7 +57,7 @@ $script:lastRender = [DateTime]::MinValue
 $script:lastThemeCheck = [DateTime]::MinValue
 $script:data = $null
 $script:remaining = $null
-$script:message = '正在读取'
+$script:message = (T 'reading')
 $script:reallyExit = $false
 $script:colors = @{}
 $script:layoutPlus = $null
@@ -48,6 +68,7 @@ $script:compactDragging = $false
 $script:compactMoved = $false
 $script:resizing = $false
 $script:trayIconKey = ''
+$script:setupCode = $null
 $script:ownedTrayIcon = $null
 $script:compactSize = [System.Drawing.Size]::new(52, 76)
 $script:detailSize = [System.Drawing.Size]::new(404, 390)
@@ -68,7 +89,7 @@ function New-Label([string]$text, [int]$x, [int]$y, [int]$width, [int]$height, [
 }
 
 $script:form = New-Object System.Windows.Forms.Form
-$form.Text = 'Codex 周额度'
+$form.Text = (T 'app')
 $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
 $form.ShowInTaskbar = $false
 $form.TopMost = $true
@@ -90,6 +111,7 @@ if ($saved) {
         }
     } catch { }
 }
+if ($saved -and $null -ne $saved.topMost) { $form.TopMost = [bool]$saved.topMost }
 if ($saved -and $saved.mode -eq 'Compact') { $script:mode = 'Compact' }
 $form.ClientSize = if ($script:mode -eq 'Compact') { $script:compactSize } else { $script:detailSize }
 $form.Location = New-Object System.Drawing.Point(($bounds.Right - $form.Width - 24), ($bounds.Top + 88))
@@ -124,14 +146,14 @@ function Set-RoundedRegion {
 }
 Set-RoundedRegion
 
-$title = New-Label 'Codex 周额度' 18 10 132 30 11.5 $true
+$title = New-Label (T 'app') 18 10 132 30 11.5 $true
 $title.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
-$status = New-Label '读取中' 155 10 100 30 9
+$status = New-Label (T 'loading') 155 10 100 30 9
 $status.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
-$compactButton = New-Label '极简' 261 10 46 30 9
+$compactButton = New-Label (T 'compact') 261 10 46 30 9
 $compactButton.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
 $refresh = New-Object System.Windows.Forms.Button
-$refresh.Text = '刷新'
+$refresh.Text = (T 'refresh')
 $refresh.Location = New-Object System.Drawing.Point(315, 10)
 $refresh.Size = New-Object System.Drawing.Size(48, 30)
 $refresh.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 9)
@@ -179,33 +201,35 @@ $ring.Add_Paint({
     $track.Dispose(); $arc.Dispose()
 })
 
-$caption = New-Label '本周剩余' 156 63 224 26 10.5
-$countdown = New-Label '正在读取' 154 94 230 45 20 $true
-$reset = New-Label '重置时间 —' 156 144 224 25 10
+$caption = New-Label (T 'weekly') 156 63 224 26 10.5
+$countdown = New-Label (T 'reading') 154 94 230 45 20 $true
+$reset = New-Label (T 'resetUnknown') 156 144 224 25 10
 $divider = New-Object System.Windows.Forms.Panel
 $divider.Location = New-Object System.Drawing.Point(20, 182)
 $divider.Size = New-Object System.Drawing.Size(364, 1)
-$updated = New-Label '最近更新 —' 20 194 240 25 9.5
-$cards = New-Label '重置卡 —' 281 194 103 25 9.5
+$updated = New-Label (T 'lastUpdated' @('—')) 20 194 240 25 9.5
+$cards = New-Label (T 'cardsUnknown') 281 194 103 25 9.5
+$cards.Cursor = [System.Windows.Forms.Cursors]::Hand
+$cards.Add_Click({ Show-ResetDetails })
 $cards.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
 
 $fiveDivider = New-Object System.Windows.Forms.Panel
 $fiveDivider.Location = New-Object System.Drawing.Point(20, 226)
 $fiveDivider.Size = New-Object System.Drawing.Size(364, 1)
-$fiveTitle = New-Label '5小时额度' 20 238 138 26 10.5 $true
-$fiveValue = New-Label '暂不可用' 238 238 146 26 10.5 $true
+$fiveTitle = New-Label (T 'fiveHour') 20 238 138 26 10.5 $true
+$fiveValue = New-Label (T 'unavailable') 238 238 146 26 10.5 $true
 $fiveValue.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
-$fiveReset = New-Label '重置时间 —' 20 267 364 22 9.5
+$fiveReset = New-Label (T 'resetUnknown') 20 267 364 22 9.5
 
 $externalDivider = New-Object System.Windows.Forms.Panel
 $externalDivider.Location = New-Object System.Drawing.Point(20, 226)
 $externalDivider.Size = New-Object System.Drawing.Size(364, 1)
-$externalTitle = New-Label '公开全局临时重置' 20 238 364 26 10.5 $true
-$lastGlobal = New-Label '上次公告 —' 20 270 364 24 9.5
-$delivery = New-Label '送达时间 —' 20 297 364 24 9.5
-$odds = New-Label '未来概率暂不可用' 20 326 364 26 9.5 $true
+$externalTitle = New-Label (T 'external') 20 238 364 26 10.5 $true
+$lastGlobal = New-Label (T 'publicUnavailable') 20 270 364 24 9.5
+$delivery = New-Label (T 'deliveryEmpty') 20 297 364 24 9.5
+$odds = New-Label (T 'oddsUnknown') 20 326 364 26 9.5 $true
 $attribution = New-Object System.Windows.Forms.LinkLabel
-$attribution.Text = '历史频率估计 · codexreset.ai'
+$attribution.Text = (T 'publicSource')
 $attribution.Location = New-Object System.Drawing.Point(20, 356)
 $attribution.Size = New-Object System.Drawing.Size(364, 22)
 $attribution.Font = New-Object System.Drawing.Font('Segoe UI', 9.5)
@@ -233,12 +257,12 @@ $script:detailControls = @($title, $status, $compactButton, $refresh, $close, $c
     $fiveDivider, $fiveTitle, $fiveValue, $fiveReset, $externalDivider, $externalTitle, $lastGlobal, $delivery, $odds, $attribution)
 
 $tooltip = New-Object System.Windows.Forms.ToolTip
-$tooltip.SetToolTip($refresh, '立即刷新额度')
-$tooltip.SetToolTip($close, '隐藏到系统托盘')
-$tooltip.SetToolTip($compactButton, '切换到极简悬浮窗')
-$tooltip.SetToolTip($ring, '极简模式可单击展开，拖动可调整位置')
-foreach ($zone in $script:resizeEdges.Values) { $tooltip.SetToolTip($zone, '拖动边缘调整大小') }
-$tooltip.SetToolTip($odds, '公开全局临时重置的历史频率估计，不是账号每周重置时间，也不是 OpenAI 承诺。')
+$tooltip.SetToolTip($refresh, (T 'tipRefresh'))
+$tooltip.SetToolTip($close, (T 'tipHide'))
+$tooltip.SetToolTip($compactButton, (T 'tipCompact'))
+$tooltip.SetToolTip($ring, (T 'tipExpand'))
+foreach ($zone in $script:resizeEdges.Values) { $tooltip.SetToolTip($zone, (T 'tipResize')) }
+$tooltip.SetToolTip($odds, (T 'tipOdds'))
 
 function Set-ControlBox($control, [double]$x, [double]$y, [double]$width, [double]$height) {
     $control.Bounds = [System.Drawing.Rectangle]::new(
@@ -415,35 +439,40 @@ function Show-Quota {
         $days = [int][Math]::Floor($span.TotalDays)
         $hours = $span.Hours
         $minutes = $span.Minutes
-        $countdown.Text = if ($days -gt 0) { "${days}天 ${hours}小时" } elseif ($hours -gt 0) { "${hours}小时 ${minutes}分" } else { "${minutes}分钟" }
-        $reset.Text = '重置 ' + $resetAt.ToLocalTime().ToString('MM/dd HH:mm')
-        $updated.Text = '最近更新 ' + ([DateTimeOffset]::FromUnixTimeMilliseconds([long]$value.updatedAt)).ToLocalTime().ToString('MM/dd HH:mm')
-        $cards.Text = if ($null -ne $value.resetCards) { "重置卡 $($value.resetCards)张" } else { '重置卡 —' }
-        $status.Text = '数据已更新'
-        $caption.Text = '距离重置'
+        $countdown.Text = Format-WidgetCountdown $span $script:language
+        $reset.Text = (T 'reset' @((Format-WidgetDate $resetAt $script:language)))
+        $updated.Text = (T 'lastUpdated' @((Format-WidgetDate ([DateTimeOffset]::FromUnixTimeMilliseconds([long]$value.updatedAt)) $script:language)))
+        $cards.Text = if ($null -ne $value.resetCards) { (T 'cards' @($value.resetCards)) } else { (T 'cardsUnknown') }
+        $status.Text = (T 'updated')
+        $caption.Text = (T 'untilReset')
         if ($value.plan -eq 'plus') {
             $five = $value.fiveHour
             try {
                 $fiveTime = [DateTimeOffset]::FromUnixTimeSeconds([long]$five.resetsAt)
                 if ($fiveTime -gt $now -and [double]$five.remainingPercent -ge 0 -and [double]$five.remainingPercent -le 100) {
-                    $fiveValue.Text = "$([int]$five.remainingPercent)% 剩余"
-                    $fiveReset.Text = '重置 ' + $fiveTime.ToLocalTime().ToString('MM/dd HH:mm')
-                } else { $fiveValue.Text = '暂不可用'; $fiveReset.Text = '重置时间 —' }
-            } catch { $fiveValue.Text = '暂不可用'; $fiveReset.Text = '重置时间 —' }
+                    $fiveValue.Text = (T 'percentRemaining' @([int]$five.remainingPercent))
+                    $fiveReset.Text = (T 'reset' @((Format-WidgetDate $fiveTime $script:language)))
+                } else { $fiveValue.Text = (T 'unavailable'); $fiveReset.Text = (T 'resetUnknown') }
+            } catch { $fiveValue.Text = (T 'unavailable'); $fiveReset.Text = (T 'resetUnknown') }
         }
     } else {
         $script:remaining = $null
-        $countdown.Text = '暂不可用'
-        $reset.Text = '重置时间 —'
-        $updated.Text = if ($value -and $value.status -eq 'ok') { '数据已过期，请刷新' } else { $script:message }
-        $cards.Text = '重置卡 —'
-        $status.Text = '暂不可用'
-        $caption.Text = '本周剩余'
+        $countdown.Text = (T 'unavailable')
+        $reset.Text = (T 'resetUnknown')
+        $updated.Text = if ($value -and $value.status -eq 'ok') { (T 'stale') } else { $script:message }
+        $cards.Text = (T 'cardsUnknown')
+        $status.Text = (T 'unavailable')
+        $caption.Text = (T 'weekly')
     }
     $ringTip = if ($script:mode -eq 'Compact') {
-        if ($null -eq $script:remaining) { '额度暂不可用 · 单击展开' } else { "本周剩余 $($script:remaining)% · 单击展开" }
-    } else { '拖动悬浮窗' }
+        if ($null -eq $script:remaining) { (T 'tipUnavailable') } else { (T 'tipRemaining' @($script:remaining)) }
+    } else { (T 'tipDrag') }
     $tooltip.SetToolTip($ring, $ringTip)
+    $tooltip.SetToolTip($cards, (T 'openDetails'))
+    $tooltip.SetToolTip($updated, $updated.Text)
+    if ($script:detailsText -and -not $script:detailsText.IsDisposed) { $script:detailsText.Text = Format-WidgetResetDetails $script:data $script:language }
+    $script:setupCode = if ($value -and $value.errorCode -in @('cli_missing','signed_out')) { [string]$value.errorCode } else { $null }
+    if ($setupItem) { $setupItem.Visible = $null -ne $script:setupCode }
     $ring.Invalidate()
     Set-Tray-QuotaIcon
 }
@@ -455,22 +484,22 @@ function Show-External {
     if ($last) {
         try {
             $time = [DateTimeOffset]::Parse([string]$last.announcedAt).ToLocalTime()
-            $scope = if ($last.scope -eq 'paid') { '付费账号' } elseif ($last.scope -eq 'all') { '全部账号' } else { '范围未明' }
-            $lastGlobal.Text = '上次公告 ' + $time.ToString('MM/dd HH:mm') + " · $scope"
+            $scope = if ($last.scope -eq 'paid') { (T 'paid') } elseif ($last.scope -eq 'all') { (T 'all') } else { (T 'unknownScope') }
+            $lastGlobal.Text = (T 'lastAnnouncement' @((Format-WidgetDate $time $script:language), $scope))
             $delivery.Text = if ($last.deliveredAt) {
-                '记录送达 ' + ([DateTimeOffset]::Parse([string]$last.deliveredAt).ToLocalTime().ToString('MM/dd HH:mm'))
-            } else { '送达时间未确认' }
-        } catch { $lastGlobal.Text = '上次公开重置暂不可用'; $delivery.Text = '送达时间 —' }
+                (T 'delivered' @((Format-WidgetDate ([DateTimeOffset]::Parse([string]$last.deliveredAt)) $script:language)))
+            } else { (T 'deliveryUnknown') }
+        } catch { $lastGlobal.Text = (T 'publicUnavailable'); $delivery.Text = (T 'deliveryEmpty') }
     } else {
-        $lastGlobal.Text = '上次公开重置暂不可用'
-        $delivery.Text = '送达时间 —'
+        $lastGlobal.Text = (T 'publicUnavailable')
+        $delivery.Text = (T 'deliveryEmpty')
     }
     if ($forecast) {
-        $odds.Text = "未来概率 24h $($forecast.next24h)% · 48h $($forecast.next48h)% · 7天 $($forecast.next7d)%"
-        Set-AttributionLinks '历史频率估计 · codexreset.ai / whenreset.app'
+        $odds.Text = (T 'probability' @($forecast.next24h, $forecast.next48h, $forecast.next7d))
+        Set-AttributionLinks (T 'attribution')
     } else {
-        $odds.Text = '未来概率暂不可用'
-        Set-AttributionLinks '公开数据 · codexreset.ai'
+        $odds.Text = (T 'oddsUnknown')
+        Set-AttributionLinks (T 'publicSource')
     }
 }
 
@@ -481,6 +510,60 @@ function Set-AttributionLinks([string]$text) {
         $index = $text.IndexOf($entry[0], [System.StringComparison]::Ordinal)
         if ($index -ge 0) { [void]$attribution.Links.Add($index, $entry[0].Length, $entry[1]) }
     }
+}
+
+
+function Start-SettingsRequest {
+    if ($script:settingsTask -and -not $script:settingsTask.IsCompleted) { return }
+    try { $script:settingsTask = $script:client.GetAsync("$script:baseUrl/api/settings") } catch { }
+}
+function Save-WidgetLanguage([string]$setting) {
+    try {
+        $body = @{ language = $setting } | ConvertTo-Json -Compress
+        $result = Invoke-RestMethod -Uri "$script:baseUrl/api/settings" -Method Post -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) -TimeoutSec 3
+        if ($result.language -notin @('auto','en','zh-CN')) { throw 'Invalid settings response' }
+        $script:languageSetting = [string]$result.language
+        Set-Language
+    } catch {
+        [void][Windows.Forms.MessageBox]::Show((T 'languageSaveFailed'), (T 'app'), [Windows.Forms.MessageBoxButtons]::OK, [Windows.Forms.MessageBoxIcon]::Warning)
+    }
+}
+function Set-Language {
+    $script:language = Resolve-WidgetLanguage $script:languageSetting
+    $form.Text = T 'app'; $title.Text = T 'app'; $compactButton.Text = T 'compact'; $refresh.Text = T 'refresh'; $fiveTitle.Text = T 'fiveHour'; $externalTitle.Text = T 'external'
+    $showItem.Text = T 'show'; $modeItem.Text = T 'mode'; $hideItem.Text = T 'hide'; $refreshItem.Text = T 'refreshNow'; $topItem.Text = T 'onTop'; $exitItem.Text = T 'quit'
+    $languageMenu.Text = T 'language'; $autoLanguageItem.Text = T 'languageAuto'; $englishLanguageItem.Text = T 'languageEn'; $chineseLanguageItem.Text = T 'languageZh'
+    foreach ($item in @($autoLanguageItem,$englishLanguageItem,$chineseLanguageItem)) { $item.Checked = $item.Tag -eq $script:languageSetting }
+    $detailsItem.Text = T 'openDetails'; $setupItem.Text = T 'setup'
+    $tooltip.SetToolTip($refresh, (T 'tipRefresh')); $tooltip.SetToolTip($close, (T 'tipHide')); $tooltip.SetToolTip($compactButton, (T 'tipCompact')); $tooltip.SetToolTip($odds, (T 'tipOdds'))
+    foreach ($zone in $script:resizeEdges.Values) { $tooltip.SetToolTip($zone, (T 'tipResize')) }
+    if ($script:detailsForm -and -not $script:detailsForm.IsDisposed) { $script:detailsForm.Text = T 'detailsTitle' }
+    $script:message = if ($script:data) { Get-WidgetErrorText ([string]$script:data.errorCode) $script:language } else { T 'service_unavailable' }
+    $script:trayIconKey = ''
+    Show-Quota; Show-External
+}
+function Show-ResetDetails {
+    if ($script:detailsForm -and -not $script:detailsForm.IsDisposed) { $script:detailsForm.Show(); $script:detailsForm.Activate(); return }
+    $script:detailsForm = New-Object Windows.Forms.Form
+    $script:detailsForm.Text = T 'detailsTitle'
+    $script:detailsForm.Size = [Drawing.Size]::new(500,400)
+    $script:detailsForm.MinimumSize = [Drawing.Size]::new(360,260)
+    $script:detailsForm.StartPosition = [Windows.Forms.FormStartPosition]::CenterParent
+    $script:detailsForm.TopMost = $form.TopMost
+    $script:detailsText = New-Object Windows.Forms.TextBox
+    $script:detailsText.Multiline = $true; $script:detailsText.ReadOnly = $true; $script:detailsText.ScrollBars = [Windows.Forms.ScrollBars]::Vertical
+    $script:detailsText.WordWrap = $true; $script:detailsText.Dock = [Windows.Forms.DockStyle]::Fill
+    $script:detailsText.Font = [Drawing.Font]::new('Segoe UI',11)
+    $script:detailsText.BackColor = $script:colors.back; $script:detailsText.ForeColor = $script:colors.text
+    $script:detailsText.Text = Format-WidgetResetDetails $script:data $script:language
+    [void]$script:detailsForm.Controls.Add($script:detailsText)
+    $script:detailsForm.Show($form)
+}
+function Show-Setup {
+    if ($script:setupCode -eq 'cli_missing') {
+        [void][Windows.Forms.MessageBox]::Show((T 'installHelp'), (T 'setup'))
+        Start-Process 'https://developers.openai.com/codex/cli/'
+    } else { [void][Windows.Forms.MessageBox]::Show((T 'signInHelp'), (T 'setup')) }
 }
 
 function Start-ExternalRequest {
@@ -496,7 +579,7 @@ function Start-ExternalRequest {
 }
 
 function Start-Request([bool]$manual) {
-    if ($script:requestTask -and -not $script:requestTask.IsCompleted) { return }
+    if ($script:requestTask -and -not $script:requestTask.IsCompleted) { if ($manual) { $script:queuedManual = $true }; return }
     try {
         $script:requestManual = $manual
         $script:requestTask = if ($manual) {
@@ -505,12 +588,13 @@ function Start-Request([bool]$manual) {
         } else {
             $script:client.GetAsync("$script:baseUrl/api/usage")
         }
-        $script:nextPoll = [DateTime]::UtcNow.AddMinutes(1)
-        $status.Text = '正在刷新'
+        $script:nextPoll = [DateTime]::UtcNow.AddSeconds(60)
+        Start-SettingsRequest
+        $status.Text = (T 'refreshing')
     } catch {
         $script:requestTask = $null
         $script:data = $null
-        $script:message = '本机服务未连接'
+        $script:message = (T 'service_unavailable')
         Show-Quota
     }
 }
@@ -548,7 +632,7 @@ function Set-Tray-QuotaIcon {
         $script:tray.Icon = $icon
         $script:ownedTrayIcon = $icon
         if ($old) { $old.Dispose() }
-        $script:tray.Text = if ($null -eq $script:remaining) { 'Codex 周额度暂不可用' } else { "Codex 本周剩余 $($script:remaining)%" }
+        $script:tray.Text = if ($null -eq $script:remaining) { (T 'trayUnavailable') } else { (T 'trayRemaining' @($script:remaining)) }
         $script:trayIconKey = $key
     } finally {
         foreach ($resource in @($trackPen, $arcPen, $backBrush, $textBrush, $font, $format, $graphics, $bitmap)) {
@@ -563,7 +647,7 @@ function Set-ModeVisual([bool]$compact) {
         foreach ($control in @($fiveDivider, $fiveTitle, $fiveValue, $fiveReset)) { $control.Visible = $false }
     }
     foreach ($zone in $script:resizeEdges.Values) { $zone.Visible = $true }
-    $modeTip = if ($compact) { '单击展开，拖动可调整位置' } else { '拖动悬浮窗' }
+    $modeTip = if ($compact) { (T 'tipExpand') } else { (T 'tipDrag') }
     $tooltip.SetToolTip($ring, $modeTip)
     Update-ResponsiveLayout
     Update-DetailFonts
@@ -754,22 +838,35 @@ foreach ($zone in $script:resizeEdges.Values) {
 $form.Add_SizeChanged({ Update-ResponsiveLayout })
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
-$showItem = $menu.Items.Add('显示悬浮窗')
-$modeItem = $menu.Items.Add('切换极简 / 详细')
-$hideItem = $menu.Items.Add('隐藏到托盘')
-$refreshItem = $menu.Items.Add('立即刷新')
-$topItem = $menu.Items.Add('始终置顶')
-$topItem.Checked = $true
+$showItem = $menu.Items.Add((T 'show'))
+$modeItem = $menu.Items.Add((T 'mode'))
+$hideItem = $menu.Items.Add((T 'hide'))
+$refreshItem = $menu.Items.Add((T 'refreshNow'))
+$topItem = $menu.Items.Add((T 'onTop'))
+$topItem.Checked = $form.TopMost
+
+$detailsItem = $menu.Items.Add((T 'openDetails'))
+$detailsItem.Add_Click({ Show-ResetDetails })
+$setupItem = $menu.Items.Add((T 'setup'))
+$setupItem.Visible = $false
+$setupItem.Add_Click({ Show-Setup })
+$languageMenu = New-Object Windows.Forms.ToolStripMenuItem((T 'language'))
+$autoLanguageItem = $languageMenu.DropDownItems.Add((T 'languageAuto')); $autoLanguageItem.Tag = 'auto'
+$englishLanguageItem = $languageMenu.DropDownItems.Add((T 'languageEn')); $englishLanguageItem.Tag = 'en'
+$chineseLanguageItem = $languageMenu.DropDownItems.Add((T 'languageZh')); $chineseLanguageItem.Tag = 'zh-CN'
+foreach ($item in @($autoLanguageItem,$englishLanguageItem,$chineseLanguageItem)) { $item.Add_Click({ param($sender,$e) Save-WidgetLanguage ([string]$sender.Tag) }) }
+[void]$menu.Items.Add($languageMenu)
+
 [void]$menu.Items.Add('-')
-$exitItem = $menu.Items.Add('退出额度工具')
-$showItem.Add_Click({ $form.Show(); $form.Activate() })
+$exitItem = $menu.Items.Add((T 'quit'))
+$showItem.Add_Click({ $form.Show(); $form.Activate(); Start-Request $true })
 $modeItem.Add_Click({
     $form.Show(); $form.Activate()
     if ($script:mode -eq 'Compact') { Start-ModeTransition 'Detail' } else { Start-ModeTransition 'Compact' }
 })
 $hideItem.Add_Click({ $form.Hide() })
 $refreshItem.Add_Click({ Start-Request $true; $form.Show(); $form.Activate() })
-$topItem.Add_Click({ $form.TopMost = -not $form.TopMost; $topItem.Checked = $form.TopMost })
+$topItem.Add_Click({ $form.TopMost = -not $form.TopMost; $topItem.Checked = $form.TopMost; $script:positionDirty = $true })
 $exitItem.Add_Click({
     $stopScript = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'Stop.ps1'))
     $powershell = (Get-Command powershell.exe).Source
@@ -783,24 +880,45 @@ $form.ContextMenuStrip = $menu
 $ring.ContextMenuStrip = $menu
 $script:tray = New-Object System.Windows.Forms.NotifyIcon
 $script:tray.Icon = [System.Drawing.SystemIcons]::Information
-$script:tray.Text = 'Codex 周额度'
+$script:tray.Text = (T 'app')
 $script:tray.ContextMenuStrip = $menu
 $script:tray.Visible = $true
-$script:tray.Add_DoubleClick({ $form.Show(); $form.Activate() })
+$script:tray.Add_DoubleClick({ $form.Show(); $form.Activate(); Start-Request $true })
+function Save-WindowPosition {
+    if ($script:animating) { return }
+    Write-WidgetJson $script:positionPath @{
+        x = $form.Left; y = $form.Top; mode = $script:mode
+        compactWidth = $script:compactSize.Width; compactHeight = $script:compactSize.Height
+        detailWidth = $script:detailSize.Width; detailHeight = $script:detailSize.Height
+        topMost = $form.TopMost
+    }
+    $script:positionDirty = $false
+    $script:lastPositionSave = [DateTime]::UtcNow
+}
 $form.Add_FormClosing({
     param($sender, $e)
+    Save-WindowPosition
     if (-not $script:reallyExit) { $e.Cancel = $true; $form.Hide() }
 })
 $form.Add_LocationChanged({ $script:positionDirty = $true })
 
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 500
+$script:lastTick = [DateTime]::UtcNow
 $timer.Add_Tick({
+    $tickNow = [DateTime]::UtcNow
+    if ([WidgetPower]::ConsumeResume() -or ($tickNow - $script:lastTick).TotalSeconds -gt 10) { Start-Request $true; Start-ExternalRequest }
+    $script:lastTick = $tickNow
+    $quitRequest = Join-Path $script:dataDirectory 'quit.request'
+    if (Test-Path -LiteralPath $quitRequest) {
+        Remove-Item -LiteralPath $quitRequest -ErrorAction SilentlyContinue
+        $script:reallyExit = $true; $form.Close(); return
+    }
     if (Test-Path -LiteralPath $script:showRequest) {
         Remove-Item -LiteralPath $script:showRequest -ErrorAction SilentlyContinue
         $form.Show()
         $form.Activate()
-        Start-Request $false
+        Start-Request $true
         Start-ExternalRequest
     }
     if ($script:requestTask -and $script:requestTask.IsCompleted) {
@@ -810,16 +928,30 @@ $timer.Add_Tick({
                 $response.EnsureSuccessStatusCode() | Out-Null
                 $json = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
                 $script:data = $json | ConvertFrom-Json
-                $script:message = if ($script:data.message) { [string]$script:data.message } else { '额度暂不可用' }
+                $script:message = Get-WidgetErrorText ([string]$script:data.errorCode) $script:language
             } finally { $response.Dispose() }
         } catch {
             $script:data = $null
-            $script:message = '本机服务未连接'
+            $script:message = (T 'service_unavailable')
         }
         $script:requestTask = $null
         Show-Quota
         if ($script:requestManual) { Start-ExternalRequest }
         $script:requestManual = $false
+        if ($script:queuedManual) { $script:queuedManual = $false; Start-Request $true }
+    }
+    if ($script:settingsTask -and $script:settingsTask.IsCompleted) {
+        try {
+            $response = $script:settingsTask.GetAwaiter().GetResult()
+            try {
+                $response.EnsureSuccessStatusCode() | Out-Null
+                $settings = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult() | ConvertFrom-Json
+                if ($settings.language -in @('auto','en','zh-CN') -and ($settings.language -ne $script:languageSetting -or (Resolve-WidgetLanguage $settings.language) -ne $script:language)) {
+                    $script:languageSetting = [string]$settings.language; Set-Language
+                }
+            } finally { $response.Dispose() }
+        } catch { }
+        $script:settingsTask = $null
     }
     if ($script:externalTask -and $script:externalTask.IsCompleted) {
         try {
@@ -834,13 +966,7 @@ $timer.Add_Tick({
     }
     $now = [DateTime]::UtcNow
     if ($script:positionDirty -and -not $script:animating -and ($now - $script:lastPositionSave).TotalSeconds -ge 1) {
-        @{
-            x = $form.Left; y = $form.Top; mode = $script:mode
-            compactWidth = $script:compactSize.Width; compactHeight = $script:compactSize.Height
-            detailWidth = $script:detailSize.Width; detailHeight = $script:detailSize.Height
-        } | ConvertTo-Json | Set-Content -LiteralPath $script:positionPath -Encoding UTF8
-        $script:positionDirty = $false
-        $script:lastPositionSave = $now
+        Save-WindowPosition
     }
     if (-not $script:requestTask -and $now -ge $script:nextPoll) { Start-Request $false }
     if (-not $script:externalTask -and $now -ge $script:nextExternalPoll) { Start-ExternalRequest }
@@ -853,7 +979,7 @@ $form.Add_Shown({
         $form.Bounds = [System.Drawing.Rectangle]::new($form.Left, $form.Top, $script:compactSize.Width, $script:compactSize.Height)
         Set-RoundedRegion
     }
-    Start-Request $false
+    Start-Request $true
     Start-ExternalRequest
 })
 $form.Add_FormClosed({
@@ -862,11 +988,16 @@ $form.Add_FormClosed({
     $script:tray.Visible = $false
     $script:tray.Dispose()
     if ($script:ownedTrayIcon) { $script:ownedTrayIcon.Dispose() }
+    if ($script:detailsForm -and -not $script:detailsForm.IsDisposed) { $script:detailsForm.Close(); $script:detailsForm.Dispose() }
     $client.Dispose()
 })
 Set-Theme
 Show-Quota
 Show-External
 Set-ModeVisual ($script:mode -eq 'Compact')
+Set-Language
+# The event handler only sets a thread-safe flag; the UI timer consumes it.
+[WidgetPower]::Enable()
 $timer.Start()
-[System.Windows.Forms.Application]::Run($form)
+try { [System.Windows.Forms.Application]::Run($form) }
+finally { [WidgetPower]::Disable() }

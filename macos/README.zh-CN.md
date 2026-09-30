@@ -2,28 +2,37 @@
 
 [English](README.md) | 简体中文
 
-Mac 版在菜单栏显示本周剩余额度，并提供始终置顶的极简／详细悬浮窗。极简窗显示进度圆环与数字；单击展开详细窗。
+## 预编译应用
 
-## 第一次启动
+1. 系统需为 **macOS 13.5 或更新版本**。在**苹果菜单 → 关于本机**查看芯片：Apple Silicon 下载 `arm64` ZIP，Intel 下载 `x64` ZIP。
+2. 安装官方 [Codex 桌面应用](https://learn.chatgpt.com/docs/app)或 [Codex CLI](https://learn.chatgpt.com/docs/codex/cli)并登录。若工具未找到桌面应用的 CLI，请单独安装 CLI 后运行 `codex login`。
+3. 用 `shasum -a 256 <文件名>` 核对 ZIP 与随包提供的 `SHA256SUMS`。解压后，把 **Codex Quota Widget.app** 移到 `/Applications` 或个人应用目录 `~/Applications`。
+4. 打开应用，需要时拖到程序坞。应用内置 Node.js 24.19.0，无需另外安装 Node 或编译工具。
 
-1. 在仓库首页点 **Code → Download ZIP** 并解压。把解压得到的整个 `codex-quota-widget-main` 文件夹放到个人应用目录 `~/Applications/`。之后不要只移动生成的 `.app`；源码、启动器和本机服务需要留在同一个文件夹。
-2. 安装 Node.js 24 或更新版本、Codex CLI，并在终端运行 `codex login`。Codex 桌面应用的登录状态不一定等于 CLI 登录状态。用 `node -v`、`codex --version` 检查安装。
-3. 在终端运行 `xcode-select --install` 安装 Apple 命令行工具；如果已经安装，直接继续。
-4. 在 Finder 打开 `~/Applications/codex-quota-widget-main/macos/`，双击 `Start.command`。首次启动会在本机编译悬浮窗和程序坞入口。若系统阻止打开，在 Finder 中右键该文件并选“打开”；若双击只显示文本，在终端输入 `bash `，把文件拖进终端后按回车。
-5. 菜单栏出现百分比后，文件夹内会生成 `启动 Codex 周额度.app`。将它拖到程序坞，之后点击即可打开或重新显示悬浮窗。
+应用仅有临时签名，没有 Developer ID 签名或 Apple 公证。若 macOS 阻止打开，请先核对来源及校验值，再使用系统**隐私与安全性 → 仍要打开**（若显示该选项）。不要关闭整个系统的安全保护。
+
+同一台电脑只运行一份；本机服务使用 `127.0.0.1:39224`。
 
 ## 日常使用
 
-- 点击菜单栏百分比，可显示或隐藏悬浮窗、切换极简／详细、刷新额度或退出。
-- 极简窗单击圆环展开；拖动窗体移动。左右边缘调整宽度，上下边缘调整高度，四角同时调整两者。最小尺寸是 36×36。
-- 详细窗顶部的“极简”可缩小；拖动顶部空白区域移动。两种模式各自记住位置和尺寸；移动及缩放都被限制在屏幕范围内。详细内容可以滚动。
-- 程序坞图标显示本周剩余额度的圆环与百分比，约每 30 秒读取一次本机缓存。额度暂不可用时显示 `—`。
-- 双击 `Stop.command` 可停止工具；再次双击 `Start.command` 或点击程序坞图标可恢复。工具不会自动开机启动。
+- 点击菜单栏百分比，可显示／隐藏窗口、切换极简／详细、刷新、打开浏览器详细页、选择语言或退出。
+- 在**语言 → 跟随系统 / English / 简体中文**中选择；设置会保存，与浏览器详细页共用。
+- 点击极简圆环展开；拖动窗体移动，拖动边缘或四角缩放。两种模式各自记住位置和尺寸，详细内容可滚动。
+- 打开**重置详情**查看可用重置卡及 Codex 提供的发放／到期时间。工具只读取，不使用重置卡。
+- 程序坞图标显示本周剩余，不可用时显示 `—`；点击可重新打开窗口。
 
-## 数据刷新与故障排查
+额度和缓存检查每 60 秒进行；手动刷新、重新打开和唤醒后及时更新。临时失败按 15／30／60 秒重试，公开站点数据单独每 10 分钟更新。
 
-本机服务每 5 分钟向 Codex CLI 读取一次账号额度；详细窗每分钟读取本机缓存，菜单栏和程序坞图标每 30 秒更新显示。公开站点记录单独每 10 分钟刷新；不会向这些站点发送登录信息或个人额度。超过 10 分钟未更新、重置时间已到或登录失效时，旧百分比不会继续显示为当前额度。
+## 更新、退出与卸载
 
-若显示 `—`，先在终端运行 `codex login status`，然后从菜单栏刷新。若启动或编译失败，查看 `~/Library/Application Support/CodexWeeklyMonitor/` 下的 `monitor.log`、`build.log` 或 `launcher-build.log`。工具本体留在 `macos` 文件夹，运行记录保存在上述本机目录。
+先从菜单选择**退出**，再用新版本替换原位置的应用并重新打开。语言与窗口位置保存在 `~/Library/Application Support/CodexWeeklyMonitor/`，更新后保留。
 
-这套 macOS 原生悬浮窗已经在 Apple Silicon Mac 上编译并验证过极简／详细切换、各边缘缩放、屏幕边界约束和程序坞图标。其他 Mac 配置仍需分别验证。
+卸载时先退出，再把应用移到废纸篓。若也要删除偏好和日志，请在退出后删除 `~/Library/Application Support/CodexWeeklyMonitor/`。工具不会设置开机启动。
+
+## 排查与源码启动
+
+若界面提示登录，检查 `codex login status`，需要时运行 `codex login` 后刷新。启动问题查看 `~/Library/Application Support/CodexWeeklyMonitor/monitor.log`；源码编译日志为同目录下的 `build.log` 和 `launcher-build.log`。反馈时仅提供已脱敏内容。
+
+源码启动需 [Node.js 24+](https://nodejs.org/en/download)、已登录的 Codex 和 Apple 命令行工具（`xcode-select --install`）。保留整个仓库，双击 [Start.command](Start.command) 启动，[Stop.command](Stop.command) 停止。源码启动器在本机编译，生成的入口仍依赖旁边的服务文件。若 Finder 只显示文本，可在终端用 `bash` 执行脚本。
+
+独立应用构建方法见 [CONTRIBUTING.md](../CONTRIBUTING.md)。原生 CI 覆盖 Apple Silicon 与 Intel 运行环境构建，不代表实体 Intel 硬件或每个 macOS 版本的真实账号登录均已验证。
