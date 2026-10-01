@@ -311,6 +311,21 @@ public static class QuotaSmokeWindows {
         public int Height { get { return Bottom-Top; } }
     }
     public sealed class HeaderButton { public IntPtr Handle; public WindowBounds Bounds; }
+    [StructLayout(LayoutKind.Sequential)] private struct CursorPoint { public int X, Y; }
+    [DllImport("user32.dll", SetLastError=true)] private static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] private static extern bool GetCursorPos(out CursorPoint point);
+    public static string PlaceOwnedCursor(IntPtr control, int pid, int x, int y) {
+        var bounds=OwnedBounds(control,pid);
+        if (!IsWindowVisible(control) || x < 0 || y < 0 || x >= bounds.Width || y >= bounds.Height)
+            throw new InvalidOperationException("Cursor target escaped the owned visible fixture control");
+        CursorPoint before; GetCursorPos(out before);
+        if (!SetCursorPos(bounds.Left+x,bounds.Top+y))
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),"CI input desktop cannot move cursor to fixture");
+        CursorPoint after;
+        if (!GetCursorPos(out after) || after.X != bounds.Left+x || after.Y != bounds.Top+y)
+            throw new InvalidOperationException("CI input desktop did not retain the fixture cursor position");
+        return "before="+before.X+","+before.Y+" after="+after.X+","+after.Y;
+    }
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hWnd, out WindowBounds bounds);
     [DllImport("user32.dll")] private static extern bool IsChild(IntPtr parent, IntPtr child);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetClassName(IntPtr hWnd, StringBuilder text, int count);
@@ -492,6 +507,9 @@ public static class QuotaSmokeWindows {
             $linkFormat.Dispose(); $linkGraphics.Dispose(); $linkFont.Dispose(); $baseFont.Dispose()
         }
         $linkPoint=[IntPtr](($linkY -shl 16) -bor $linkX)
+        # Keep the actual CI cursor in this owned link as well as sending its
+        # messages, so WinForms tracking cannot clear Hover with MouseLeave.
+        Write-Output ('Fabricated fixture cursor: '+[QuotaSmokeWindows]::PlaceOwnedCursor($creditHandle,$ui.Id,$linkX,$linkY))
         # LinkLabel activates the link hit by WM_MOUSEMOVE before mouse-down;
         # a down/up pair alone never puts its link into the Hover state.
         [void][QuotaSmokeWindows]::SendMessage($creditHandle,0x200,[IntPtr]::Zero,$linkPoint)
