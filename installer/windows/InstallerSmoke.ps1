@@ -466,15 +466,32 @@ public static class QuotaSmokeWindows {
         # Click the disclosure portion of the merged credit row.
         $creditElement = $element.FindFirst([Windows.Automation.TreeScope]::Descendants,$creditCondition)
         $creditHandle = [IntPtr]$creditElement.Current.NativeWindowHandle
-        $fontHandle=[QuotaSmokeWindows]::SendMessage($creditHandle,0x31,[IntPtr]::Zero,[IntPtr]::Zero)
-        $linkFont=if ($fontHandle -ne [IntPtr]::Zero) {[Drawing.Font]::FromHfont($fontHandle)} else {[Drawing.Font]::new('Segoe UI',10.5)}
-        try {
-            $prefix=$creditText.Substring(0,$creditText.IndexOf(' · ')+3)
-            $linkX=[Windows.Forms.TextRenderer]::MeasureText($prefix,$linkFont).Width+4
-        } finally {$linkFont.Dispose()}
         $creditBounds=[QuotaSmokeWindows]::OwnedBounds($creditHandle,$ui.Id)
-        Write-Output ("Fabricated credit disclosure: text=[$creditText], bounds=$($creditBounds.Left),$($creditBounds.Top),$($creditBounds.Width),$($creditBounds.Height), click=$linkX,10, offscreen=$($creditElement.Current.IsOffscreen), fontHandle=$fontHandle")
-        $linkPoint=[IntPtr]((10 -shl 16) -bor $linkX)
+        $fontHandle=[QuotaSmokeWindows]::SendMessage($creditHandle,0x31,[IntPtr]::Zero,[IntPtr]::Zero)
+        $baseFont=if ($fontHandle -ne [IntPtr]::Zero) {[Drawing.Font]::FromHfont($fontHandle)} else {[Drawing.Font]::new('Segoe UI',10.5)}
+        $linkFont=[Drawing.Font]::new($baseFont,($baseFont.Style -bor [Drawing.FontStyle]::Underline))
+        $linkGraphics=[Drawing.Graphics]::FromHwnd($creditHandle)
+        $linkFormat=[Drawing.StringFormat]::new()
+        $linkRegions=@()
+        try {
+            # Partial LinkLabel links use GDI+ character ranges, even when the
+            # surrounding labels use GDI TextRenderer. Hit the actual range's
+            # center rather than estimating its start from the prefix width.
+            $linkStart=$creditText.IndexOf(' · ')+3
+            Assert-True ($linkStart -ge 3) 'Credit disclosure separator missing.'
+            $linkFormat.SetMeasurableCharacterRanges([Drawing.CharacterRange[]]@([Drawing.CharacterRange]::new($linkStart,$creditText.Length-$linkStart)))
+            $linkRegions=@($linkGraphics.MeasureCharacterRanges($creditText,$linkFont,[Drawing.RectangleF]::new(0,0,$creditBounds.Width,$creditBounds.Height),$linkFormat))
+            $linkRegion=$linkRegions[0].GetBounds($linkGraphics)
+            Assert-True ($linkRegion.Width -gt 0 -and $linkRegion.Height -gt 0) 'Credit disclosure has no measurable hit area.'
+            $linkX=[int][Math]::Round($linkRegion.Left+$linkRegion.Width/2)
+            $linkY=[int][Math]::Round($linkRegion.Top+$linkRegion.Height/2)
+            Assert-True ($linkX -gt 0 -and $linkX -lt $creditBounds.Width -and $linkY -ge 0 -and $linkY -lt $creditBounds.Height) 'Credit disclosure click escaped its owned control.'
+            Write-Output ("Fabricated credit disclosure: text=[$creditText], bounds=$($creditBounds.Left),$($creditBounds.Top),$($creditBounds.Width),$($creditBounds.Height), linkRegion=$linkRegion, click=$linkX,$linkY, offscreen=$($creditElement.Current.IsOffscreen), fontHandle=$fontHandle")
+        } finally {
+            foreach ($region in $linkRegions) {$region.Dispose()}
+            $linkFormat.Dispose(); $linkGraphics.Dispose(); $linkFont.Dispose(); $baseFont.Dispose()
+        }
+        $linkPoint=[IntPtr](($linkY -shl 16) -bor $linkX)
         # LinkLabel activates the link hit by WM_MOUSEMOVE before mouse-down;
         # a down/up pair alone never puts its link into the Hover state.
         [void][QuotaSmokeWindows]::SendMessage($creditHandle,0x200,[IntPtr]::Zero,$linkPoint)
