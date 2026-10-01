@@ -46,3 +46,22 @@ test('external API restores confirmed announcements after a service restart and 
     assert.equal(restored.items[0].sourceUrl,item.sourceUrl);
   }finally { if(running)await running.stop();await rm(directory,{recursive:true,force:true}); }
 });
+
+test('public data is queried on the ten-minute timer and polling the cache does not query the provider',async(context)=>{
+  context.mock.timers.enable({apis:['setInterval']});
+  const directory=await mkdtemp(join(tmpdir(),'quota-public-cadence-'));
+  let queries=0,running;
+  try {
+    running=await startMonitor({port:0,settingsFile:join(directory,'settings.json'),query:async()=>({}),externalQuery:async()=>({status:'ok',updatedAt:++queries,announcements:{status:'unavailable'}})});
+    const base=`http://127.0.0.1:${running.server.address().port}`;
+    const read=async()=>(await(await fetch(base+'/api/external')).json());
+    assert.equal((await read()).updatedAt,1);
+    context.mock.timers.tick(599999);
+    assert.equal((await read()).updatedAt,1);
+    context.mock.timers.tick(1);
+    // The timer starts an asynchronous store write; observe the response after it completes.
+    for(let tries=0;tries<30&&(await read()).updatedAt===1;tries++)await new Promise(resolve=>setTimeout(resolve,10));
+    assert.equal((await read()).updatedAt,2);
+    assert.equal(queries,2);
+  }finally {if(running)await running.stop();context.mock.timers.reset();await rm(directory,{recursive:true,force:true});}
+});

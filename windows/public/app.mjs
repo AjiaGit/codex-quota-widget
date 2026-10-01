@@ -1,5 +1,16 @@
 import { t, resolveLanguage, formatDate, formatRelativeUpdate, formatShortDate } from './i18n.mjs';
 const TEN_MINUTES = 10 * 60 * 1000;
+const PUBLIC_MAX_AGE = 24 * 60 * 60 * 1000;
+function publicSourceFresh(state,now) {
+  const stamp=Date.parse(state?.sourceUpdatedAt);
+  return Number.isFinite(stamp)&&stamp<=now+5*60000&&now-stamp<=PUBLIC_MAX_AGE;
+}
+function forecastForView(state,now) {
+  const forecast=state?.status==='ok'?state.forecast:null;
+  if(!publicSourceFresh(forecast,now))return null;
+  const values=[forecast.next24h,forecast.next48h,forecast.next7d];
+  return values.every(value=>Number.isFinite(value)&&value>=0&&value<=100)&&values[0]<=values[1]&&values[1]<=values[2]?forecast:null;
+}
 function formatCountdown(milliseconds, language) {
   const minutes=Math.max(0,Math.ceil(milliseconds/60000));
   const days=Math.floor(minutes/1440),hours=Math.floor((minutes%1440)/60),rest=minutes%60;
@@ -10,18 +21,20 @@ export function deriveView(state,now=Date.now(),timeZone=Intl.DateTimeFormat().r
   if(state?.status==='loading')return unavailable(t(language,'loading'),t(language,'querying'));
   if(state?.status!=='ok')return unavailable(t(language,'unavailable'),t(language,state?.errorCode||'query_failed'));
   const resetMs=state.resetsAt*1000;
-  if(!Number.isFinite(state.updatedAt)||now-state.updatedAt>TEN_MINUTES)return unavailable(t(language,'stale'),t(language,'waitingData'));
+  if(!Number.isFinite(state.updatedAt)||state.updatedAt>now+60000||now-state.updatedAt>TEN_MINUTES)return unavailable(t(language,'stale'),t(language,'waitingData'));
   if(!Number.isFinite(resetMs)||now>=resetMs)return unavailable(t(language,'waiting'),t(language,'resetPassed'));
+  if(!Number.isFinite(state.remainingPercent)||state.remainingPercent<0||state.remainingPercent>100)return unavailable(t(language,'unavailable'),t(language,'unsupported'));
   const percent=Math.max(0,Math.min(100,Math.round(state.remainingPercent))),shortReset=state.fiveHour?.resetsAt*1000;
   const shortValid=state.plan==='plus'&&Number.isFinite(shortReset)&&shortReset>now&&Number.isFinite(state.fiveHour?.remainingPercent)&&state.fiveHour.remainingPercent>=0&&state.fiveHour.remainingPercent<=100;
   return {statusText:t(language,'updated'),message:t(language,'weekly'),percentText:`${percent}%`,ringPercent:percent,tone:percent<=10?'danger':percent<=50?'warning':'healthy',resetText:formatDate(resetMs,timeZone,language),countdownText:formatCountdown(resetMs-now,language),updatedText:formatDate(state.updatedAt,timeZone,language),cardsText:Number.isSafeInteger(state.resetCards)&&state.resetCards>=0?t(language,state.resetCards===1?'resetOne':'resetCount',{count:state.resetCards}):'—',showFiveHour:state.plan==='plus',cardsCountText:Number.isSafeInteger(state.resetCards)&&state.resetCards>=0?(language==='en'?String(state.resetCards):t(language,state.resetCards===1?'resetOne':'resetCount',{count:state.resetCards})):'—',fiveHourPercentText:shortValid?`${Math.round(state.fiveHour.remainingPercent)}%`:t(language,'unavailable'),fiveHourText:shortValid?t(language,'percentRemaining',{percent:Math.round(state.fiveHour.remainingPercent)}):t(language,'unavailable'),fiveHourResetText:shortValid?formatDate(shortReset,timeZone,language):'—'};
 }
-export function deriveExternalView(state,timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone,language='zh-CN') {
-  const last=state?.status==='ok'?state.lastGlobal:null,forecast=state?.status==='ok'?state.forecast:null,scope=t(language,last?.scope==='paid'?'paid':last?.scope==='all'?'all':'unknownScope');
+export function deriveExternalView(state,timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone,language='zh-CN',now=Date.now()) {
+  const last=state?.status==='ok'&&publicSourceFresh(state.lastGlobal,now)?state.lastGlobal:null,forecast=forecastForView(state,now),scope=t(language,last?.scope==='paid'?'paid':last?.scope==='all'?'all':'unknownScope');
   return {announcementText:last?.announcedAt?`${formatDate(Date.parse(last.announcedAt),timeZone,language)} · ${scope}`:t(language,'unavailable'),deliveryText:last?.deliveredAt?`${formatDate(Date.parse(last.deliveredAt),timeZone,language)} · ${t(language,'delivered')}`:t(language,'deliveryUnknown'),oddsText:forecast?t(language,'oddsValue',{a:forecast.next24h,b:forecast.next48h,c:forecast.next7d}):t(language,'unavailable'),sourceText:forecast?.sourceUpdatedAt?`${t(language,'dataTime')} ${formatDate(Date.parse(forecast.sourceUpdatedAt),timeZone,language)}`:t(language,'sourceUnavailable')};
 }
-export function deriveResetDetails(state,language='en',timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone) {
-  const rows=state?.status==='ok'&&Array.isArray(state.resetDetails)?state.resetDetails:null;
+export function deriveResetDetails(state,language='en',timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone,now=Date.now()) {
+  if(deriveView(state,now,timeZone,language).percentText==='—')return {note:t(language,'detailsPending'),rows:[]};
+  const rows=Array.isArray(state.resetDetails)?state.resetDetails:null;
   return {note:t(language,rows===null?'detailsUnknown':rows.length?'detailsPartial':'detailsEmpty'),rows:(rows||[]).map(row=>({title:row.title||t(language,'genericReset'),description:row.description||'',granted:t(language,'granted')+': '+(row.grantedAt?formatDate(row.grantedAt*1000,timeZone,language):t(language,'dateUnknown')),expires:t(language,'expires')+': '+(row.expiresAt?formatDate(row.expiresAt*1000,timeZone,language):t(language,'dateUnknown'))}))};
 }
 function safeSource(value) { try { const url=new URL(value);return url.protocol==='https:' && !url.username && !url.password ? url.href : null; } catch { return null; } }
@@ -48,10 +61,10 @@ export function deriveAnnouncementsView(state,now=Date.now(),timeZone=Intl.DateT
   };
   for(const item of state?.items||[]){const row=renderItem(item);if(!row)continue;if(row.phase==='archived')history.push(row);else rows.push(row);seen.add(row.id);}
   for(const item of state?.history||[]){const row=renderItem(item);if(row&&!seen.has(row.id)){history.push(row);seen.add(row.id);}}
-  return {rows,history,notice:state?.stale||state?.status!=='ok'?t(language,rows.length?'informationPending':'announcementsUnavailable'):rows.length?'':t(language,'noAnnouncements')};
+  return {rows,history,notice:state?.stale||state?.status!=='ok'||!publicSourceFresh(state,now)?t(language,rows.length?'informationPending':'announcementsUnavailable'):rows.length?'':t(language,'noAnnouncements')};
 }
 export function derivePublicStatus(state,now=Date.now(),timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone,language='en') {
-  if(state?.status==='ok'&&state.forecast&&state.announcements?.status==='ok'&&!state.announcements.stale)return '';
+  if(forecastForView(state,now)&&state.announcements?.status==='ok'&&!state.announcements.stale&&publicSourceFresh(state.announcements,now))return '';
   if(state?.status==='loading')return '';
   const stamp=Date.parse(state?.announcements?.sourceUpdatedAt);
   const last=Number.isFinite(stamp)&&stamp<=now?`${t(language,'lastSuccess')} ${formatShortDate(stamp,timeZone,language,now)}`:'';
@@ -93,7 +106,8 @@ if(typeof document!=='undefined') {
     const publicStatus=derivePublicStatus(externalState,Date.now(),undefined,lang);
     document.querySelector('.announcements').setAttribute('aria-label',t(lang,'confirmedAnnouncements'));
     byId('public-status').textContent=publicStatus;byId('public-status').hidden=!publicStatus;
-    for(const[id,key]of Object.entries({'odds-24h':'next24h','odds-48h':'next48h','odds-7d':'next7d'}))byId(id).textContent=externalState.status==='ok'&&Number.isFinite(externalState.forecast?.[key])?externalState.forecast[key]+'%':'—';
+    const forecast=forecastForView(externalState,Date.now());
+    for(const[id,key]of Object.entries({'odds-24h':'next24h','odds-48h':'next48h','odds-7d':'next7d'}))byId(id).textContent=forecast?forecast[key]+'%':'—';
     const announcements=deriveAnnouncementsView(externalState.announcements,Date.now(),undefined,lang);
     const icon=(kind)=>{
       const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('aria-hidden','true');svg.classList.add('section-icon');

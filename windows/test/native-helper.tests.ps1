@@ -21,19 +21,26 @@ Test-Case 'countdown handles minutes hours and days in both languages' {
     Assert-Equal (Format-WidgetCountdown ([TimeSpan]::FromHours(49)) 'zh-CN') '2天 1小时' 'Days'
 }
 Test-Case 'reset cards stay authoritative and unavailable details stay explicit' {
-    $data = [pscustomobject]@{ resetCards = 2; resetDetails = $null }
+    $data = [pscustomobject]@{ status='ok'; updatedAt=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); resetsAt=[DateTimeOffset]::UtcNow.AddHours(1).ToUnixTimeSeconds(); remainingPercent=50; resetCards = 2; resetDetails = $null }
     $text = Format-WidgetResetDetails $data 'en'
     if (-not $text.Contains('Available banked resets: 2')) { throw 'Count was not displayed' }
     if (-not $text.Contains('Grant and expiry details were not provided.')) { throw 'Missing details claimed complete history' }
 }
 Test-Case 'reset summary includes grant and expiry but never credit IDs' {
-    $data = [pscustomobject]@{ resetCards = 0; resetDetails = @([pscustomobject]@{
+    $data = [pscustomobject]@{ status='ok'; updatedAt=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); resetsAt=[DateTimeOffset]::UtcNow.AddHours(1).ToUnixTimeSeconds(); remainingPercent=50; resetCards = 0; resetDetails = @([pscustomobject]@{
         id = 'secret-credit-id'; title = 'Sample grant'; description = 'Fabricated details'; grantedAt = 1790726400; expiresAt = $null
     }) }
     $text = Format-WidgetResetDetails $data 'en'
     if (-not $text.Contains('Available banked resets: 0')) { throw 'Detail count replaced authoritative count' }
     if (-not $text.Contains('Sample grant') -or -not $text.Contains('Granted:') -or -not $text.Contains('Expires: Not provided')) { throw 'Grant/expiry omitted' }
     if ($text.Contains('secret-credit-id')) { throw 'Credit ID exposed' }
+}
+Test-Case 'stale personal reset details do not retain an available count or grant title' {
+    $now=[DateTimeOffset]'2026-10-01T02:00:00Z'
+    $data=[pscustomobject]@{status='ok';updatedAt=$now.AddMinutes(-11).ToUnixTimeMilliseconds();resetsAt=$now.AddHours(1).ToUnixTimeSeconds();remainingPercent=72;resetCards=1;resetDetails=@([pscustomobject]@{title='Stale grant';grantedAt=1790816400;expiresAt=$null})}
+    $text=Format-WidgetResetDetails $data 'en' $now
+    if ($text.Contains('Stale grant') -or $text.Contains('Available banked resets: 1')) {throw 'Stale grants shown as current'}
+    if (-not $text.Contains('Quota data unavailable or expired')) {throw 'Expired details not explained'}
 }
 Test-Case 'all service error codes have actionable localized messages' {
     foreach ($code in @('cli_missing','signed_out','timeout','network','unsupported','service_unavailable','query_failed')) {

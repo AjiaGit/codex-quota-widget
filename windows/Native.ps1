@@ -15,7 +15,7 @@ $script:WidgetStrings = @{
         language = 'Language'; languageAuto = 'System'; languageEn = 'English'; languageZh = '简体中文'; languageSaveFailed = 'Could not save the language. Try again.'
         trayRemaining = 'Codex weekly remaining {0}%'; trayUnavailable = 'Codex quota unavailable'; dayHour = '{0}d {1}h'; hourMinute = '{0}h {1}m'; minute = '{0}m'
         detailsTitle = 'Banked reset details'; detailsCount = 'Available banked resets: {0}'; detailsUnknownCount = 'Available banked resets: Not provided'
-        detailsUnavailable = 'Grant and expiry details were not provided.'; detailsEmpty = 'No grant or expiry rows were provided.'
+        detailsUnavailable = 'Grant and expiry details were not provided.'; detailsPending = 'Quota data unavailable or expired; refresh to view current reset details.'; detailsEmpty = 'No grant or expiry rows were provided.'
         detailsScope = 'Only details returned by Codex are shown. This is not a complete history or a prediction.'; grant = 'Granted: {0}'; expiry = 'Expires: {0}'; notProvided = 'Not provided'; unnamedGrant = 'Banked reset'
         openDetails = 'View banked reset details'; setup = 'Set up Codex'; setupTip = 'Install Codex CLI or sign in, then refresh.'
         cli_missing = 'Codex CLI was not found. Install Codex CLI, then refresh.'; signed_out = 'Sign in to Codex: run codex login, then refresh.'
@@ -30,7 +30,7 @@ $script:WidgetStrings = @{
         clearPrefs = 'Remove saved window position and language?'; preferencesTitle = 'Codex Quota preferences'
         justNow = 'Updated just now'; minuteAgo = 'Updated 1 minute ago'; minutesAgo = 'Updated {0} minutes ago'; updateUnknown = 'Update time unavailable'
         creditDetailsRow = '{0} · Details ›'; confirmedBanked = 'Confirmed banked reset grant'; confirmedRegular = 'Confirmed global reset'
-        noAnnouncements = 'No confirmed banked reset grants or global resets'; announcementsUnavailable = 'Confirmed announcements unavailable'; pendingUpdate = 'Information pending update'
+        noAnnouncements = 'Monitored sources report no confirmed banked reset grants or global resets'; announcementsUnavailable = 'Confirmed announcements unavailable'; pendingUpdate = 'Information pending update'
         retention = 'Completed results retained for 24h'; forecastPending = 'Public estimates pending update'; phaseUpcoming = 'Upcoming'; phaseWaiting = 'Awaiting delivery'; phaseAnnounced = 'Announced · awaiting delivery'; phaseDelivered = 'Delivered'; phaseArchived = 'Delivered'
         scheduled = 'Scheduled {0}'; originalScheduled = 'Originally scheduled {0}'; scheduleUnknown = 'Delivery time not announced'; announcedOn = 'Announced {0}'; deliveredOn = 'Completed {0}'
         publicUpdated = 'Public data updated {0}'; publicUpdateUnknown = 'Public update time unavailable'; refreshCadence = 'Auto-refresh: quota every 1 min · public data every 10 min'; sourceLinks = 'codexreset.ai / whenreset.app'
@@ -53,7 +53,7 @@ $script:WidgetStrings = @{
         language = '语言'; languageAuto = '跟随系统'; languageEn = 'English'; languageZh = '简体中文'; languageSaveFailed = '语言设置保存失败，请重试。'
         trayRemaining = 'Codex 本周剩余 {0}%'; trayUnavailable = 'Codex 周额度暂不可用'; dayHour = '{0}天 {1}小时'; hourMinute = '{0}小时 {1}分'; minute = '{0}分钟'
         detailsTitle = '额度重置明细'; detailsCount = '可用重置次数：{0}'; detailsUnknownCount = '可用重置次数：未提供'
-        detailsUnavailable = 'Codex 未提供发放和到期明细。'; detailsEmpty = '未提供发放或到期记录。'
+        detailsUnavailable = 'Codex 未提供发放和到期明细。'; detailsPending = '额度数据暂不可用或已过期，请刷新后查看重置详情。'; detailsEmpty = '未提供发放或到期记录。'
         detailsScope = '仅显示 Codex 返回的明细，不代表完整历史或未来发放。'; grant = '发放：{0}'; expiry = '到期：{0}'; notProvided = '未提供'; unnamedGrant = '可用重置'
         openDetails = '查看额度重置明细'; setup = '设置 Codex'; setupTip = '安装 Codex CLI 或登录后，再刷新。'
         cli_missing = '未找到 Codex CLI。请安装 Codex CLI 后刷新。'; signed_out = '请在终端运行 codex login 登录，然后刷新。'
@@ -68,7 +68,7 @@ $script:WidgetStrings = @{
         clearPrefs = '删除保存的窗口位置和语言设置？'; preferencesTitle = 'Codex 周额度偏好设置'
         justNow = '刚刚更新'; minuteAgo = '1分钟前更新'; minutesAgo = '{0}分钟前更新'; updateUnknown = '更新时间暂不可用'
         creditDetailsRow = '{0} · 查看明细 ›'; confirmedBanked = '已确认重置次数赠送'; confirmedRegular = '已确认全局额度重置'
-        noAnnouncements = '暂无已确认的重置次数赠送或全局额度重置公告'; announcementsUnavailable = '已确认公告暂不可用'; pendingUpdate = '信息待更新'
+        noAnnouncements = '监控来源暂无已确认的重置次数赠送或全局额度重置公告'; announcementsUnavailable = '已确认公告暂不可用'; pendingUpdate = '信息待更新'
         retention = '完成结果保留24小时'; forecastPending = '公开概率信息待更新'; phaseUpcoming = '即将进行'; phaseWaiting = '等待送达'; phaseAnnounced = '已公告 · 等待送达'; phaseDelivered = '已送达'; phaseArchived = '已送达'
         scheduled = '计划 {0}'; originalScheduled = '原定 {0}'; scheduleUnknown = '送达时间尚未公布'; announcedOn = '公告 {0}'; deliveredOn = '确认完成 {0}'
         publicUpdated = '公告数据更新 {0}'; publicUpdateUnknown = '公告更新时间暂不可用'; refreshCadence = '自动刷新：额度每1分钟 · 公共信息每10分钟'; sourceLinks = 'codexreset.ai / whenreset.app'
@@ -258,6 +258,8 @@ function ConvertTo-WidgetAnnouncementRow($row, [string]$language, [DateTimeOffse
 function Get-WidgetAnnouncementView($external, [string]$language, [DateTimeOffset]$now = [DateTimeOffset]::UtcNow) {
     $active=New-Object 'System.Collections.Generic.List[object]'; $history=New-Object 'System.Collections.Generic.List[object]'
     $feed=if ($external) {$external.announcements} else {$null}
+    $stamp=ConvertTo-WidgetTimestamp $feed.sourceUpdatedAt
+    $stale=-not $feed -or $feed.stale -or $feed.status -ne 'ok' -or -not $stamp -or $stamp -gt $now.AddMinutes(5) -or ($now-$stamp).TotalHours -gt 24
     $seen=@{}
     foreach ($row in @($feed.items)) {
         if (-not $row -or $row.kind -notin @('banked','regular')) { continue }
@@ -274,9 +276,9 @@ function Get-WidgetAnnouncementView($external, [string]$language, [DateTimeOffse
     }
     [pscustomobject]@{
         active=@($active.ToArray()); history=@($history.ToArray())
-        emptyText=Get-WidgetText $(if ($feed -and $feed.status -eq 'ok' -and -not $feed.stale) {'noAnnouncements'} else {'announcementsUnavailable'}) $language
-        staleText=$(if ($active.Count -gt 0 -and $feed -and ($feed.stale -or $feed.status -ne 'ok')) {Get-WidgetText 'pendingUpdate' $language} else {''})
-        sourceUpdateText=$(if ($active.Count -gt 0 -and $feed -and ($feed.stale -or $feed.status -ne 'ok')) {Format-WidgetPublicUpdate $feed $language $now} else {''})
+        emptyText=Get-WidgetText $(if (-not $stale) {'noAnnouncements'} else {'announcementsUnavailable'}) $language
+        staleText=$(if ($active.Count -gt 0 -and $stale) {Get-WidgetText 'pendingUpdate' $language} else {''})
+        sourceUpdateText=$(if ($active.Count -gt 0 -and $stale) {Format-WidgetPublicUpdate $feed $language $now} else {''})
     }
 }
 function Merge-WidgetExternalData($previous, $incoming, [bool]$transportFailure = $false) {
@@ -322,12 +324,23 @@ function Merge-WidgetExternalData($previous, $incoming, [bool]$transportFailure 
     return $result
 }
 
-function Format-WidgetResetDetails($data, [string]$language) {
+function Format-WidgetResetDetails($data, [string]$language, [DateTimeOffset]$now = [DateTimeOffset]::UtcNow) {
+    $fresh=$false
+    if ($data -and $data.status -eq 'ok' -and $null -ne $data.updatedAt -and $null -ne $data.resetsAt -and $null -ne $data.remainingPercent) {
+        try {
+            $age=$now-[DateTimeOffset]::FromUnixTimeMilliseconds([long]$data.updatedAt)
+            $resetAt=[DateTimeOffset]::FromUnixTimeSeconds([long]$data.resetsAt)
+            $percent=[double]$data.remainingPercent
+            $fresh=$age.TotalMinutes -le 10 -and $age.TotalSeconds -ge -60 -and $resetAt -gt $now -and $percent -ge 0 -and $percent -le 100
+        } catch {}
+    }
+    if (-not $fresh) {$data=$null}
     $lines = New-Object 'System.Collections.Generic.List[string]'
     if ($data -and $null -ne $data.resetCards) { $lines.Add((Get-WidgetText 'detailsCount' $language @($data.resetCards))) }
     else { $lines.Add((Get-WidgetText 'detailsUnknownCount' $language)) }
     $lines.Add('')
-    if (-not $data -or $null -eq $data.resetDetails) { $lines.Add((Get-WidgetText 'detailsUnavailable' $language)) }
+    if (-not $fresh) { $lines.Add((Get-WidgetText 'detailsPending' $language)) }
+    elseif ($null -eq $data.resetDetails) { $lines.Add((Get-WidgetText 'detailsUnavailable' $language)) }
     elseif (@($data.resetDetails).Count -eq 0) { $lines.Add((Get-WidgetText 'detailsEmpty' $language)) }
     else {
         foreach ($row in @($data.resetDetails)) {

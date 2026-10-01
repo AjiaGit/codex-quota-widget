@@ -11,9 +11,10 @@ test('locale selection follows Chinese systems, respects manual selection and fa
   assert.equal(t('unknown','refresh'),'Refresh now');
 });
 test('unknown and empty reset detail lists remain distinct and missing dates are not invented',()=>{
-  assert.match(deriveResetDetails({status:'ok',resetDetails:null}).note,/not provided/);
-  assert.match(deriveResetDetails({status:'ok',resetDetails:[]}).note,/No detail rows/);
-  const result=deriveResetDetails({status:'ok',resetDetails:[{title:null,grantedAt:null,expiresAt:null}]});
+  const fresh={status:'ok',updatedAt:Date.now(),resetsAt:Date.now()/1000+3600,remainingPercent:50};
+  assert.match(deriveResetDetails({...fresh,resetDetails:null}).note,/not provided/);
+  assert.match(deriveResetDetails({...fresh,resetDetails:[]}).note,/No detail rows/);
+  const result=deriveResetDetails({...fresh,resetDetails:[{title:null,grantedAt:null,expiresAt:null}]});
   assert.equal(result.rows[0].granted,'Granted: Not provided');
   assert.equal(result.rows[0].expires,'Expires: Not provided');
 });

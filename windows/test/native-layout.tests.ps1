@@ -72,7 +72,7 @@ Test-Case 'two kinds stay separate and empty/unavailable feeds use one muted sta
     Assert-Equal $view.active.Count 2 'Both confirmed kinds'
     Assert-Equal $view.active[0].title 'Confirmed banked reset grant' 'Banked title'
     Assert-Equal $view.active[1].title 'Confirmed global reset' 'Regular title'
-    Assert-Equal (Get-WidgetAnnouncementView (New-External) 'zh-CN' $now).emptyText '暂无已确认的重置次数赠送或全局额度重置公告' 'Merged empty state'
+    Assert-Equal (Get-WidgetAnnouncementView (New-External) 'zh-CN' $now).emptyText '监控来源暂无已确认的重置次数赠送或全局额度重置公告' 'Merged empty state'
     Assert-Equal (Get-WidgetAnnouncementView (New-External @() @() 'unavailable') 'en' $now).emptyText 'Confirmed announcements unavailable' 'Unavailable state'
 }
 Test-Case 'rendering archives delivered rows locally even without another fetch' {
@@ -212,5 +212,11 @@ Test-Case 'completed results explain their 24 hour retention in both languages' 
         $row=(Get-WidgetAnnouncementView (New-External @($event)) $language $now).active[0]
         if (-not $row.retentionText -or -not $row.retentionText.Contains('24')) {throw 'Completed result retention caption absent'}
     }
+}
+Test-Case 'expired announcement cache does not claim no confirmed announcements' {
+    $value=New-External
+    $later=$now.AddHours(25)
+    $view=Get-WidgetAnnouncementView $value 'en' $later
+    Assert-Equal $view.emptyText 'Confirmed announcements unavailable' 'Source cache expired'
 }
 if ($script:failures) { throw "$script:failures native layout tests failed" }

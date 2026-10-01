@@ -133,9 +133,9 @@ test('announcement presentation distinguishes upcoming, awaiting completion, com
 
 test('no known announcements use one merged notice; transport failure has a different notice and retains known rows', () => {
   assert.equal(typeof view.deriveAnnouncementsView, 'function');
-  const empty = view.deriveAnnouncementsView({ status: 'ok', items: [], history: [] }, now, 'UTC', 'zh-CN');
+  const empty = view.deriveAnnouncementsView({ status: 'ok', sourceUpdatedAt:at(0), items: [], history: [] }, now, 'UTC', 'zh-CN');
   assert.deepEqual(empty.rows, []);
-  assert.equal(empty.notice, '暂无已确认的赠送或全局额度重置公告');
+  assert.equal(empty.notice, '监控来源暂无已确认的赠送或全局额度重置公告');
   const unavailable = view.deriveAnnouncementsView({ status: 'unavailable', items: [], history: [] }, now, 'UTC', 'zh-CN');
   assert.equal(unavailable.notice, '预告信息暂不可用');
   const known = { id: 'b', kind: 'banked', scheduledDate: '2026-10-01', sourceUrl: 'https://x.com/thsottiaux/status/b' };
@@ -174,7 +174,7 @@ test('completion keeps the original plan, completion evidence and account scope 
 
 test('public lookup failures show source freshness separately from quota freshness', () => {
   assert.equal(typeof view.derivePublicStatus, 'function');
-  assert.equal(view.derivePublicStatus({ status: 'ok', forecast: {}, announcements: { status: 'ok', stale: false } }, now, 'UTC', 'en'), '');
+  assert.equal(view.derivePublicStatus({ status: 'ok', forecast: {next24h:15,next48h:33,next7d:69,sourceUpdatedAt:at(0)}, announcements: { status: 'ok', stale: false, sourceUpdatedAt:at(0) } }, now, 'UTC', 'en'), '');
   const status = view.derivePublicStatus({ status: 'ok', forecast: {}, announcements: { status: 'unavailable', sourceUpdatedAt: at(-hour), stale: true } }, now, 'UTC', 'en');
   assert.match(status, /Public information pending update/);
   assert.match(status, /11:00/);
