@@ -70,9 +70,9 @@ Test-Case 'two kinds stay separate and empty/unavailable feeds use one muted sta
     $a=New-Event 'banked'; $b=New-Event 'regular' 'regular'
     $view=Get-WidgetAnnouncementView (New-External @($a,$b)) 'en' $now
     Assert-Equal $view.active.Count 2 'Both confirmed kinds'
-    Assert-Equal $view.active[0].title 'Confirmed reset credit grant' 'Banked title'
-    Assert-Equal $view.active[1].title 'Confirmed global temporary reset' 'Regular title'
-    Assert-Equal (Get-WidgetAnnouncementView (New-External) 'zh-CN' $now).emptyText '暂无已确认的重置卡赠送或全局临时重置公告' 'Merged empty state'
+    Assert-Equal $view.active[0].title 'Confirmed banked reset grant' 'Banked title'
+    Assert-Equal $view.active[1].title 'Confirmed global reset' 'Regular title'
+    Assert-Equal (Get-WidgetAnnouncementView (New-External) 'zh-CN' $now).emptyText '暂无已确认的重置次数赠送或全局额度重置公告' 'Merged empty state'
     Assert-Equal (Get-WidgetAnnouncementView (New-External @() @() 'unavailable') 'en' $now).emptyText 'Confirmed announcements unavailable' 'Unavailable state'
 }
 Test-Case 'rendering archives delivered rows locally even without another fetch' {
@@ -179,7 +179,7 @@ Test-Case 'source pending state is separate from quota age and appears only once
     Assert-Equal $unavailable.emptyText 'Confirmed announcements unavailable' 'One unavailable line'
 }
 Test-Case 'inventory and evidence link terminology match the approved bilingual layout' {
-    Assert-Equal (Get-WidgetText 'cards' 'en' @(2)) 'Reset credits 2' 'Inventory is not consumption count'
+    Assert-Equal (Get-WidgetText 'cards' 'en' @(2)) 'Banked resets 2' 'Inventory is not consumption count'
     Assert-Equal (Get-WidgetText 'announcementSource' 'en') 'View announcement' 'Announcement link'
     Assert-Equal (Get-WidgetText 'deliverySource' 'en') 'Delivery record' 'Evidence link'
     foreach ($language in @('en','zh-CN')) {

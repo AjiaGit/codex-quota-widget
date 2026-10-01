@@ -9,14 +9,16 @@ English | [简体中文](README.zh-CN.md)
 3. Run **CodexQuotaWidget-0.1.0-windows-x64.exe**. The per-user installer includes Node.js 24.19.0 and creates a Start Menu entry. A separate Node installation is not needed.
 4. Open **Codex Quota Widget** from Start. If the widget cannot find Codex or requests sign-in, use the displayed installation/login action. For a separate CLI installation, run `codex login`, then choose **Refresh**.
 
+While running, the widget adds an icon to the notification area near the clock; Windows may place it in the hidden-icons overflow. Installing without launching does not show that icon. A pinned taskbar shortcut is an optional launcher, independent of the notification-area icon.
+
 The widget installer is unsigned, so Windows may display an unknown-publisher or SmartScreen prompt. Check the source and checksum before deciding to run it. Only run one copy; the local service uses `127.0.0.1:39224`.
 
 ## Daily use
 
-- Click **Compact** to collapse; click the ring to expand. Drag the window to move it or its edges/corners to resize.
+- Click the **minus icon** to collapse; click the ring to expand. Drag the window to move it or its edges/corners to resize.
 - Click `×` to hide to the tray. Double-click the tray icon to show it again. The tray menu includes mode, refresh, always-on-top, language, and quit controls.
 - Choose **Language → System / English / 简体中文**. Native UI and browser detail page share the saved choice.
-- Open **Reset details** to view the available count and any provided grant/expiry dates. The widget never spends a credit.
+- Open **Banked resets / Details** to view the available count and any provided grant/expiry dates. The widget never uses a banked reset.
 
 Quota and cache checks run every 60 seconds. Manual refresh, reopening, and wake trigger a prompt update. Temporary failures retry at 15/30/60 seconds. Public reset data refreshes every 10 minutes; historical odds do not promise a future reset.
 

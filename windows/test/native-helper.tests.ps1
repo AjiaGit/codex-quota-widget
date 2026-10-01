@@ -23,7 +23,7 @@ Test-Case 'countdown handles minutes hours and days in both languages' {
 Test-Case 'reset cards stay authoritative and unavailable details stay explicit' {
     $data = [pscustomobject]@{ resetCards = 2; resetDetails = $null }
     $text = Format-WidgetResetDetails $data 'en'
-    if (-not $text.Contains('Available reset credits: 2')) { throw 'Count was not displayed' }
+    if (-not $text.Contains('Available banked resets: 2')) { throw 'Count was not displayed' }
     if (-not $text.Contains('Grant and expiry details were not provided.')) { throw 'Missing details claimed complete history' }
 }
 Test-Case 'reset summary includes grant and expiry but never credit IDs' {
@@ -31,7 +31,7 @@ Test-Case 'reset summary includes grant and expiry but never credit IDs' {
         id = 'secret-credit-id'; title = 'Sample grant'; description = 'Fabricated details'; grantedAt = 1790726400; expiresAt = $null
     }) }
     $text = Format-WidgetResetDetails $data 'en'
-    if (-not $text.Contains('Available reset credits: 0')) { throw 'Detail count replaced authoritative count' }
+    if (-not $text.Contains('Available banked resets: 0')) { throw 'Detail count replaced authoritative count' }
     if (-not $text.Contains('Sample grant') -or -not $text.Contains('Granted:') -or -not $text.Contains('Expires: Not provided')) { throw 'Grant/expiry omitted' }
     if ($text.Contains('secret-credit-id')) { throw 'Credit ID exposed' }
 }

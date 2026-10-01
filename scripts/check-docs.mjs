@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const files = ['README.md', 'README.zh-CN.md', 'CONTRIBUTING.md',
   'THIRD_PARTY_NOTICES.md', 'CHANGELOG.md', 'macos/README.md',
-  'macos/README.zh-CN.md', 'windows/README.md', 'windows/README.zh-CN.md'];
+  'macos/README.zh-CN.md', 'windows/README.md', 'windows/README.zh-CN.md',
+  'docs/TERMINOLOGY.md', 'docs/TERMINOLOGY.zh-CN.md'];
 const problems = [];
 let count = 0;
 for (const name of files) {

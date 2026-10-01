@@ -398,7 +398,7 @@ const http=require('node:http'),fs=require('node:fs'),path=require('node:path');
 const settingsFile=path.join(process.env.LOCALAPPDATA,'CodexWeeklyMonitor','settings.json');
 const refreshFile=path.join(__dirname,'ui-refreshes.txt');
 const fixtureNow=Date.now(),sourceUpdatedAt=fixtureNow-180000;
-const completed={id:'fixture-announcement-regular-id',kind:'regular',announcedAt:new Date(fixtureNow-86400000).toISOString(),scheduledAt:new Date(fixtureNow-3600000).toISOString(),scheduledDate:null,deliveredAt:new Date(fixtureNow-600000).toISOString(),scope:'all',scopeLabel:null,sourceUrl:'https://example.org/regular-announcement',deliverySourceUrl:'https://example.org/regular-delivery',summary:'Confirmed public reset delivery record',summaryZh:'已确认全局临时重置送达记录'};
+const completed={id:'fixture-announcement-regular-id',kind:'regular',announcedAt:new Date(fixtureNow-86400000).toISOString(),scheduledAt:new Date(fixtureNow-3600000).toISOString(),scheduledDate:null,deliveredAt:new Date(fixtureNow-600000).toISOString(),scope:'all',scopeLabel:null,sourceUrl:'https://example.org/regular-announcement',deliverySourceUrl:'https://example.org/regular-delivery',summary:'Confirmed public reset delivery record',summaryZh:'已确认全局额度重置送达记录'};
 http.createServer(async(req,res)=>{
   res.setHeader('Content-Type','application/json');
   if(req.url==='/api/settings') {
@@ -407,7 +407,7 @@ http.createServer(async(req,res)=>{
   } else if(req.url==='/api/external') {
     const now=fixtureNow;
     res.end(JSON.stringify({status:'ok',lastGlobal:null,forecast:{next24h:12,next48h:25,next7d:61,sourceUpdatedAt:new Date(now).toISOString()},announcements:{status:'ok',stale:false,sourceUpdatedAt:new Date(now).toISOString(),history:[completed],items:[
-      {id:'fixture-announcement-banked-id',kind:'banked',announcedAt:new Date(now-86400000).toISOString(),scheduledAt:new Date(now+86400000).toISOString(),scheduledDate:null,deliveredAt:null,scope:'paid',scopeLabel:null,sourceUrl:'https://example.org/banked-announcement',deliverySourceUrl:null,summary:'Confirmed credit grant for paid accounts',summaryZh:'已确认向付费账号赠送重置卡'},
+      {id:'fixture-announcement-banked-id',kind:'banked',announcedAt:new Date(now-86400000).toISOString(),scheduledAt:new Date(now+86400000).toISOString(),scheduledDate:null,deliveredAt:null,scope:'paid',scopeLabel:null,sourceUrl:'https://example.org/banked-announcement',deliverySourceUrl:null,summary:'Confirmed banked reset grant for paid accounts',summaryZh:'已确认向付费账号赠送重置次数'},
       completed
     ]}}));
   }
@@ -563,7 +563,7 @@ http.createServer(async(req,res)=>{
         Assert-True (($script:detailNative.Style -band $requiredStyles) -eq $requiredStyles) 'Reset details textbox was not multiline, read-only and vertically scrollable.'
         Write-Output ("Fabricated reset details text ($language): $($script:detailReadMethod), $($script:detailNative.ClassName), style=0x{0:X8}" -f $script:detailNative.Style)
         $detailValue = $script:detailValue
-        $expectedCount = if ($language -eq 'en') { 'Available reset credits: 2' } else { '可用重置卡：2张' }
+        $expectedCount = if ($language -eq 'en') { 'Available banked resets: 2' } else { '可用重置次数：2' }
         $expectedGrant = if ($language -eq 'en') { 'Granted:' } else { '发放：' }
         $expectedExpiry = if ($language -eq 'en') { 'Expires:' } else { '到期：' }
         Assert-True ($detailValue.Contains($expectedCount)) 'Reset details changed authoritative count.'

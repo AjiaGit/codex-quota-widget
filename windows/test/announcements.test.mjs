@@ -135,7 +135,7 @@ test('no known announcements use one merged notice; transport failure has a diff
   assert.equal(typeof view.deriveAnnouncementsView, 'function');
   const empty = view.deriveAnnouncementsView({ status: 'ok', items: [], history: [] }, now, 'UTC', 'zh-CN');
   assert.deepEqual(empty.rows, []);
-  assert.equal(empty.notice, '暂无已确认的赠送或临时重置预告');
+  assert.equal(empty.notice, '暂无已确认的赠送或全局额度重置公告');
   const unavailable = view.deriveAnnouncementsView({ status: 'unavailable', items: [], history: [] }, now, 'UTC', 'zh-CN');
   assert.equal(unavailable.notice, '预告信息暂不可用');
   const known = { id: 'b', kind: 'banked', scheduledDate: '2026-10-01', sourceUrl: 'https://x.com/thsottiaux/status/b' };

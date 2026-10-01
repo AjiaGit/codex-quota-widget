@@ -3,7 +3,7 @@ $script:WidgetStrings = @{
     en = @{
         app = 'Codex Quota'; loading = 'Loading'; reading = 'Reading quota'; updated = 'Updated'; unavailable = 'Unavailable'; refreshing = 'Refreshing'
         compact = 'Mini'; refresh = 'Refresh'; weekly = 'Weekly remaining'; untilReset = 'Until reset'; reset = 'Resets {0}'; resetUnknown = 'Reset time —'
-        lastUpdated = 'Updated {0}'; stale = 'Data is stale. Refresh to update.'; cards = 'Reset credits {0}'; cardsUnknown = 'Reset credits —'
+        lastUpdated = 'Updated {0}'; stale = 'Data is stale. Refresh to update.'; cards = 'Banked resets {0}'; cardsUnknown = 'Banked resets —'
         fiveHour = 'Plus · 5-hour quota'; percentRemaining = '{0}% remaining'; external = 'Public global resets'; lastAnnouncement = 'Announced {0} · {1}'
         paid = 'Paid accounts'; all = 'All accounts'; unknownScope = 'Scope unknown'; delivered = 'Delivered {0}'; deliveryUnknown = 'Delivery not confirmed'
         publicUnavailable = 'Public reset data unavailable'; deliveryEmpty = 'Delivery time —'; probability = 'Estimated odds: 24h {0}% · 48h {1}% · 7d {2}%'
@@ -14,10 +14,10 @@ $script:WidgetStrings = @{
         show = 'Show widget'; mode = 'Switch mini / detail'; hide = 'Hide to tray'; refreshNow = 'Refresh now'; onTop = 'Always on top'; quit = 'Quit quota widget'
         language = 'Language'; languageAuto = 'System'; languageEn = 'English'; languageZh = '简体中文'; languageSaveFailed = 'Could not save the language. Try again.'
         trayRemaining = 'Codex weekly remaining {0}%'; trayUnavailable = 'Codex quota unavailable'; dayHour = '{0}d {1}h'; hourMinute = '{0}h {1}m'; minute = '{0}m'
-        detailsTitle = 'Reset credit details'; detailsCount = 'Available reset credits: {0}'; detailsUnknownCount = 'Available reset credits: Not provided'
+        detailsTitle = 'Banked reset details'; detailsCount = 'Available banked resets: {0}'; detailsUnknownCount = 'Available banked resets: Not provided'
         detailsUnavailable = 'Grant and expiry details were not provided.'; detailsEmpty = 'No grant or expiry rows were provided.'
-        detailsScope = 'Only details returned by Codex are shown. This is not a complete history or a prediction.'; grant = 'Granted: {0}'; expiry = 'Expires: {0}'; notProvided = 'Not provided'; unnamedGrant = 'Reset credit'
-        openDetails = 'View reset credit details'; setup = 'Set up Codex'; setupTip = 'Install Codex CLI or sign in, then refresh.'
+        detailsScope = 'Only details returned by Codex are shown. This is not a complete history or a prediction.'; grant = 'Granted: {0}'; expiry = 'Expires: {0}'; notProvided = 'Not provided'; unnamedGrant = 'Banked reset'
+        openDetails = 'View banked reset details'; setup = 'Set up Codex'; setupTip = 'Install Codex CLI or sign in, then refresh.'
         cli_missing = 'Codex CLI was not found. Install Codex CLI, then refresh.'; signed_out = 'Sign in to Codex: run codex login, then refresh.'
         timeout = 'Codex took too long to reply. Refresh to try again.'; network = 'Codex could not connect. Check your connection, then refresh.'
         unsupported = 'This account did not provide a weekly quota.'; service_unavailable = 'Local service unavailable. Open Codex Quota again.'; query_failed = 'Quota is unavailable. Open Codex, confirm sign-in, then refresh.'
@@ -29,11 +29,11 @@ $script:WidgetStrings = @{
         signInHelp = 'Open a terminal and run codex login. Complete sign-in, then click Refresh.'; installHelp = 'Install Codex CLI using the official instructions, then click Refresh.'
         clearPrefs = 'Remove saved window position and language?'; preferencesTitle = 'Codex Quota preferences'
         justNow = 'Updated just now'; minuteAgo = 'Updated 1 minute ago'; minutesAgo = 'Updated {0} minutes ago'; updateUnknown = 'Update time unavailable'
-        creditDetailsRow = '{0} · Details ›'; confirmedBanked = 'Confirmed reset credit grant'; confirmedRegular = 'Confirmed global temporary reset'
-        noAnnouncements = 'No confirmed reset credit grants or global temporary resets'; announcementsUnavailable = 'Confirmed announcements unavailable'; pendingUpdate = 'Information pending update'
+        creditDetailsRow = '{0} · Details ›'; confirmedBanked = 'Confirmed banked reset grant'; confirmedRegular = 'Confirmed global reset'
+        noAnnouncements = 'No confirmed banked reset grants or global resets'; announcementsUnavailable = 'Confirmed announcements unavailable'; pendingUpdate = 'Information pending update'
         retention = 'Completed results retained for 24h'; forecastPending = 'Public estimates pending update'; phaseUpcoming = 'Upcoming'; phaseWaiting = 'Awaiting delivery'; phaseAnnounced = 'Announced · awaiting delivery'; phaseDelivered = 'Delivered'; phaseArchived = 'Delivered'
         scheduled = 'Scheduled {0}'; originalScheduled = 'Originally scheduled {0}'; scheduleUnknown = 'Delivery time not announced'; announcedOn = 'Announced {0}'; deliveredOn = 'Completed {0}'
-        publicUpdated = 'Public data updated {0}'; publicUpdateUnknown = 'Public update time unavailable'; refreshCadence = 'Quota 1 min · Notices 10 min'; sourceLinks = 'codexreset.ai / whenreset.app'
+        publicUpdated = 'Public data updated {0}'; publicUpdateUnknown = 'Public update time unavailable'; refreshCadence = 'Auto-refresh: quota every 1 min · public data every 10 min'; sourceLinks = 'codexreset.ai / whenreset.app'
         announcementSource = 'View announcement'; deliverySource = 'Delivery record'; announcementHistory = 'Announcement & delivery history'; historyEmpty = 'No announcement or delivery records'
         oddsTitle = 'Estimated global reset odds'; odds24 = '24 hours'; odds48 = '48 hours'; odds7d = '7 days'; oddsNote = 'Historical frequency estimate, not a promised reset or your weekly account reset.'
         expandHistory = 'Show announcement and delivery history'; collapseHistory = 'Hide announcement and delivery history'
@@ -41,21 +41,21 @@ $script:WidgetStrings = @{
     'zh-CN' = @{
         app = 'Codex 周额度'; loading = '读取中'; reading = '正在读取额度'; updated = '数据已更新'; unavailable = '暂不可用'; refreshing = '正在刷新'
         compact = '极简'; refresh = '刷新'; weekly = '本周剩余'; untilReset = '距离重置'; reset = '重置 {0}'; resetUnknown = '重置时间 —'
-        lastUpdated = '最近更新 {0}'; stale = '数据已过期，请刷新'; cards = '重置卡 {0}张'; cardsUnknown = '重置卡 —'
-        fiveHour = 'Plus · 5小时额度'; percentRemaining = '{0}% 剩余'; external = '公开全局临时重置'; lastAnnouncement = '上次公告 {0} · {1}'
+        lastUpdated = '最近更新 {0}'; stale = '数据已过期，请刷新'; cards = '可用重置 {0}次'; cardsUnknown = '可用重置 —'
+        fiveHour = 'Plus · 5小时额度'; percentRemaining = '{0}% 剩余'; external = '公开全局额度重置'; lastAnnouncement = '上次公告 {0} · {1}'
         paid = '付费账号'; all = '全部账号'; unknownScope = '范围未明'; delivered = '记录送达 {0}'; deliveryUnknown = '送达时间未确认'
         publicUnavailable = '上次公开重置暂不可用'; deliveryEmpty = '送达时间 —'; probability = '历史估计 24h {0}% · 48h {1}% · 7天 {2}%'
         oddsUnknown = '历史概率估计暂不可用'; attribution = '历史频率估计 · codexreset.ai / whenreset.app'; publicSource = '公开数据 · codexreset.ai'
         tipRefresh = '立即刷新额度'; tipHide = '隐藏到系统托盘'; tipCompact = '切换到极简悬浮窗'; tipExpand = '单击展开，拖动可调整位置'
-        tipResize = '拖动边缘调整大小'; tipOdds = '公开全局临时重置的历史频率估计，不是账号每周重置时间，也不是 OpenAI 承诺。'
+        tipResize = '拖动边缘调整大小'; tipOdds = '公开全局额度重置的历史频率估计，不是账号每周重置时间，也不是 OpenAI 承诺。'
         tipRemaining = '本周剩余 {0}% · 单击展开'; tipUnavailable = '额度暂不可用 · 单击展开'; tipDrag = '拖动悬浮窗'
         show = '显示悬浮窗'; mode = '切换极简 / 详细'; hide = '隐藏到托盘'; refreshNow = '立即刷新'; onTop = '始终置顶'; quit = '退出额度工具'
         language = '语言'; languageAuto = '跟随系统'; languageEn = 'English'; languageZh = '简体中文'; languageSaveFailed = '语言设置保存失败，请重试。'
         trayRemaining = 'Codex 本周剩余 {0}%'; trayUnavailable = 'Codex 周额度暂不可用'; dayHour = '{0}天 {1}小时'; hourMinute = '{0}小时 {1}分'; minute = '{0}分钟'
-        detailsTitle = '重置卡明细'; detailsCount = '可用重置卡：{0}张'; detailsUnknownCount = '可用重置卡：未提供'
+        detailsTitle = '额度重置明细'; detailsCount = '可用重置次数：{0}'; detailsUnknownCount = '可用重置次数：未提供'
         detailsUnavailable = 'Codex 未提供发放和到期明细。'; detailsEmpty = '未提供发放或到期记录。'
-        detailsScope = '仅显示 Codex 返回的明细，不代表完整历史或未来发放。'; grant = '发放：{0}'; expiry = '到期：{0}'; notProvided = '未提供'; unnamedGrant = '重置卡'
-        openDetails = '查看重置卡明细'; setup = '设置 Codex'; setupTip = '安装 Codex CLI 或登录后，再刷新。'
+        detailsScope = '仅显示 Codex 返回的明细，不代表完整历史或未来发放。'; grant = '发放：{0}'; expiry = '到期：{0}'; notProvided = '未提供'; unnamedGrant = '可用重置'
+        openDetails = '查看额度重置明细'; setup = '设置 Codex'; setupTip = '安装 Codex CLI 或登录后，再刷新。'
         cli_missing = '未找到 Codex CLI。请安装 Codex CLI 后刷新。'; signed_out = '请在终端运行 codex login 登录，然后刷新。'
         timeout = 'Codex 查询超时，请刷新重试。'; network = 'Codex 无法连接，请检查网络后刷新。'
         unsupported = '当前账号未提供七天 Codex 额度。'; service_unavailable = '本机服务未连接，请重新打开 Codex 周额度。'; query_failed = '额度暂不可用，请打开 Codex 确认已登录后刷新。'
@@ -67,13 +67,13 @@ $script:WidgetStrings = @{
         signInHelp = '请打开终端运行 codex login，完成登录后点击刷新。'; installHelp = '请按官方说明安装 Codex CLI，安装后点击刷新。'
         clearPrefs = '删除保存的窗口位置和语言设置？'; preferencesTitle = 'Codex 周额度偏好设置'
         justNow = '刚刚更新'; minuteAgo = '1分钟前更新'; minutesAgo = '{0}分钟前更新'; updateUnknown = '更新时间暂不可用'
-        creditDetailsRow = '{0} · 查看明细 ›'; confirmedBanked = '已确认重置卡赠送'; confirmedRegular = '已确认全局临时重置'
-        noAnnouncements = '暂无已确认的重置卡赠送或全局临时重置公告'; announcementsUnavailable = '已确认公告暂不可用'; pendingUpdate = '信息待更新'
+        creditDetailsRow = '{0} · 查看明细 ›'; confirmedBanked = '已确认重置次数赠送'; confirmedRegular = '已确认全局额度重置'
+        noAnnouncements = '暂无已确认的重置次数赠送或全局额度重置公告'; announcementsUnavailable = '已确认公告暂不可用'; pendingUpdate = '信息待更新'
         retention = '完成结果保留24小时'; forecastPending = '公开概率信息待更新'; phaseUpcoming = '即将进行'; phaseWaiting = '等待送达'; phaseAnnounced = '已公告 · 等待送达'; phaseDelivered = '已送达'; phaseArchived = '已送达'
         scheduled = '计划 {0}'; originalScheduled = '原定 {0}'; scheduleUnknown = '送达时间尚未公布'; announcedOn = '公告 {0}'; deliveredOn = '确认完成 {0}'
-        publicUpdated = '公告数据更新 {0}'; publicUpdateUnknown = '公告更新时间暂不可用'; refreshCadence = '额度1分钟 · 公告10分钟'; sourceLinks = 'codexreset.ai / whenreset.app'
+        publicUpdated = '公告数据更新 {0}'; publicUpdateUnknown = '公告更新时间暂不可用'; refreshCadence = '自动刷新：额度每1分钟 · 公共信息每10分钟'; sourceLinks = 'codexreset.ai / whenreset.app'
         announcementSource = '查看公告'; deliverySource = '送达记录'; announcementHistory = '公告与送达记录'; historyEmpty = '暂无公告与送达记录'
-        oddsTitle = '未来临时重置概率'; odds24 = '24小时'; odds48 = '48小时'; odds7d = '7天'; oddsNote = '历史频率估计，不代表重置承诺，也不是账号每周重置时间。'
+        oddsTitle = '未来全局额度重置概率'; odds24 = '24小时'; odds48 = '48小时'; odds7d = '7天'; oddsNote = '历史频率估计，不代表重置承诺，也不是账号每周重置时间。'
         expandHistory = '展开公告与送达记录'; collapseHistory = '收起公告与送达记录'
     }
 }
@@ -437,8 +437,12 @@ function Find-WidgetNode([string]$repositoryPath) {
     foreach ($candidate in $candidates) {
         if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
         try {
-            $version = (& $candidate --version 2>$null | Select-Object -First 1)
-            if ($LASTEXITCODE -eq 0 -and $version -match '^v(\d+)\.' -and [int]$Matches[1] -ge 24) { return [IO.Path]::GetFullPath($candidate) }
+            # Read the native process to completion before inspecting its exit status.
+            # Select-Object -First 1 in the native pipeline can stop it too early.
+            $versionLines = @(& $candidate --version 2>$null)
+            $probeExitCode = $LASTEXITCODE
+            $version = $versionLines | Select-Object -First 1
+            if ($probeExitCode -eq 0 -and $version -match '^v(\d+)\.' -and [int]$Matches[1] -ge 24) { return [IO.Path]::GetFullPath($candidate) }
         } catch { }
     }
     return $null
