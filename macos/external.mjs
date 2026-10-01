@@ -71,7 +71,7 @@ export function normalizeAnnouncements(data, now = Date.now()) {
     const item = raw?.certainty === 'announced' ? normalizedAnnouncement(raw, now, true) : null;
     if (item) upcoming.push(item); else invalid = true;
   }
-  const history = product.events.map(raw => normalizedAnnouncement(raw, now)).filter(Boolean);
+  const history = product.events.filter(raw => raw?.certainty !== 'hinted').map(raw => normalizedAnnouncement(raw, now)).filter(Boolean);
   const current = history.filter(item => item.announcedAt && now - Date.parse(item.announcedAt) < MAX_AGE_MS ||
     item.deliveredAt && active(item, now));
   const combined = deduplicate([...upcoming, ...current]);
@@ -82,12 +82,29 @@ export function normalizeAnnouncements(data, now = Date.now()) {
 
 export async function createAnnouncementStore({ file, now = Date.now } = {}) {
   let snapshot = emptyAnnouncements(), writes = Promise.resolve();
+  let baselineAt = null;
+  const observed = new Set(), unread = new Map();
+  const alertIdentity = id => {
+    if(typeof id !== 'string')return null;
+    const kind = id.endsWith('#banked') ? 'banked' : id.endsWith('#regular') ? 'regular' : null;
+    return kind && safeHttpsUrl(id.slice(0, -kind.length - 1)) ? { id, kind } : null;
+  };
+  const alerts = () => ({ unread: [...unread.values()] });
   const clean = entries => (Array.isArray(entries) ? entries : []).slice(0,100)
     .map(item => normalizedAnnouncement(item, now(), false, true)).filter(Boolean);
   try {
     const saved = JSON.parse(await readFile(file, 'utf8'));
     if (saved.version === 1) snapshot = { ...snapshot, items: clean(saved.items), history: clean(saved.history),
       sourceUpdatedAt: timestamp(saved.sourceUpdatedAt, now()), stale: true };
+    const tracking = saved.version === 1 && saved.alertTracking;
+    if(tracking?.version === 1 && Number.isFinite(tracking.baselineAt) && tracking.baselineAt <= now()) {
+      baselineAt = tracking.baselineAt;
+      for(const id of (Array.isArray(tracking.observed) ? tracking.observed : []).slice(-500))if(alertIdentity(id))observed.add(id);
+      for(const entry of (Array.isArray(tracking.unread) ? tracking.unread : []).slice(0,100)) {
+        const identity = alertIdentity(entry?.id);
+        if(identity && identity.kind === entry.kind && observed.has(identity.id))unread.set(identity.id,identity);
+      }
+    }
   } catch {}
   const project = () => {
     const items = snapshot.items.filter(item => active(item, now()));
@@ -95,10 +112,35 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
       .sort((a,b)=>Date.parse(b.announcedAt || 0)-Date.parse(a.announcedAt || 0)).slice(0,50),
       stale: snapshot.stale || !snapshot.sourceUpdatedAt || now() - Date.parse(snapshot.sourceUpdatedAt) > MAX_AGE_MS };
   };
+  const persist = async () => {
+    if(!file)return;
+    writes = writes.catch(()=>{}).then(async()=>{
+      await mkdir(dirname(file), { recursive: true }); const temp = file + '.' + process.pid + '.tmp';
+      await writeFile(temp, JSON.stringify({ version:1, ...project(), alertTracking: {
+        version:1, baselineAt, observed:[...observed].slice(-500), unread:alerts().unread,
+      } }), { mode:0o600 }); await rename(temp,file);
+    });
+    // Storage failure must not erase confirmed live data or unread notices.
+    await writes.catch(()=>{});
+  };
   return {
     get state() { return project(); },
+    get alerts() { return alerts(); },
+    async acknowledge(ids) {
+      for(const id of (Array.isArray(ids) ? ids : []).slice(0,100))unread.delete(id);
+      await persist();
+      return alerts();
+    },
     async update(input) {
       const freshItems = clean(input?.items), freshHistory = clean(input?.history);
+      if(input?.status === 'ok' && !input.stale && recentTimestamp(input.sourceUpdatedAt,now())) {
+        if(baselineAt !== null)for(const item of freshItems) {
+          if(!observed.has(item.id) && item.announcedAt && Date.parse(item.announcedAt) >= baselineAt)
+            unread.set(item.id,{id:item.id,kind:item.kind});
+        }
+        else baselineAt = now();
+        for(const item of [...freshHistory,...freshItems])observed.add(item.id);
+      }
       const previous = project(), previousItems = previous.items;
       const evidence = new Map([...freshHistory, ...freshItems].map(item => [item.id, item]));
       const retained = previousItems.map(item => evidence.has(item.id) ? deduplicate([item, evidence.get(item.id)])[0] : item);
@@ -107,14 +149,7 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
         history: deduplicate([...previous.history, ...freshHistory]),
         sourceUpdatedAt: timestamp(input?.sourceUpdatedAt, now()) || snapshot.sourceUpdatedAt,
         stale: input?.status !== 'ok' || input?.stale === true || previousItems.some(item => !evidence.has(item.id)) };
-      if (file) {
-        writes = writes.catch(()=>{}).then(async()=>{
-          await mkdir(dirname(file), { recursive: true }); const temp = file + '.' + process.pid + '.tmp';
-          await writeFile(temp, JSON.stringify({ version:1, ...project() }), { mode:0o600 }); await rename(temp,file);
-        });
-        // A storage error must not erase confirmed data from the live widget.
-        await writes.catch(()=>{});
-      }
+      await persist();
       return project();
     },
   };

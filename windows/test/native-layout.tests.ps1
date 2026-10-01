@@ -219,4 +219,39 @@ Test-Case 'expired announcement cache does not claim no confirmed announcements'
     $view=Get-WidgetAnnouncementView $value 'en' $later
     Assert-Equal $view.emptyText 'Confirmed announcements unavailable' 'Source cache expired'
 }
+Test-Case 'historical rows without delivery evidence do not imply an outstanding delivery' {
+    $event=New-Event 'historical-grant'; $event.announcedAt=$now.AddDays(-7).ToString('o')
+    foreach ($language in @('en','zh-CN')) {
+        $historical=(Get-WidgetAnnouncementView (New-External @() @($event)) $language $now).history[0]
+        Assert-Equal $historical.phase 'unknown' 'Historical delivery status'
+        if (-not $historical.details.Contains((Get-WidgetText 'phaseUnknown' $language))) {throw 'Missing delivery record was not explained'}
+        Assert-Equal $historical.completedText $null 'No invented completion'
+        $active=(Get-WidgetAnnouncementView (New-External @($event)) $language $now).active[0]
+        Assert-Equal $active.phase 'announced' 'Active announcements still await evidence'
+    }
+    $event.deliveredAt=$now.AddDays(-2).ToString('o'); $event.deliverySourceUrl='https://example.org/delivered'
+    $confirmed=(Get-WidgetAnnouncementView (New-External @() @($event)) 'en' $now).history[0]
+    Assert-Equal $confirmed.phase 'archived' 'Historical confirmed delivery preserved'
+    Assert-Equal $confirmed.deliverySourceUrl $event.deliverySourceUrl 'Delivery evidence preserved'
+}
+Test-Case 'compact announcement indicator validates sources and both localized announcement kinds' {
+    $alerts=[pscustomobject]@{unread=@([pscustomobject]@{id='https://example.org/grant#banked';kind='banked'},[pscustomobject]@{id='https://example.org/reset#regular';kind='regular'})}
+    $view=Get-WidgetAnnouncementAlertView $alerts 'en'
+    Assert-Equal $view.hasUnread $true 'Unread indicator'
+    if (-not $view.tooltip.Contains('banked reset grant and global reset')) {throw 'Kinds not explained'}
+    $zh=Get-WidgetAnnouncementAlertView $alerts 'zh-CN'
+    if (-not $zh.tooltip.Contains('重置次数赠送和全局额度重置')) {throw 'Chinese tooltip missing'}
+    $bad=[pscustomobject]@{unread=@([pscustomobject]@{id='javascript:alert(1)#banked';kind='banked'},[pscustomobject]@{id='https://example.org/hint#hinted';kind='hinted'})}
+    Assert-Equal (Get-WidgetAnnouncementAlertView $bad 'en').hasUnread $false 'Unsafe or unconfirmed notices ignored'
+    foreach ($side in @(48,64,100)) {
+        $rect=Get-WidgetNoticeBounds $side $side
+        if ($rect.x -lt 5 -or $rect.y -lt 5 -or $rect.x+$rect.width -gt $side-5 -or $rect.width -lt 5 -or $rect.width -gt 8) {throw 'Dot is outside compact bounds'}
+    }
+}
+Test-Case 'hidden detail never acknowledges notices and newly arrived unseen IDs stay unread' {
+    $alerts=[pscustomobject]@{ids=@('shown','later')}
+    $view=[pscustomobject]@{active=@([pscustomobject]@{key='shown'});history=@()}
+    Assert-Equal (Get-WidgetAnnouncementReadIds $alerts $view $false).Count 0 'Compact and hidden state'
+    Assert-Equal ((Get-WidgetAnnouncementReadIds $alerts $view $true) -join ',') 'shown' 'Only rendered IDs'
+}
 if ($script:failures) { throw "$script:failures native layout tests failed" }

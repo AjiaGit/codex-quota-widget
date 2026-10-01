@@ -1,6 +1,7 @@
 ﻿# Shared native helpers. Dot-source this file; it does not start a service or UI.
 $script:WidgetStrings = @{
     en = @{
+        newGrant = 'New banked reset grant announcement · Click for details'; newGlobalReset = 'New global reset announcement · Click for details'; newAnnouncements = 'New banked reset grant and global reset announcements · Click for details'
         app = 'Codex Quota'; loading = 'Loading'; reading = 'Reading quota'; updated = 'Updated'; unavailable = 'Unavailable'; refreshing = 'Refreshing'
         compact = 'Mini'; refresh = 'Refresh'; weekly = 'Weekly remaining'; untilReset = 'Until reset'; reset = 'Resets {0}'; resetUnknown = 'Reset time —'
         lastUpdated = 'Updated {0}'; stale = 'Data is stale. Refresh to update.'; cards = 'Banked resets {0}'; cardsUnknown = 'Banked resets —'
@@ -31,7 +32,7 @@ $script:WidgetStrings = @{
         justNow = 'Updated just now'; minuteAgo = 'Updated 1 minute ago'; minutesAgo = 'Updated {0} minutes ago'; updateUnknown = 'Update time unavailable'
         creditDetailsRow = '{0} · Details ›'; confirmedBanked = 'Confirmed banked reset grant'; confirmedRegular = 'Confirmed global reset'
         noAnnouncements = 'Monitored sources report no confirmed banked reset grants or global resets'; announcementsUnavailable = 'Confirmed announcements unavailable'; pendingUpdate = 'Information pending update'
-        retention = 'Completed results retained for 24h'; forecastPending = 'Public estimates pending update'; phaseUpcoming = 'Upcoming'; phaseWaiting = 'Awaiting delivery'; phaseAnnounced = 'Announced · awaiting delivery'; phaseDelivered = 'Delivered'; phaseArchived = 'Delivered'
+        retention = 'Completed results retained for 24h'; forecastPending = 'Public estimates pending update'; phaseUpcoming = 'Upcoming'; phaseWaiting = 'Awaiting delivery'; phaseAnnounced = 'Announced · awaiting delivery'; phaseUnknown = 'Source did not provide a delivery record'; phaseDelivered = 'Delivered'; phaseArchived = 'Delivered'
         scheduled = 'Scheduled {0}'; originalScheduled = 'Originally scheduled {0}'; scheduleUnknown = 'Delivery time not announced'; announcedOn = 'Announced {0}'; deliveredOn = 'Completed {0}'
         publicUpdated = 'Public data updated {0}'; publicUpdateUnknown = 'Public update time unavailable'; refreshCadence = 'Auto-refresh: quota every 1 min · public data every 10 min'; sourceLinks = 'codexreset.ai / whenreset.app'
         announcementSource = 'View announcement'; deliverySource = 'Delivery record'; announcementHistory = 'Announcement & delivery history'; historyEmpty = 'No announcement or delivery records'
@@ -39,6 +40,7 @@ $script:WidgetStrings = @{
         expandHistory = 'Show announcement and delivery history'; collapseHistory = 'Hide announcement and delivery history'
     }
     'zh-CN' = @{
+        newGrant = '有新的重置次数赠送公告，点击查看详情'; newGlobalReset = '有新的全局额度重置公告，点击查看详情'; newAnnouncements = '有新的重置次数赠送和全局额度重置公告，点击查看详情'
         app = 'Codex 周额度'; loading = '读取中'; reading = '正在读取额度'; updated = '数据已更新'; unavailable = '暂不可用'; refreshing = '正在刷新'
         compact = '极简'; refresh = '刷新'; weekly = '本周剩余'; untilReset = '距离重置'; reset = '重置 {0}'; resetUnknown = '重置时间 —'
         lastUpdated = '最近更新 {0}'; stale = '数据已过期，请刷新'; cards = '可用重置 {0}次'; cardsUnknown = '可用重置 —'
@@ -69,7 +71,7 @@ $script:WidgetStrings = @{
         justNow = '刚刚更新'; minuteAgo = '1分钟前更新'; minutesAgo = '{0}分钟前更新'; updateUnknown = '更新时间暂不可用'
         creditDetailsRow = '{0} · 查看明细 ›'; confirmedBanked = '已确认重置次数赠送'; confirmedRegular = '已确认全局额度重置'
         noAnnouncements = '监控来源暂无已确认的重置次数赠送或全局额度重置公告'; announcementsUnavailable = '已确认公告暂不可用'; pendingUpdate = '信息待更新'
-        retention = '完成结果保留24小时'; forecastPending = '公开概率信息待更新'; phaseUpcoming = '即将进行'; phaseWaiting = '等待送达'; phaseAnnounced = '已公告 · 等待送达'; phaseDelivered = '已送达'; phaseArchived = '已送达'
+        retention = '完成结果保留24小时'; forecastPending = '公开概率信息待更新'; phaseUpcoming = '即将进行'; phaseWaiting = '等待送达'; phaseAnnounced = '已公告 · 等待送达'; phaseUnknown = '来源未提供送达记录'; phaseDelivered = '已送达'; phaseArchived = '已送达'
         scheduled = '计划 {0}'; originalScheduled = '原定 {0}'; scheduleUnknown = '送达时间尚未公布'; announcedOn = '公告 {0}'; deliveredOn = '确认完成 {0}'
         publicUpdated = '公告数据更新 {0}'; publicUpdateUnknown = '公告更新时间暂不可用'; refreshCadence = '自动刷新：额度每1分钟 · 公共信息每10分钟'; sourceLinks = 'codexreset.ai / whenreset.app'
         announcementSource = '查看公告'; deliverySource = '送达记录'; announcementHistory = '公告与送达记录'; historyEmpty = '暂无公告与送达记录'
@@ -222,9 +224,33 @@ function Get-WidgetFiveHourView($quota, [string]$language, [DateTimeOffset]$now 
     }
     [pscustomobject]@{visible=[bool]$visible;percentText=$percentText;resetText=$resetText}
 }
-function ConvertTo-WidgetAnnouncementRow($row, [string]$language, [DateTimeOffset]$now) {
+function Get-WidgetAnnouncementAlertView($alerts, [string]$language) {
+    $ids=@(); $kinds=@()
+    foreach ($row in @($alerts.unread)) {
+        if (-not $row -or $row.kind -notin @('banked','regular')) {continue}
+        $id=[string]$row.id; $suffix='#'+[string]$row.kind
+        if (-not $id.EndsWith($suffix,[StringComparison]::Ordinal)) {continue}
+        if (-not (Test-WidgetHttpsUrl $id.Substring(0,$id.Length-$suffix.Length))) {continue}
+        $ids+=,$id; $kinds+=,[string]$row.kind
+        if ($ids.Count -ge 100) {break}
+    }
+    $key=if (($kinds | Select-Object -Unique).Count -gt 1) {'newAnnouncements'} elseif ($kinds -contains 'banked') {'newGrant'} else {'newGlobalReset'}
+    [pscustomobject]@{ids=@($ids);hasUnread=($ids.Count -gt 0);tooltip=$(if ($ids.Count) {Get-WidgetText $key $language} else {''})}
+}
+function Get-WidgetAnnouncementReadIds($alerts, $view, [bool]$visible) {
+    if (-not $visible) {return ,@()}
+    $rendered=@{}
+    foreach ($row in @($view.active)+@($view.history)) {if ($row) {$rendered[[string]$row.key]=$true}}
+    return ,@($alerts.ids | Where-Object {$rendered.ContainsKey([string]$_)})
+}
+function Get-WidgetNoticeBounds([double]$width, [double]$height) {
+    $diameter=[Math]::Max(5,[Math]::Min(8,[Math]::Min($width,$height)*0.12))
+    [pscustomobject]@{x=$width-$diameter-5;y=5;width=$diameter;height=$diameter}
+}
+function ConvertTo-WidgetAnnouncementRow($row, [string]$language, [DateTimeOffset]$now, [bool]$historical = $false) {
     $phase=Get-WidgetAnnouncementPhase $row $now
     $completed=$phase -in @('delivered','archived')
+    if ($historical -and -not $completed) { $phase='unknown' }
     $scheduleKey=if ($completed) {'originalScheduled'} else {'scheduled'}
     $scheduledText=$null; $completedText=$null
     $delivered=ConvertTo-WidgetTimestamp $row.deliveredAt
@@ -252,7 +278,7 @@ function ConvertTo-WidgetAnnouncementRow($row, [string]$language, [DateTimeOffse
         summary=$summary
         retentionText=$(if ($phase -eq 'delivered') {Get-WidgetText 'retention' $language} else {''})
         sourceUrl=$(if (Test-WidgetHttpsUrl $row.sourceUrl) {[string]$row.sourceUrl} else {$null})
-        deliverySourceUrl=$(if (Test-WidgetHttpsUrl $row.deliverySourceUrl) {[string]$row.deliverySourceUrl} else {$null})
+        deliverySourceUrl=$(if ($completed -and (Test-WidgetHttpsUrl $row.deliverySourceUrl)) {[string]$row.deliverySourceUrl} else {$null})
     }
 }
 function Get-WidgetAnnouncementView($external, [string]$language, [DateTimeOffset]$now = [DateTimeOffset]::UtcNow) {
@@ -272,7 +298,7 @@ function Get-WidgetAnnouncementView($external, [string]$language, [DateTimeOffse
         if (-not $row -or $row.kind -notin @('banked','regular')) { continue }
         $key=Get-WidgetAnnouncementKey $row
         if ($seen.ContainsKey($key)) { continue }; $seen[$key]=$true
-        $history.Add((ConvertTo-WidgetAnnouncementRow $row $language $now))
+        $history.Add((ConvertTo-WidgetAnnouncementRow $row $language $now $true))
     }
     [pscustomobject]@{
         active=@($active.ToArray()); history=@($history.ToArray())

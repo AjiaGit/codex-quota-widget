@@ -255,6 +255,7 @@ private final class ResizeGrip: NSView {
 
 private final class CompactView: NSView {
     var percent: Int? { didSet { needsDisplay = true } }
+    var hasNotice = false { didSet { needsDisplay = true } }
     var onClick: (() -> Void)?
     private var startFrame = NSRect.zero
     private var startMouse = NSPoint.zero
@@ -332,7 +333,9 @@ private final class CompactView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        if !dragged && resizingEdge == nil { onClick?() }
+        let noticeClicked = hasNotice && nativeCompactNoticeRect(in: bounds).insetBy(dx: -2, dy: -2)
+            .contains(convert(event.locationInWindow, from: nil))
+        if !dragged && (resizingEdge == nil || noticeClicked) { onClick?() }
     }
 
     override func viewDidChangeEffectiveAppearance() { needsDisplay = true }
@@ -375,6 +378,14 @@ private final class CompactView: NSView {
         let size = (label as NSString).size(withAttributes: attributes)
         (label as NSString).draw(at: NSPoint(x: bounds.midX - size.width / 2,
                                             y: bounds.midY - size.height / 2), withAttributes: attributes)
+        if hasNotice {
+            let notice = NSBezierPath(ovalIn: nativeCompactNoticeRect(in: bounds))
+            detailBackground.setStroke()
+            notice.lineWidth = 2
+            notice.stroke()
+            NSColor(srgbRed: 246 / 255, green: 202 / 255, blue: 105 / 255, alpha: 1).setFill()
+            notice.fill()
+        }
     }
 }
 
@@ -397,6 +408,7 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
     private let client = NativeServiceClient()
     private var localizer = NativeLocalizer(setting: NativeLanguage.saved(at: nativeStateDirectory()))
     private var usage = NativeUsage(object: ["status": "loading"])
+    private var announcementAlerts = NativeAnnouncementAlerts(object: nil)
     private var didPresentSetupNotice = false
     private var isCompact = UserDefaults.standard.bool(forKey: "compact")
     private var transitioning = false
@@ -448,6 +460,7 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
 
         let configuration = WKWebViewConfiguration()
         configuration.userContentController.add(self, name: "detailLayout")
+        configuration.userContentController.add(self, name: "announcementRead")
         web = WKWebView(frame: NSRect(x: 0, y: 0, width: detailFrame.width,
                                       height: max(0, detailFrame.height - 60)), configuration: configuration)
         web.navigationDelegate = self
@@ -601,6 +614,7 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         panel.orderFrontRegardless()
+        publishDetailVisibility()
         refresh()
         return true
     }
@@ -624,6 +638,7 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
         isCompact = value
         UserDefaults.standard.set(value, forKey: "compact")
         transitioning = true
+        publishDetailVisibility()
         let target = visibleFrame(NSRect(x: saved.minX, y: saved.minY,
                                          width: width, height: height))
         layoutViews()
@@ -636,6 +651,7 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
             self?.layoutViews()
             self?.saveFrame()
             self?.fitDetailHeight()
+            self?.publishDetailVisibility()
         })
         panel.orderFrontRegardless()
     }
@@ -662,7 +678,8 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
             item.state = value == localizer.setting.rawValue ? .on : .off
         }
         statusItem.button?.toolTip = usage.tooltip(localizer)
-        compact.toolTip = usage.tooltip(localizer)
+        compact.toolTip = [usage.tooltip(localizer), announcementAlerts.tooltip(localizer)].filter { !$0.isEmpty }.joined(separator: "\n")
+        compact.setAccessibilityLabel(compact.toolTip)
         updateStatusText()
     }
 
@@ -674,10 +691,12 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard message.name == "detailLayout", message.webView === web, !transitioning,
+        guard message.webView === web, message.frameInfo.isMainFrame,
               message.frameInfo.securityOrigin.protocol == baseURL.scheme,
               message.frameInfo.securityOrigin.host == baseURL.host,
-              message.frameInfo.securityOrigin.port == baseURL.port,
+              message.frameInfo.securityOrigin.port == baseURL.port else { return }
+        if message.name == "announcementRead" { pollAnnouncementAlerts(); return }
+        guard message.name == "detailLayout", !transitioning,
               let measurement = NativeDetailMeasurement(object: message.body,
                   documentURL: message.frameInfo.request.url, isMainFrame: message.frameInfo.isMainFrame,
                   expectedURL: baseURL, viewWidth: web.bounds.width) else { return }
@@ -734,8 +753,8 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
     @objc private func toggleVisibility() {
         if panel.isVisible { hide() } else { show() }
     }
-    @objc private func show() { panel.orderFrontRegardless() }
-    @objc private func hide() { panel.orderOut(nil) }
+    @objc private func show() { panel.orderFrontRegardless(); publishDetailVisibility() }
+    @objc private func hide() { panel.orderOut(nil); publishDetailVisibility() }
     @objc private func collapse() { setCompact(true) }
     @objc private func toggle() { setCompact(!isCompact) }
     @objc private func openPage() { NSWorkspace.shared.open(baseURL) }
@@ -756,6 +775,7 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
     }
 
     private func poll(force: Bool = false, notifyDock: Bool = false) {
+        pollAnnouncementAlerts()
         client.fetch(force: force) { [weak self] usage, language in
             guard let self else { return }
             self.usage = usage
@@ -774,6 +794,24 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
                 self.presentNotice(code)
             }
         }
+    }
+
+    private func pollAnnouncementAlerts() {
+        client.fetchAnnouncementAlerts { [weak self] alerts in
+            guard let self, let alerts else { return }
+            self.announcementAlerts = alerts
+            self.compact.hasNotice = alerts.hasUnread
+            self.updateNativeText()
+        }
+    }
+
+    private func publishDetailVisibility() {
+        let visible = !isCompact && panel.isVisible && !transitioning
+        web.evaluateJavaScript("window.dispatchEvent(new CustomEvent('quota-detail-visibility', {detail: \(visible ? "true" : "false")}))", completionHandler: nil)
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        publishDetailVisibility()
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,

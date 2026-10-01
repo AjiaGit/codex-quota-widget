@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { get } from 'node:http';
 import { startMonitor, queryAppServer } from '../monitor.mjs';
+import { createAnnouncementStore } from '../external.mjs';
 test('settings API persists language and rejects cross-origin and invalid writes',async()=>{
   const directory=await mkdtemp(join(tmpdir(),'quota-http-'));
   const {server,stop}=await startMonitor({port:0,settingsFile:join(directory,'settings.json'),query:async()=>({}),externalQuery:async()=>({status:'unavailable'})});
@@ -64,4 +65,51 @@ test('public data is queried on the ten-minute timer and polling the cache does 
     assert.equal((await read()).updatedAt,2);
     assert.equal(queries,2);
   }finally {if(running)await running.stop();context.mock.timers.reset();await rm(directory,{recursive:true,force:true});}
+});
+
+test('announcement alert cache and scoped read API preserve unread notices and reject cross-origin writes',async()=>{
+  const directory=await mkdtemp(join(tmpdir(),'quota-alert-http-'));
+  const baseline=Date.now()-120000;
+  const store=await createAnnouncementStore({file:join(directory,'announcements.json'),now:()=>baseline});
+  await store.update({status:'ok',items:[],history:[],sourceUpdatedAt:new Date(baseline).toISOString()});
+  const item={kind:'banked',sourceUrl:'https://example.org/new-grant',announcedAt:new Date(Date.now()-60000).toISOString()};
+  let queries=0;
+  const {server,stop}=await startMonitor({port:0,settingsFile:join(directory,'settings.json'),query:async()=>({}),externalQuery:async()=>{
+    queries++;return {status:'ok',announcements:{status:'ok',items:[item],history:[],sourceUpdatedAt:new Date().toISOString()}};
+  }});
+  const base=`http://127.0.0.1:${server.address().port}`;
+  const read=async()=>(await(await fetch(base+'/api/announcement-alerts')).json());
+  const post=(body,origin=base)=>fetch(base+'/api/announcement-alerts/read',{method:'POST',headers:{'Content-Type':'application/json',Origin:origin},body:JSON.stringify(body)});
+  try {
+    const external=await(await fetch(base+'/api/external')).json();
+    const expected={unread:[{id:item.sourceUrl+'#banked',kind:'banked'}]};
+    assert.deepEqual(external.announcementAlerts,expected);
+    assert.deepEqual(await read(),expected);
+    assert.equal(queries,1,'native alert polling reads the cache only');
+    assert.equal((await post({ids:[expected.unread[0].id]},'https://attacker.example')).status,403);
+    assert.equal((await post({ids:'all'})).status,400);
+    assert.equal((await fetch(base+'/api/announcement-alerts/read',{method:'POST',body:'ids=all'})).status,415);
+    assert.deepEqual(await read(),expected,'failed writes never clear unread notices');
+    assert.equal((await post({ids:[]})).status,200);
+    assert.deepEqual(await read(),expected,'only explicitly viewed IDs are acknowledged');
+    assert.equal((await post({ids:[expected.unread[0].id]})).status,200);
+    assert.deepEqual(await read(),{unread:[]});
+    assert.equal(queries,1);
+  }finally {await stop();await rm(directory,{recursive:true,force:true});}
+});
+
+test('stopping the service drains an in-progress public snapshot write before reporting shutdown complete',async()=>{
+  const directory=await mkdtemp(join(tmpdir(),'quota-shutdown-http-'));
+  let release;
+  const external=new Promise(resolve=>{release=()=>resolve({status:'unavailable',announcements:{status:'unavailable'}});});
+  const {server,stop}=await startMonitor({port:0,settingsFile:join(directory,'settings.json'),query:async()=>({}),externalQuery:()=>external});
+  let stopped=false;
+  const shutdown=stop().then(()=>{stopped=true;});
+  try {
+    await new Promise(resolve=>setTimeout(resolve,20));
+    const closedBeforeWrite=stopped;
+    release();
+    await shutdown;
+    assert.equal(closedBeforeWrite,false,'shutdown must not race the final local state write');
+  }finally {release();await shutdown;await rm(directory,{recursive:true,force:true,maxRetries:3,retryDelay:10});}
 });

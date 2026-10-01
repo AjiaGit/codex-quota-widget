@@ -131,6 +131,9 @@ struct NativeLocalizer {
         case "ok": pair = ("OK", "好")
         case "remaining": pair = ("Weekly quota remaining: {value}%", "本周剩余 {value}%")
         case "quota_tooltip": pair = ("Codex weekly quota", "Codex 本周额度")
+        case "new_grant": pair = ("New banked reset grant announcement · Click for details", "有新的重置次数赠送公告，点击查看详情")
+        case "new_global_reset": pair = ("New global reset announcement · Click for details", "有新的全局额度重置公告，点击查看详情")
+        case "new_announcements": pair = ("New banked reset grant and global reset announcements · Click for details", "有新的重置次数赠送和全局额度重置公告，点击查看详情")
         case "cli_missing": pair = ("Codex CLI was not found. Install Codex CLI or the Codex desktop app, then reopen this widget.", "未找到 Codex CLI。请安装 Codex CLI 或 Codex 桌面应用，然后重新打开此工具。")
         case "signed_out": pair = ("Sign in to Codex, or run codex login in Terminal, then choose Refresh.", "请先登录 Codex，或在终端运行 codex login，然后点击刷新。")
         case "timeout": pair = ("Codex took too long to respond. Check your connection and choose Refresh.", "Codex 查询超时。请检查网络，然后点击刷新。")
@@ -143,6 +146,34 @@ struct NativeLocalizer {
         }
         return (chinese ? pair.1 : pair.0).replacingOccurrences(of: "{value}", with: value.map(String.init) ?? "—")
     }
+}
+
+struct NativeAnnouncementAlerts {
+    let ids: [String]
+    private let kinds: Set<String>
+    var hasUnread: Bool { !ids.isEmpty }
+
+    init(object: [String: Any]?) {
+        let entries = (object?["unread"] as? [[String: Any]] ?? []).prefix(100).filter { row in
+            guard let id = row["id"] as? String, let kind = row["kind"] as? String,
+                  ["banked", "regular"].contains(kind), id.hasSuffix("#" + kind),
+                  let url = URL(string: String(id.dropLast(kind.count + 1))) else { return false }
+            return url.scheme == "https" && url.host != nil && url.user == nil && url.password == nil
+        }
+        ids = entries.compactMap { $0["id"] as? String }
+        kinds = Set(entries.compactMap { $0["kind"] as? String })
+    }
+
+    func tooltip(_ localizer: NativeLocalizer) -> String {
+        guard hasUnread else { return "" }
+        return localizer.text(kinds.count > 1 ? "new_announcements" : kinds.contains("banked") ? "new_grant" : "new_global_reset")
+    }
+}
+
+func nativeCompactNoticeRect(in bounds: CGRect) -> CGRect {
+    let diameter = max(5, min(8, min(bounds.width, bounds.height) * 0.12))
+    return CGRect(x: bounds.maxX - diameter - 5, y: bounds.maxY - diameter - 5,
+                  width: diameter, height: diameter)
 }
 
 /// Keep the fixed header separate from the scrolling detail content at every supported width.
@@ -283,6 +314,7 @@ final class NativeServiceClient {
     private var lastFetch: TimeInterval = -.infinity
     private var fetching = false
     private var refreshing = false
+    private var fetchingAlerts = false
     private var pendingFetch: ((NativeUsage, NativeLanguage?) -> Void)?
 
     init(session: URLSession = .shared,
@@ -350,6 +382,23 @@ final class NativeServiceClient {
             DispatchQueue.main.async {
                 self?.refreshing = false
                 completion()
+            }
+        }.resume()
+    }
+
+    func fetchAnnouncementAlerts(completion: @escaping (NativeAnnouncementAlerts?) -> Void) {
+        precondition(Thread.isMainThread)
+        guard !fetchingAlerts else { return }
+        fetchingAlerts = true
+        var request = URLRequest(url: Self.baseURL.appendingPathComponent("api/announcement-alerts"))
+        request.timeoutInterval = 8
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        session.dataTask(with: request) { [weak self] data, response, _ in
+            let object = (response as? HTTPURLResponse)?.statusCode == 200
+                ? data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } : nil
+            DispatchQueue.main.async {
+                self?.fetchingAlerts = false
+                completion(object.map { NativeAnnouncementAlerts(object: $0) })
             }
         }.resume()
     }

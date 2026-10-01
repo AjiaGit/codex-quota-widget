@@ -32,8 +32,8 @@ private func dockImage(percent: Int?) -> (NSImage, NSBitmapImageRep) {
         (percent <= 10 ? danger : accent).setStroke()
         arc.stroke()
     }
-    let label = percent.map { "\($0)%" } ?? "—"
-    let fontSize: CGFloat = label.count >= 4 ? 119 : 151
+    let label = percent.map(String.init) ?? "—"
+    let fontSize: CGFloat = label.count >= 3 ? 132 : 151
     let attrs: [NSAttributedString.Key: Any] = [
         .font: NSFont.systemFont(ofSize: fontSize, weight: .bold),
         .foregroundColor: NSColor.white

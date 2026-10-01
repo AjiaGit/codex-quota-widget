@@ -88,10 +88,20 @@ export async function startMonitor({port=PORT,settingsFile=settingsPath(),query,
       const json=value=>{response.writeHead(200,{'Content-Type':'application/json; charset=utf-8'});response.end(JSON.stringify(value));};
       if(request.method==='GET'&&url.pathname==='/health'){json({app:'codex-weekly-monitor',version:'0.1.0'});return;}
       if(request.method==='GET'&&url.pathname==='/api/usage'){json(await cache.refreshIfDue());return;}
-      if(request.method==='GET'&&url.pathname==='/api/external'){if(externalState.status==='loading')await refreshExternal();json({...externalState,announcements:announcements.state});return;}
+      if(request.method==='GET'&&url.pathname==='/api/external'){if(externalState.status==='loading')await refreshExternal();json({...externalState,announcements:announcements.state,announcementAlerts:announcements.alerts});return;}
+      if(request.method==='GET'&&url.pathname==='/api/announcement-alerts'){json(announcements.alerts);return;}
       if(request.method==='GET'&&url.pathname==='/api/settings'){json(await readSettings(settingsFile));return;}
       if(request.method==='POST'){
         if(request.headers.origin&&request.headers.origin!==origin){response.writeHead(403).end();return;}
+        if(url.pathname==='/api/announcement-alerts/read'){
+          if(!/^application\/json(?:;|$)/i.test(request.headers['content-type']||'')){response.writeHead(415).end();return;}
+          try{
+            let body='';for await(const chunk of request){body+=chunk;if(body.length>16384)throw Error();}
+            const input=JSON.parse(body);
+            if(!Array.isArray(input?.ids)||input.ids.length>100||input.ids.some(id=>typeof id!=='string'||id.length>2048))throw Error();
+            json(await announcements.acknowledge(input.ids));
+          }catch{response.writeHead(400).end();}return;
+        }
         if(url.pathname==='/api/settings'){
           if(!/^application\/json(?:;|$)/i.test(request.headers['content-type']||'')){response.writeHead(415).end();return;}
           try{let body='';for await(const chunk of request){body+=chunk;if(body.length>4096)throw Error();}json(await saveSettings(JSON.parse(body),settingsFile));}catch{response.writeHead(400).end();}return;
@@ -104,7 +114,14 @@ export async function startMonitor({port=PORT,settingsFile=settingsPath(),query,
   });
   await new Promise((resolveListen,reject)=>{server.once('error',reject);server.listen(port,HOST,resolveListen);});cache.refresh();refreshExternal();
   const timer=setInterval(()=>cache.refreshIfDue(),5000),externalTimer=setInterval(()=>refreshExternal(),600000);
-  const stop=()=>new Promise(resolveStop=>{clearInterval(timer);clearInterval(externalTimer);for(const child of activeChildren)child.kill();server.close(resolveStop);server.closeIdleConnections();});
+  const stop=async()=>{
+    clearInterval(timer);clearInterval(externalTimer);
+    const finishingExternal=externalPending;
+    for(const child of activeChildren)child.kill();
+    await new Promise(resolveStop=>{server.close(resolveStop);server.closeIdleConnections();});
+    // A final snapshot write must finish before restart or cleanup reuses its directory.
+    await finishingExternal?.catch(()=>{});
+  };
   return {server,cache,stop};
 }
 if(process.argv[1]&&fileURLToPath(import.meta.url)===resolve(process.argv[1])){

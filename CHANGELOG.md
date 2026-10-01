@@ -2,6 +2,8 @@
 
 ## 0.1.0
 
+- Quiet unread-announcement dot in compact mode, with localized hover text, persistent read state, and no first-use alerts for existing records.
+- Neutral labels for historical announcements without delivery records; macOS Dock quota numbers omit the percent sign and leave space inside the ring.
 - Compact and detailed floating quota views, with saved size and position, Windows tray controls, and macOS menu bar/Dock controls.
 - English, Simplified Chinese, and system-language selection shared by the native UI and browser detail page.
 - Available banked-reset count plus optional grant and expiry details, without exposing reset identifiers or using a reset.

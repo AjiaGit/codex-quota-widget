@@ -40,19 +40,19 @@ export function deriveResetDetails(state,language='en',timeZone=Intl.DateTimeFor
 function safeSource(value) { try { const url=new URL(value);return url.protocol==='https:' && !url.username && !url.password ? url.href : null; } catch { return null; } }
 export function deriveAnnouncementsView(state,now=Date.now(),timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone,language='en') {
   const rows=[],history=[],seen=new Set();
-  const renderItem=item=>{
+  const renderItem=(item,historical=false)=>{
     if(!['banked','regular'].includes(item?.kind)||!safeSource(item.sourceUrl))return null;
     const delivered=Date.parse(item.deliveredAt),announced=Date.parse(item.announcedAt),scheduled=Date.parse(item.scheduledAt);
     const confirmed=Number.isFinite(delivered)&&delivered<=now&&(!Number.isFinite(announced)||delivered>=announced);
     const day=typeof item.scheduledDate==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(item.scheduledDate)?Date.parse(item.scheduledDate+'T00:00:00Z'):NaN;
-    const phase=confirmed?(now-delivered>=86400000?'archived':'delivered'):Number.isFinite(scheduled)?(scheduled<=now?'waiting':'upcoming'):Number.isFinite(day)?(now>=day+86400000?'waiting':'upcoming'):'announced';
+    const phase=confirmed?(now-delivered>=86400000?'archived':'delivered'):historical?'unknown':Number.isFinite(scheduled)?(scheduled<=now?'waiting':'upcoming'):Number.isFinite(day)?(now>=day+86400000?'waiting':'upcoming'):'announced';
     const planDate=Number.isFinite(scheduled)?scheduled:day;
     const plannedDate=Number.isFinite(planDate)?formatShortDate(planDate,Number.isFinite(scheduled)?timeZone:'UTC',language,now,!Number.isFinite(scheduled)):'';
     const scopeText=item.scope==='paid'?t(language,'paid'):item.scope==='all'?t(language,'all'):(language==='zh-CN'?item.scopeLabel:item.scope)||t(language,'unknownScope');
     const plannedText=plannedDate?`${t(language,phase==='upcoming'?'scheduled':'original')} ${plannedDate}`:'';
     const completedText=confirmed?`${t(language,'completed')} ${formatShortDate(delivered,timeZone,language,now)}`:'';
     const announcedText=!plannedText&&!completedText&&Number.isFinite(announced)?`${t(language,'announcement')} ${formatShortDate(announced,timeZone,language,now)}`:'';
-    const status=confirmed?t(language,item.kind==='banked'?'grantDone':'resetDone'):t(language,phase==='waiting'?'waitingDelivery':phase==='upcoming'?'upcoming':'announcedWaiting');
+    const status=confirmed?t(language,item.kind==='banked'?'grantDone':'resetDone'):t(language,phase==='unknown'?'historyDeliveryUnknown':phase==='waiting'?'waitingDelivery':phase==='upcoming'?'upcoming':'announcedWaiting');
     return {id:item.id||item.sourceUrl+'#'+item.kind,kind:item.kind,phase,title:t(language,item.kind==='banked'?'confirmedGrant':'confirmedReset'),status,
       plannedText,completedText,announcedText,scopeText,retentionText:phase==='delivered'?t(language,'retention'):'',
       timeText:[completedText||plannedText||announcedText,scopeText].filter(Boolean).join(' · '),
@@ -60,7 +60,7 @@ export function deriveAnnouncementsView(state,now=Date.now(),timeZone=Intl.DateT
       summary:language==='zh-CN'?(item.summaryZh||item.summary||''):(item.summary||'')};
   };
   for(const item of state?.items||[]){const row=renderItem(item);if(!row)continue;if(row.phase==='archived')history.push(row);else rows.push(row);seen.add(row.id);}
-  for(const item of state?.history||[]){const row=renderItem(item);if(row&&!seen.has(row.id)){history.push(row);seen.add(row.id);}}
+  for(const item of state?.history||[]){const row=renderItem(item,true);if(row&&!seen.has(row.id)){history.push(row);seen.add(row.id);}}
   return {rows,history,notice:state?.stale||state?.status!=='ok'||!publicSourceFresh(state,now)?t(language,rows.length?'informationPending':'announcementsUnavailable'):rows.length?'':t(language,'noAnnouncements')};
 }
 export function derivePublicStatus(state,now=Date.now(),timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone,language='en') {
@@ -70,10 +70,26 @@ export function derivePublicStatus(state,now=Date.now(),timeZone=Intl.DateTimeFo
   const last=Number.isFinite(stamp)&&stamp<=now?`${t(language,'lastSuccess')} ${formatShortDate(stamp,timeZone,language,now)}`:'';
   return [t(language,'publicPending'),last].filter(Boolean).join(' · ');
 }
+export function announcementIdsForReading(alerts,view,visible) {
+  if(!visible||!Array.isArray(alerts?.unread))return [];
+  const rendered=new Set([...(view?.rows||[]),...(view?.history||[])].map(row=>row.id));
+  return alerts.unread.filter(row=>['banked','regular'].includes(row?.kind)&&rendered.has(row.id)).map(row=>row.id);
+}
 if(typeof document!=='undefined') {
   document.body.dataset.embedded=String(new URLSearchParams(location.search).get('embedded')==='1');
   const byId=id=>document.getElementById(id),root=byId('card'),refreshButton=byId('refresh');
   let state={status:'loading'},externalState={status:'loading'},loading=false,setting='auto';
+  let detailVisible=document.body.dataset.embedded!=='true',acknowledging=false;
+  async function acknowledgeRenderedAnnouncements(view) {
+    const ids=announcementIdsForReading(externalState.announcementAlerts,view,detailVisible&&!document.hidden);
+    if(acknowledging||!ids.length)return;
+    acknowledging=true;
+    try {
+      const response=await fetch('/api/announcement-alerts/read',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})});
+      if(response.ok){externalState.announcementAlerts=await response.json();window.webkit?.messageHandlers?.announcementRead?.postMessage({});}
+    }catch{}finally{acknowledging=false;}
+  }
+  window.addEventListener('quota-detail-visibility',event=>{detailVisible=event.detail===true;if(detailVisible)loadExternal();});
   const renderedLists=new Map();
   const replaceList=(id,signature,children)=>{if(renderedLists.get(id)===signature)return;byId(id).replaceChildren(...children());renderedLists.set(id,signature);};
   const language=()=>resolveLanguage(setting,navigator.language);
@@ -142,6 +158,7 @@ if(typeof document!=='undefined') {
     byId('ring').setAttribute('aria-label',t(lang,'weekly'));byId('ring').setAttribute('aria-valuenow',String(view.ringPercent));byId('ring').setAttribute('aria-valuetext',view.percentText==='—'?view.statusText:t(lang,'percentRemaining',{percent:view.ringPercent}));
     byId('language').value=setting;refreshButton.disabled=loading;byId('setup-link').hidden=state.errorCode!=='cli_missing';
     reportDetailLayout();
+    acknowledgeRenderedAnnouncements(announcements);
   }
   async function loadExternal(){try{const response=await fetch('/api/external',{cache:'no-store'});if(!response.ok)throw Error();externalState=await response.json();}catch{externalState={...externalState,status:'unavailable',announcements:{...externalState.announcements,status:'unavailable',stale:true}};}render();}
   async function loadSettings(){try{const response=await fetch('/api/settings',{cache:'no-store'});if(response.ok)setting=(await response.json()).language;}catch{}render();}

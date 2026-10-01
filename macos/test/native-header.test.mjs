@@ -31,6 +31,35 @@ function runNative(source) {
   } finally { rmSync(temp, { recursive: true, force: true }); }
 }
 
+test('compact notices validate kinds, localize their tooltip and stay inside the smallest widget', { skip: process.platform !== 'darwin' }, () => {
+  const output = runNative(`import Foundation
+import CoreGraphics
+@main struct NoticeTest {
+  static func main() throws {
+    let grant = NativeAnnouncementAlerts(object: ["unread": [["id": "https://example.org/grant#banked", "kind": "banked"]]])
+    let reset = NativeAnnouncementAlerts(object: ["unread": [["id": "https://example.org/reset#regular", "kind": "regular"]]])
+    let invalid = NativeAnnouncementAlerts(object: ["unread": [["id": "javascript:alert(1)#banked", "kind": "banked"], ["id": "https://example.org/hint#hinted", "kind": "hinted"]]])
+    let both = NativeAnnouncementAlerts(object: ["unread": [["id": "https://example.org/grant#banked", "kind": "banked"], ["id": "https://example.org/reset#regular", "kind": "regular"]]])
+    let frames = [36.0, 48.0, 100.0].map { side -> [Double] in
+      let rect = nativeCompactNoticeRect(in: CGRect(x: 0, y: 0, width: side, height: side))
+      return [side, Double(rect.minX), Double(rect.minY), Double(rect.width), Double(rect.height)]
+    }
+    let result: [String: Any] = ["grant": grant.tooltip(NativeLocalizer(setting: .simplifiedChinese)),
+      "reset": reset.tooltip(NativeLocalizer(setting: .english)), "both": both.tooltip(NativeLocalizer(setting: .english)),
+      "invalid": invalid.hasUnread, "frames": frames]
+    print(String(data: try JSONSerialization.data(withJSONObject: result), encoding: .utf8)!)
+  }
+}`);
+  assert.match(output.grant, /新的重置次数赠送公告/);
+  assert.match(output.reset, /global reset/);
+  assert.match(output.both, /banked reset grant.*global reset/);
+  assert.equal(output.invalid, false);
+  for (const [side,x,y,width,height] of output.frames) {
+    assert.ok(width >= 5 && width <= 8 && width === height);
+    assert.ok(x >= 5 && y >= 5 && x + width <= side - 5 && y + height <= side - 5);
+  }
+});
+
 test('native header reports the successful cache age in the selected language', { skip: process.platform !== 'darwin' }, () => {
   const output = runNative(`import Foundation
 @main struct HeaderTest {

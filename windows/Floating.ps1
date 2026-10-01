@@ -11,6 +11,9 @@ $script:dataDirectory = Get-WidgetDataDirectory
 Initialize-WidgetStorage $PSScriptRoot $script:dataDirectory
 $script:languageSetting = Get-WidgetLanguageSetting $script:dataDirectory
 $script:language = Resolve-WidgetLanguage $script:languageSetting
+$script:announcementReadTask = $null
+$script:announcementReadContent = $null
+$script:noticeView = $null
 $script:settingsTask = $null
 $script:detailsForm = $null
 $script:detailsText = $null
@@ -239,6 +242,14 @@ $ring.Add_Paint({
         $format.LineAlignment = [System.Drawing.StringAlignment]::Center
         $e.Graphics.DrawString($text, $font, $brush, [System.Drawing.RectangleF]::new(0, 0, $sender.Width, $sender.Height), $format)
         $font.Dispose(); $brush.Dispose(); $format.Dispose()
+    }
+    if ($compactVisual -and $script:noticeView.hasUnread) {
+        $notice=Get-WidgetNoticeBounds $sender.Width $sender.Height
+        $outline=[Drawing.Pen]::new($script:colors.back,2)
+        $brush=[Drawing.SolidBrush]::new([Drawing.Color]::FromArgb(246,202,105))
+        $e.Graphics.DrawEllipse($outline,[single]$notice.x,[single]$notice.y,[single]$notice.width,[single]$notice.height)
+        $e.Graphics.FillEllipse($brush,[single]$notice.x,[single]$notice.y,[single]$notice.width,[single]$notice.height)
+        $outline.Dispose(); $brush.Dispose()
     }
     $track.Dispose(); $arc.Dispose()
 })
@@ -519,6 +530,7 @@ function Show-Quota {
     $ringTip = if ($script:mode -eq 'Compact') {
         if ($null -eq $script:remaining) { (T 'tipUnavailable') } else { (T 'tipRemaining' @($script:remaining)) }
     } else { (T 'tipDrag') }
+    if ($script:mode -eq 'Compact' -and $script:noticeView.hasUnread) {$ringTip+="`n"+$script:noticeView.tooltip}
     $tooltip.SetToolTip($ring, $ringTip)
     $countText=$cards.Text
     $cards.Text=T 'creditDetailsRow' @($countText)
@@ -616,6 +628,8 @@ function Show-External {
     Set-AttributionLinks (T 'sourceLinks')
     $cadence.Text=T 'refreshCadence'
     Update-ResponsiveLayout
+    Update-AnnouncementIndicator
+    Start-AnnouncementRead
 }
 
 function Set-AttributionLinks([string]$text) {
@@ -682,6 +696,29 @@ function Show-Setup {
     } else { [void][Windows.Forms.MessageBox]::Show((T 'signInHelp'), (T 'setup')) }
 }
 
+function Update-AnnouncementIndicator {
+    $script:noticeView=Get-WidgetAnnouncementAlertView $script:externalData.announcementAlerts $script:language
+    if ($script:mode -eq 'Compact') {
+        $tip=if ($null -eq $script:remaining) {T 'tipUnavailable'} else {T 'tipRemaining' @($script:remaining)}
+        if ($script:noticeView.hasUnread) {$tip+="`n"+$script:noticeView.tooltip}
+        $tooltip.SetToolTip($ring,$tip); $ring.AccessibleName=$tip
+    }
+    $ring.Invalidate()
+}
+function Start-AnnouncementRead {
+    if ($script:announcementReadTask -or $script:animating -or $script:mode -ne 'Detail' -or -not $form.Visible) {return}
+    $view=Get-WidgetAnnouncementView $script:externalData $script:language ([DateTimeOffset]::UtcNow)
+    $ids=Get-WidgetAnnouncementReadIds $script:noticeView $view $true
+    if (-not $ids.Count) {return}
+    try {
+        $json=@{ids=@($ids)} | ConvertTo-Json -Compress
+        $script:announcementReadContent=[Net.Http.StringContent]::new($json,[Text.Encoding]::UTF8,'application/json')
+        $script:announcementReadTask=$script:client.PostAsync("$script:baseUrl/api/announcement-alerts/read",$script:announcementReadContent)
+    } catch {
+        if ($script:announcementReadContent) {$script:announcementReadContent.Dispose();$script:announcementReadContent=$null}
+        $script:announcementReadTask=$null
+    }
+}
 function Start-ExternalRequest {
     if ($script:externalTask -and -not $script:externalTask.IsCompleted) { return }
     try {
@@ -767,6 +804,8 @@ function Set-ModeVisual([bool]$compact) {
     foreach ($zone in $script:resizeEdges.Values) { $zone.Visible=$true }
     $tooltip.SetToolTip($ring,$(if ($compact) {T 'tipExpand'} else {T 'tipDrag'}))
     Update-ResponsiveLayout
+    Update-AnnouncementIndicator
+    Start-AnnouncementRead
 }
 
 function Start-ModeTransition([string]$nextMode) {
@@ -1069,6 +1108,22 @@ $timer.Add_Tick({
         } catch { }
         $script:settingsTask = $null
     }
+    if ($script:announcementReadTask -and $script:announcementReadTask.IsCompleted) {
+        try {
+            $response=$script:announcementReadTask.GetAwaiter().GetResult()
+            try {
+                $response.EnsureSuccessStatusCode() | Out-Null
+                $alerts=$response.Content.ReadAsStringAsync().GetAwaiter().GetResult() | ConvertFrom-Json
+                $script:externalData | Add-Member -NotePropertyName announcementAlerts -NotePropertyValue $alerts -Force
+                Save-PublicSnapshot
+                Update-AnnouncementIndicator
+            } finally {$response.Dispose()}
+        } catch { }
+        finally {
+            if ($script:announcementReadContent) {$script:announcementReadContent.Dispose();$script:announcementReadContent=$null}
+            $script:announcementReadTask=$null
+        }
+    }
     if ($script:externalTask -and $script:externalTask.IsCompleted) {
         try {
             $response = $script:externalTask.GetAwaiter().GetResult()
@@ -1092,6 +1147,7 @@ $timer.Add_Tick({
     if (($now - $script:lastThemeCheck).TotalMinutes -ge 1) { Set-Theme; $script:lastThemeCheck = $now }
 })
 
+$form.Add_VisibleChanged({if ($form.Visible) {Start-AnnouncementRead}})
 $form.Add_Shown({
     if ($script:mode -eq 'Compact') {
         $form.Bounds = [System.Drawing.Rectangle]::new($form.Left, $form.Top, $script:compactSize.Width, $script:compactSize.Height)

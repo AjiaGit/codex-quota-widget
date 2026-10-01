@@ -28,12 +28,15 @@ To run from source, install Node.js 24+ and follow the platform guide. macOS sou
 
 - Switch between a compact percentage ring and detailed view; drag to move or resize. Each mode remembers its position and size. On macOS, the default detail height fits the content within the available screen; manually resizing keeps your chosen size.
 - Use the Windows tray menu or macOS menu bar to show the window, refresh, change language, or quit. The macOS Dock icon also shows remaining weekly quota.
+- A small amber dot in compact mode marks a new confirmed banked reset grant or global reset announcement. Hover for its type; open details to clear the notices shown there. Existing records on first use do not trigger the dot, and read notices stay read after a restart. There is no sound or flashing. The macOS Dock ring uses a number without a percent sign.
 - Choose **Language → System / English / 简体中文**. System selects Chinese for a Chinese system language and English otherwise. The browser detail page and native UI share the saved choice.
 - Open the **Banked resets / Details** row to see the authoritative available count and any grant or expiry dates Codex provides. Missing dates are shown as unavailable. The widget never spends a banked reset or predicts future grants. Banked resets are separate from paid usage credits and the normal reset countdown.
 
 Quota queries and cache checks run every **60 seconds**. Manual refresh, reopening, and waking the computer refresh promptly; simultaneous requests are combined. Temporary query failures retry after **15, 30, then 60 seconds**. Unavailable, expired, or stale quota is shown as `—`, rather than continuing to present an old percentage as current.
 
 Confirmed banked reset grants and global reset announcements stay visible until delivery is confirmed, then remain for 24 hours before moving into history. Known pending announcements survive source outages and app restarts. Five-hour usage is shown only for a confirmed Plus plan; Pro and unknown plans hide that row.
+
+Historical announcements without delivery evidence say **Source did not provide a delivery record**. An account's personal grant date does not confirm delivery of a public announcement to every account.
 
 Public reset announcements and historical odds from [codexreset.ai](https://codexreset.ai/) and [whenreset.app](https://whenreset.app/) refresh separately every **10 minutes**. Historical odds do not promise a future reset time.
 
@@ -45,7 +48,7 @@ The local service uses the read-only `account/read` and `account/rateLimits/read
 
 If quota is unavailable, follow the displayed instruction, check `codex login status`, and choose **Refresh**. The platform guides list log locations and restart/uninstall steps. Do not share credentials, raw account responses, unredacted logs, or personal account screenshots in bug reports.
 
-App Server can change with Codex updates. Hosted-runner tests use fabricated data; they do not prove real-account login or physical Intel Mac/Windows desktop compatibility. The Windows installer offers startup at login as an optional unchecked task. Notifications and remote sync are not included.
+App Server can change with Codex updates. Hosted-runner tests use fabricated data; they do not prove real-account login or physical Intel Mac/Windows desktop compatibility. The Windows installer offers startup at login as an optional unchecked task. System notifications and remote sync are not included.
 
 ## Development and license
 

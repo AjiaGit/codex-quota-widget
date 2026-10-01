@@ -131,6 +131,96 @@ test('announcement presentation distinguishes upcoming, awaiting completion, com
   assert.equal(view.deriveAnnouncementsView(done, now + 25 * hour, 'UTC', 'en').history.length, 1);
 });
 
+test('historical announcements without delivery evidence never imply they are still awaiting delivery', () => {
+  const item = { id: 'old-grant', kind: 'banked', announcedAt: at(-7 * 24 * hour), deliveredAt: null, sourceUrl: 'https://x.com/thsottiaux/status/old-grant' };
+  for (const [language, status] of [['en', 'Source did not provide a delivery record'], ['zh-CN', '来源未提供送达记录']]) {
+    const historical = view.deriveAnnouncementsView({ status: 'ok', items: [], history: [item] }, now, 'UTC', language);
+    assert.equal(historical.history[0].phase, 'unknown');
+    assert.equal(historical.history[0].status, status);
+    assert.equal(historical.history[0].completedText, '');
+    assert.equal(historical.history[0].deliverySourceUrl, null);
+    const active = view.deriveAnnouncementsView({ status: 'ok', items: [item], history: [] }, now, 'UTC', language);
+    assert.equal(active.rows[0].phase, 'announced', 'active announcements retain their pending state');
+    assert.equal(active.rows[0].status, locale.t(language, 'announcedWaiting'));
+  }
+});
+
+test('historical completion labels require and preserve delivery evidence', () => {
+  const item = { id: 'done-reset', kind: 'regular', announcedAt: at(-72 * hour), deliveredAt: at(-48 * hour), sourceUrl: 'https://x.com/thsottiaux/status/done-reset', deliverySourceUrl: 'https://x.com/thsottiaux/status/confirmed' };
+  const result = view.deriveAnnouncementsView({ status: 'ok', items: [], history: [item] }, now, 'UTC', 'zh-CN');
+  assert.equal(result.history[0].phase, 'archived');
+  assert.equal(result.history[0].status, '已重置');
+  assert.match(result.history[0].completedText, /确认完成/);
+  assert.equal(result.history[0].deliverySourceUrl, item.deliverySourceUrl);
+});
+
+test('compact announcement alerts baseline existing records and ignore late historical records', async () => {
+  let time = now;
+  const store = await source.createAnnouncementStore({ now: () => time });
+  await store.update({ status: 'unavailable' });
+  assert.deepEqual(store.alerts, { unread: [] });
+  const old = { ...scheduled(), certainty: undefined, ts: at(-72 * hour) };
+  await store.update(source.normalizeAnnouncements(feed(scheduled(), [old]), time));
+  assert.deepEqual(store.alerts.unread, [], 'first successful lookup is the baseline');
+  time += hour;
+  const fresh = { ...scheduled('regular'), ts: at(hour) };
+  const addedHistory = { ...old, url: 'https://x.com/thsottiaux/status/older-added', ts: at(-48 * hour) };
+  await store.update(source.normalizeAnnouncements({ ...feed([scheduled(), fresh], [old, addedHistory]), generated_at: at(hour) }, time));
+  assert.deepEqual(store.alerts.unread, [{ id: fresh.url + '#regular', kind: 'regular' }]);
+  await store.update({ status: 'unavailable' });
+  assert.equal(store.alerts.unread.length, 1, 'provider failure preserves genuine unread notices');
+});
+
+test('unread confirmed announcements survive restart and acknowledgements clear only the IDs that were viewed', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'quota-unread-'));
+  const file = join(dir, 'announcements.json');
+  let time = now;
+  try {
+    const store = await source.createAnnouncementStore({ file, now: () => time });
+    await store.update(source.normalizeAnnouncements(feed(), time));
+    time += hour;
+    const grant = { ...scheduled(), ts: at(hour) };
+    await store.update(source.normalizeAnnouncements({ ...feed(grant), generated_at: at(hour) }, time));
+    const viewed = store.alerts.unread.map(item => item.id);
+    time += hour;
+    const reset = { ...scheduled('regular'), ts: at(2 * hour) };
+    await store.update(source.normalizeAnnouncements({ ...feed([grant, reset]), generated_at: at(2 * hour) }, time));
+    assert.equal(store.alerts.unread.length, 2);
+    const restarted = await source.createAnnouncementStore({ file, now: () => time });
+    assert.equal(restarted.alerts.unread.length, 2);
+    await restarted.acknowledge(viewed);
+    assert.deepEqual(restarted.alerts.unread, [{ id: reset.url + '#regular', kind: 'regular' }], 'a newly arrived reset remains unread');
+    await restarted.acknowledge([reset.url + '#regular']);
+    const reopened = await source.createAnnouncementStore({ file, now: () => time });
+    await reopened.update(source.normalizeAnnouncements({ ...feed([grant, reset]), generated_at: at(2 * hour) }, time));
+    assert.deepEqual(reopened.alerts.unread, [], 'viewed announcements never reappear after restart or repeated polling');
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('hints, failed or stale sources cannot create compact announcement alerts', async () => {
+  let time = now;
+  const store = await source.createAnnouncementStore({ now: () => time });
+  await store.update(source.normalizeAnnouncements(feed(), time));
+  time += hour;
+  const hint = { ...scheduled(), certainty: 'hinted', ts: at(hour) };
+  await store.update(source.normalizeAnnouncements({ ...feed(hint), generated_at: at(hour) }, time));
+  await store.update(source.normalizeAnnouncements({ ...feed(null, [hint]), generated_at: at(hour) }, time));
+  const fresh = { ...scheduled('regular'), ts: at(hour) };
+  const value = source.normalizeAnnouncements({ ...feed(fresh), generated_at: at(hour) }, time);
+  await store.update({ ...value, status: 'unavailable', stale: true });
+  await store.update({ ...value, sourceUpdatedAt: at(-25 * hour) });
+  assert.deepEqual(store.alerts.unread, []);
+});
+
+test('hidden compact details never acknowledge notices and a visible detail acknowledges only rendered IDs', () => {
+  const alerts = { unread: [{ id: 'shown', kind: 'banked' }, { id: 'arrived-later', kind: 'regular' }] };
+  const displayed = { rows: [{ id: 'shown' }], history: [] };
+  assert.equal(typeof view.announcementIdsForReading, 'function');
+  assert.deepEqual(view.announcementIdsForReading(alerts, displayed, false), []);
+  assert.deepEqual(view.announcementIdsForReading(alerts, displayed, true), ['shown']);
+  assert.deepEqual(view.announcementIdsForReading(null, displayed, true), []);
+});
+
 test('no known announcements use one merged notice; transport failure has a different notice and retains known rows', () => {
   assert.equal(typeof view.deriveAnnouncementsView, 'function');
   const empty = view.deriveAnnouncementsView({ status: 'ok', sourceUpdatedAt:at(0), items: [], history: [] }, now, 'UTC', 'zh-CN');
