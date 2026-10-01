@@ -399,7 +399,9 @@ public static class QuotaSmokeWindows {
         # Screenshots must contain only the completely fabricated UI response.
         Remove-Item -LiteralPath (Join-Path $dataDir 'native-public-cache.json') -ErrorAction SilentlyContinue
         [void](Invoke-RestMethod 'http://127.0.0.1:39225/api/settings' -Method Post -ContentType 'application/json' -Body ('{"language":"'+$language+'"}'))
-        $ui = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe') -ArgumentList @('-NoProfile','-Sta','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',('"'+(Join-Path $installDir 'Floating.ps1')+'"'),'-BaseUrl','http://127.0.0.1:39225') -PassThru -WindowStyle Hidden
+        $uiOut=Join-Path $OutputDir ('native-'+$language+'-stdout.log')
+        $uiError=Join-Path $OutputDir ('native-'+$language+'-stderr.log')
+        $ui = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe') -ArgumentList @('-NoProfile','-Sta','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',('"'+(Join-Path $installDir 'Floating.ps1')+'"'),'-BaseUrl','http://127.0.0.1:39225') -PassThru -WindowStyle Hidden -RedirectStandardOutput $uiOut -RedirectStandardError $uiError
         $testProcesses.Add($ui)
         $title = Get-WidgetText 'app' $language
         Wait-Until { [QuotaSmokeWindows]::Find($ui.Id,$title) -ne [IntPtr]::Zero } "Localized native window missing: $language"
@@ -470,6 +472,8 @@ public static class QuotaSmokeWindows {
             $prefix=$creditText.Substring(0,$creditText.IndexOf(' · ')+3)
             $linkX=[Windows.Forms.TextRenderer]::MeasureText($prefix,$linkFont).Width+4
         } finally {$linkFont.Dispose()}
+        $creditBounds=[QuotaSmokeWindows]::OwnedBounds($creditHandle,$ui.Id)
+        Write-Output ("Fabricated credit disclosure: text=[$creditText], bounds=$($creditBounds.Left),$($creditBounds.Top),$($creditBounds.Width),$($creditBounds.Height), click=$linkX,10, offscreen=$($creditElement.Current.IsOffscreen), fontHandle=$fontHandle")
         $linkPoint=[IntPtr]((10 -shl 16) -bor $linkX)
         # LinkLabel activates the link hit by WM_MOUSEMOVE before mouse-down;
         # a down/up pair alone never puts its link into the Hover state.
@@ -560,6 +564,9 @@ public static class QuotaSmokeWindows {
                 }
             } catch { }
         }
+    }
+    foreach ($uiLog in @($uiOut,$uiError)) {
+        if ($uiLog -and (Test-Path -LiteralPath $uiLog)) { Write-Output ("Fabricated native process log: "+[IO.Path]::GetFileName($uiLog)); Get-Content -LiteralPath $uiLog | Select-Object -Last 30 | Write-Output }
     }
     throw $failure
 } finally {
