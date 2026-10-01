@@ -14,6 +14,129 @@ if ($OutputDir.StartsWith($repository.TrimEnd('\','/') + [IO.Path]::DirectorySep
 $Installer = [IO.Path]::GetFullPath($Installer)
 if (-not (Test-Path -LiteralPath $Installer -PathType Leaf)) { throw 'Installer file does not exist.' }
 if ($UpgradeInstaller) { $UpgradeInstaller = [IO.Path]::GetFullPath($UpgradeInstaller) }
+Add-Type -TypeDefinition @'
+using System; using System.Runtime.InteropServices; using System.Text; using System.Collections.Generic;
+public static class QuotaSmokeWindows {
+    private delegate bool EnumProc(IntPtr hWnd, IntPtr param);
+    [DllImport("user32.dll")] private static extern bool EnumWindows(EnumProc callback, IntPtr param);
+    [DllImport("user32.dll")] private static extern bool EnumChildWindows(IntPtr parent, EnumProc callback, IntPtr param);
+    [StructLayout(LayoutKind.Sequential)] public struct WindowBounds {
+        public int Left, Top, Right, Bottom;
+        public int Width { get { return Right-Left; } }
+        public int Height { get { return Bottom-Top; } }
+    }
+    public sealed class HeaderButton { public IntPtr Handle; public WindowBounds Bounds; }
+    [StructLayout(LayoutKind.Sequential)] private struct CursorPoint { public int X, Y; }
+    [DllImport("user32.dll", SetLastError=true)] private static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] private static extern bool GetCursorPos(out CursorPoint point);
+    public static string PlaceOwnedCursor(IntPtr control, int pid, int x, int y) {
+        var bounds=OwnedBounds(control,pid);
+        if (!IsWindowVisible(control) || x < 0 || y < 0 || x >= bounds.Width || y >= bounds.Height)
+            throw new InvalidOperationException("Cursor target escaped the owned visible fixture control");
+        CursorPoint before; GetCursorPos(out before);
+        if (!SetCursorPos(bounds.Left+x,bounds.Top+y))
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),"CI input desktop cannot move cursor to fixture");
+        CursorPoint after;
+        if (!GetCursorPos(out after) || after.X != bounds.Left+x || after.Y != bounds.Top+y)
+            throw new InvalidOperationException("CI input desktop did not retain the fixture cursor position");
+        return "before="+before.X+","+before.Y+" after="+after.X+","+after.Y;
+    }
+    [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hWnd, out WindowBounds bounds);
+    [DllImport("user32.dll")] private static extern bool IsChild(IntPtr parent, IntPtr child);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetClassName(IntPtr hWnd, StringBuilder text, int count);
+    [DllImport("user32.dll", EntryPoint="GetWindowLongW", ExactSpelling=true)] private static extern int GetWindowStyle(IntPtr hWnd, int index);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+    [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll", EntryPoint="SendMessageW", CharSet=CharSet.Unicode, ExactSpelling=true)] private static extern IntPtr SendMessageText(IntPtr hWnd, uint msg, IntPtr wParam, StringBuilder text);
+    public sealed class EditSnapshot {
+        public IntPtr Handle;
+        public string ClassName;
+        public uint Style;
+        public string Text;
+    }
+    private static bool IsOwned(IntPtr window, int pid) {
+        uint owner;
+        return window != IntPtr.Zero && GetWindowThreadProcessId(window, out owner) != 0 && owner == (uint)pid;
+    }
+    public static EditSnapshot ReadOwnedEdit(IntPtr parent, int pid) {
+        if (!IsOwned(parent, pid)) return null;
+        EditSnapshot result = null;
+        EnumChildWindows(parent, delegate(IntPtr child, IntPtr unused) {
+            if (!IsChild(parent, child) || !IsOwned(child, pid)) return true;
+            var name = new StringBuilder(256);
+            GetClassName(child, name, name.Capacity);
+            if (!name.ToString().StartsWith("WindowsForms10.EDIT.", StringComparison.OrdinalIgnoreCase)) return true;
+            // WM_GETTEXT is marshalled by Windows for this owned child control;
+            // GetWindowText cannot reliably read another process's edit text.
+            long length = SendMessage(child, 0x000E, IntPtr.Zero, IntPtr.Zero).ToInt64();
+            if (length < 0 || length > 1024 * 1024) return true;
+            var text = new StringBuilder((int)length + 1);
+            SendMessageText(child, 0x000D, new IntPtr(text.Capacity), text);
+            result = new EditSnapshot {
+                Handle = child, ClassName = name.ToString(),
+                Style = unchecked((uint)GetWindowStyle(child, -16)), Text = text.ToString()
+            };
+            return false;
+        }, IntPtr.Zero);
+        return result;
+    }
+    public static WindowBounds OwnedBounds(IntPtr window, int pid) {
+        WindowBounds bounds;
+        if (!IsOwned(window,pid) || !GetWindowRect(window,out bounds)) throw new InvalidOperationException("Unowned fixture window");
+        return bounds;
+    }
+    public static HeaderButton[] Toolbar(IntPtr parent, int pid) {
+        var root=OwnedBounds(parent,pid);
+        var found=new List<HeaderButton>();
+        EnumChildWindows(parent,delegate(IntPtr child,IntPtr unused) {
+            if (!IsChild(parent,child) || !IsOwned(child,pid)) return true;
+            var name=new StringBuilder(256); GetClassName(child,name,name.Capacity);
+            WindowBounds bounds;
+            if (IsWindowVisible(child) && name.ToString().StartsWith("WindowsForms10.BUTTON.",StringComparison.OrdinalIgnoreCase) && GetWindowRect(child,out bounds)
+                && bounds.Top >= root.Top && bounds.Bottom <= root.Top+54) found.Add(new HeaderButton {Handle=child,Bounds=bounds});
+            return true;
+        },IntPtr.Zero);
+        found.Sort(delegate(HeaderButton a,HeaderButton b) {return a.Bounds.Left.CompareTo(b.Bounds.Left);});
+        return found.ToArray();
+    }
+    public static IntPtr ScrollBody(IntPtr parent, int pid) {
+        if (!IsOwned(parent,pid)) return IntPtr.Zero;
+        IntPtr result=IntPtr.Zero;
+        EnumChildWindows(parent,delegate(IntPtr child,IntPtr unused) {
+            if (!IsChild(parent,child) || !IsOwned(child,pid)) return true;
+            var name=new StringBuilder(256); GetClassName(child,name,name.Capacity);
+            if (name.ToString().StartsWith("WindowsForms10.Window.",StringComparison.OrdinalIgnoreCase)
+                && (unchecked((uint)GetWindowStyle(child,-16)) & 0x00200000) != 0) {result=child;return false;}
+            return true;
+        },IntPtr.Zero); return result;
+    }
+    public static string ReadOwnedDialogText(IntPtr dialog, int pid) {
+        if (!IsOwned(dialog,pid)) return null;
+        var values=new List<string>();
+        EnumChildWindows(dialog,delegate(IntPtr child,IntPtr unused) {
+            if (!IsOwned(child,pid) || !IsChild(dialog,child)) return true;
+            var text=new StringBuilder(8192); GetWindowText(child,text,text.Capacity);
+            if (text.Length>0) values.Add(text.ToString());
+            return true;
+        },IntPtr.Zero);
+        return string.Join(" | ",values.ToArray());
+    }
+    public static IntPtr Find(int pid, string title) {
+        IntPtr result=IntPtr.Zero;
+        EnumWindows(delegate(IntPtr window, IntPtr unused) {
+            uint owner; GetWindowThreadProcessId(window, out owner);
+            if(owner==(uint)pid && IsWindowVisible(window)) {
+                var text=new StringBuilder(256); GetWindowText(window,text,text.Capacity);
+                if(text.ToString()==title) { result=window; return false; }
+            } return true;
+        },IntPtr.Zero); return result;
+    }
+}
+'@
+
 $savedLocal = $env:LOCALAPPDATA; $savedTemp = $env:TEMP; $savedTmp = $env:TMP; $savedPath = $env:PATH
 $savedCli = $env:CODEX_CLI_PATH; $savedModeFile = $env:QUOTA_SMOKE_MODE_FILE
 $savedPidFile = $env:QUOTA_SMOKE_PID_FILE; $savedWrapperPidFile = $env:QUOTA_SMOKE_WRAPPER_PID_FILE
@@ -24,6 +147,7 @@ $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot\System32\WindowsPowerShell
 $installDir = Join-Path $OutputDir 'installed'
 $dataDir = Join-Path $env:LOCALAPPDATA 'CodexWeeklyMonitor'
 $testProcesses = New-Object 'System.Collections.Generic.List[System.Diagnostics.Process]'
+$fixtureLaunches=New-Object 'System.Collections.Generic.List[int]'
 $serviceUrl = 'http://127.0.0.1:39224'
 $uninstalled = $false
 function Assert-True([bool]$condition, [string]$message) { if (-not $condition) { throw $message } }
@@ -38,7 +162,8 @@ function Install-Widget([string]$path, [string]$logName) {
     Assert-True ($installerProcess.ExitCode -eq 0) "Installation failed: $logName"
 }
 function Start-Installed {
-    [void](Start-Process -FilePath (Join-Path $installDir 'CodexQuotaWidget.exe') -PassThru)
+    $fixtureLauncher=Start-Process -FilePath (Join-Path $installDir 'CodexQuotaWidget.exe') -PassThru
+    $fixtureLaunches.Add($fixtureLauncher.Id)
     Wait-Until { (Invoke-RestMethod "$serviceUrl/health" -TimeoutSec 2).app -eq 'codex-weekly-monitor' } 'Installed service did not become healthy.'
     Wait-Until { $state = Read-WidgetJson (Join-Path $dataDir 'state.json'); $state -and $state.floatingPid -and (Get-Process -Id $state.floatingPid -ErrorAction SilentlyContinue) } 'Native floating window did not stay running.'
     Wait-Until { (Invoke-RestMethod "$serviceUrl/api/usage" -TimeoutSec 2).status -eq 'ok' } 'Fabricated Codex fixture did not supply quota.'
@@ -299,117 +424,6 @@ http.createServer(async(req,res)=>{
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName UIAutomationClient
     Add-Type -AssemblyName UIAutomationTypes
-    Add-Type -TypeDefinition @'
-using System; using System.Runtime.InteropServices; using System.Text; using System.Collections.Generic;
-public static class QuotaSmokeWindows {
-    private delegate bool EnumProc(IntPtr hWnd, IntPtr param);
-    [DllImport("user32.dll")] private static extern bool EnumWindows(EnumProc callback, IntPtr param);
-    [DllImport("user32.dll")] private static extern bool EnumChildWindows(IntPtr parent, EnumProc callback, IntPtr param);
-    [StructLayout(LayoutKind.Sequential)] public struct WindowBounds {
-        public int Left, Top, Right, Bottom;
-        public int Width { get { return Right-Left; } }
-        public int Height { get { return Bottom-Top; } }
-    }
-    public sealed class HeaderButton { public IntPtr Handle; public WindowBounds Bounds; }
-    [StructLayout(LayoutKind.Sequential)] private struct CursorPoint { public int X, Y; }
-    [DllImport("user32.dll", SetLastError=true)] private static extern bool SetCursorPos(int x, int y);
-    [DllImport("user32.dll")] private static extern bool GetCursorPos(out CursorPoint point);
-    public static string PlaceOwnedCursor(IntPtr control, int pid, int x, int y) {
-        var bounds=OwnedBounds(control,pid);
-        if (!IsWindowVisible(control) || x < 0 || y < 0 || x >= bounds.Width || y >= bounds.Height)
-            throw new InvalidOperationException("Cursor target escaped the owned visible fixture control");
-        CursorPoint before; GetCursorPos(out before);
-        if (!SetCursorPos(bounds.Left+x,bounds.Top+y))
-            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),"CI input desktop cannot move cursor to fixture");
-        CursorPoint after;
-        if (!GetCursorPos(out after) || after.X != bounds.Left+x || after.Y != bounds.Top+y)
-            throw new InvalidOperationException("CI input desktop did not retain the fixture cursor position");
-        return "before="+before.X+","+before.Y+" after="+after.X+","+after.Y;
-    }
-    [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hWnd, out WindowBounds bounds);
-    [DllImport("user32.dll")] private static extern bool IsChild(IntPtr parent, IntPtr child);
-    [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetClassName(IntPtr hWnd, StringBuilder text, int count);
-    [DllImport("user32.dll", EntryPoint="GetWindowLongW", ExactSpelling=true)] private static extern int GetWindowStyle(IntPtr hWnd, int index);
-    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
-    [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
-    [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hWnd);
-    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
-    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
-    [DllImport("user32.dll", EntryPoint="SendMessageW", CharSet=CharSet.Unicode, ExactSpelling=true)] private static extern IntPtr SendMessageText(IntPtr hWnd, uint msg, IntPtr wParam, StringBuilder text);
-    public sealed class EditSnapshot {
-        public IntPtr Handle;
-        public string ClassName;
-        public uint Style;
-        public string Text;
-    }
-    private static bool IsOwned(IntPtr window, int pid) {
-        uint owner;
-        return window != IntPtr.Zero && GetWindowThreadProcessId(window, out owner) != 0 && owner == (uint)pid;
-    }
-    public static EditSnapshot ReadOwnedEdit(IntPtr parent, int pid) {
-        if (!IsOwned(parent, pid)) return null;
-        EditSnapshot result = null;
-        EnumChildWindows(parent, delegate(IntPtr child, IntPtr unused) {
-            if (!IsChild(parent, child) || !IsOwned(child, pid)) return true;
-            var name = new StringBuilder(256);
-            GetClassName(child, name, name.Capacity);
-            if (!name.ToString().StartsWith("WindowsForms10.EDIT.", StringComparison.OrdinalIgnoreCase)) return true;
-            // WM_GETTEXT is marshalled by Windows for this owned child control;
-            // GetWindowText cannot reliably read another process's edit text.
-            long length = SendMessage(child, 0x000E, IntPtr.Zero, IntPtr.Zero).ToInt64();
-            if (length < 0 || length > 1024 * 1024) return true;
-            var text = new StringBuilder((int)length + 1);
-            SendMessageText(child, 0x000D, new IntPtr(text.Capacity), text);
-            result = new EditSnapshot {
-                Handle = child, ClassName = name.ToString(),
-                Style = unchecked((uint)GetWindowStyle(child, -16)), Text = text.ToString()
-            };
-            return false;
-        }, IntPtr.Zero);
-        return result;
-    }
-    public static WindowBounds OwnedBounds(IntPtr window, int pid) {
-        WindowBounds bounds;
-        if (!IsOwned(window,pid) || !GetWindowRect(window,out bounds)) throw new InvalidOperationException("Unowned fixture window");
-        return bounds;
-    }
-    public static HeaderButton[] Toolbar(IntPtr parent, int pid) {
-        var root=OwnedBounds(parent,pid);
-        var found=new List<HeaderButton>();
-        EnumChildWindows(parent,delegate(IntPtr child,IntPtr unused) {
-            if (!IsChild(parent,child) || !IsOwned(child,pid)) return true;
-            var name=new StringBuilder(256); GetClassName(child,name,name.Capacity);
-            WindowBounds bounds;
-            if (IsWindowVisible(child) && name.ToString().StartsWith("WindowsForms10.BUTTON.",StringComparison.OrdinalIgnoreCase) && GetWindowRect(child,out bounds)
-                && bounds.Top >= root.Top && bounds.Bottom <= root.Top+54) found.Add(new HeaderButton {Handle=child,Bounds=bounds});
-            return true;
-        },IntPtr.Zero);
-        found.Sort(delegate(HeaderButton a,HeaderButton b) {return a.Bounds.Left.CompareTo(b.Bounds.Left);});
-        return found.ToArray();
-    }
-    public static IntPtr ScrollBody(IntPtr parent, int pid) {
-        if (!IsOwned(parent,pid)) return IntPtr.Zero;
-        IntPtr result=IntPtr.Zero;
-        EnumChildWindows(parent,delegate(IntPtr child,IntPtr unused) {
-            if (!IsChild(parent,child) || !IsOwned(child,pid)) return true;
-            var name=new StringBuilder(256); GetClassName(child,name,name.Capacity);
-            if (name.ToString().StartsWith("WindowsForms10.Window.",StringComparison.OrdinalIgnoreCase)
-                && (unchecked((uint)GetWindowStyle(child,-16)) & 0x00200000) != 0) {result=child;return false;}
-            return true;
-        },IntPtr.Zero); return result;
-    }
-    public static IntPtr Find(int pid, string title) {
-        IntPtr result=IntPtr.Zero;
-        EnumWindows(delegate(IntPtr window, IntPtr unused) {
-            uint owner; GetWindowThreadProcessId(window, out owner);
-            if(owner==(uint)pid && IsWindowVisible(window)) {
-                var text=new StringBuilder(256); GetWindowText(window,text,text.Capacity);
-                if(text.ToString()==title) { result=window; return false; }
-            } return true;
-        },IntPtr.Zero); return result;
-    }
-}
-'@
     foreach ($language in @('en','zh-CN')) {
         # Screenshots must contain only the completely fabricated UI response.
         Remove-Item -LiteralPath (Join-Path $dataDir 'native-public-cache.json') -ErrorAction SilentlyContinue
@@ -592,6 +606,24 @@ public static class QuotaSmokeWindows {
     $failure = $_
     Write-Output ("Original Windows smoke failure: "+$failure.Exception.Message)
     Write-Output $failure.ScriptStackTrace
+    # Capture only this isolated install's startup helpers and logs. An owned
+    # startup error dialog can retain the lifecycle mutex until it is closed.
+    foreach ($logName in @('stdout.log','stderr.log','floating-stdout.log','floating-stderr.log')) {
+        $nativeLog=Join-Path $dataDir $logName
+        if (Test-Path -LiteralPath $nativeLog) { Write-Output ("Isolated installed log: "+$logName); Get-Content -LiteralPath $nativeLog | Select-Object -Last 30 | Write-Output }
+    }
+    $starterScript=Join-Path $installDir 'Start.ps1'
+    $starterExe=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
+    foreach ($starter in @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue | Where-Object {$_.ParentProcessId -in $fixtureLaunches})) {
+        if (-not $starter.CreationDate -or -not (Test-WidgetProcessOwnership $starter $starterExe $starterScript $starter.CreationDate.ToUniversalTime().ToString('o'))) {continue}
+        foreach ($starterLanguage in @('en','zh-CN')) {
+            $starterDialog=[QuotaSmokeWindows]::Find([int]$starter.ProcessId,(Get-WidgetText 'app' $starterLanguage))
+            if ($starterDialog -ne [IntPtr]::Zero) {
+                Write-Output ('Isolated owned startup dialog: '+[QuotaSmokeWindows]::ReadOwnedDialogText($starterDialog,[int]$starter.ProcessId))
+                [void][QuotaSmokeWindows]::SendMessage($starterDialog,0x10,[IntPtr]::Zero,[IntPtr]::Zero)
+            }
+        }
+    }
     if ($ui -and $language -and ('QuotaSmokeWindows' -as [type])) {
         foreach ($entry in @(@('app','native-failure'), @('detailsTitle','reset-details-failure'))) {
             try {
