@@ -471,6 +471,9 @@ public static class QuotaSmokeWindows {
             $linkX=[Windows.Forms.TextRenderer]::MeasureText($prefix,$linkFont).Width+4
         } finally {$linkFont.Dispose()}
         $linkPoint=[IntPtr]((10 -shl 16) -bor $linkX)
+        # LinkLabel activates the link hit by WM_MOUSEMOVE before mouse-down;
+        # a down/up pair alone never puts its link into the Hover state.
+        [void][QuotaSmokeWindows]::SendMessage($creditHandle,0x200,[IntPtr]::Zero,$linkPoint)
         [void][QuotaSmokeWindows]::SendMessage($creditHandle,0x201,[IntPtr]1,$linkPoint)
         [void][QuotaSmokeWindows]::SendMessage($creditHandle,0x202,[IntPtr]0,$linkPoint)
         $detailsTitle = Get-WidgetText 'detailsTitle' $language
