@@ -590,6 +590,8 @@ public static class QuotaSmokeWindows {
     Write-Output "Fabricated native screenshots: $OutputDir"
 } catch {
     $failure = $_
+    Write-Output ("Original Windows smoke failure: "+$failure.Exception.Message)
+    Write-Output $failure.ScriptStackTrace
     if ($ui -and $language -and ('QuotaSmokeWindows' -as [type])) {
         foreach ($entry in @(@('app','native-failure'), @('detailsTitle','reset-details-failure'))) {
             try {
@@ -608,7 +610,12 @@ public static class QuotaSmokeWindows {
     foreach ($process in $testProcesses) { try { if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit(5000) | Out-Null } } catch { } }
     if (-not $uninstalled -and (Test-Path (Join-Path $installDir 'Stop.ps1'))) {
         try { & (Join-Path $installDir 'Stop.ps1') -Quiet | Out-Null } catch { }
-        if (Test-Path (Join-Path $installDir 'unins000.exe')) { try { Start-Process -FilePath (Join-Path $installDir 'unins000.exe') -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART') -Wait | Out-Null } catch { } }
+        if (Test-Path (Join-Path $installDir 'unins000.exe')) {
+            try {
+                $cleanup=Start-Process -FilePath (Join-Path $installDir 'unins000.exe') -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART') -PassThru
+                if (-not $cleanup.WaitForExit(30000)) { $cleanup.Kill(); Write-Output 'Isolated smoke cleanup timed out; original failure retained.' }
+            } catch { Write-Output ('Isolated smoke cleanup failed: '+$_.Exception.Message) }
+        }
     }
     if ($nativeFixtureExe) {
         foreach ($native in @(Get-CimInstance Win32_Process -Filter "Name='codex.exe'" -ErrorAction SilentlyContinue | Where-Object { [string]::Equals([string]$_.ExecutablePath, $nativeFixtureExe, [StringComparison]::OrdinalIgnoreCase) })) {
