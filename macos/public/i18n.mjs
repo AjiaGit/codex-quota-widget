@@ -3,6 +3,8 @@ const en = {
   confirmedAnnouncements:'Confirmed announcements', confirmedGrant:'Confirmed banked reset grant', confirmedReset:'Confirmed global reset',
   noAnnouncements:'Monitored sources report no confirmed banked reset grant or global reset announcements', announcementsUnavailable:'Announcement information unavailable', informationPending:'Information pending update',
   upcoming:'Upcoming', waitingDelivery:'Time reached; awaiting confirmation', announcedWaiting:'Announced; awaiting delivery', historyDeliveryUnknown:'Source did not provide a delivery record', grantDone:'Granted', resetDone:'Reset confirmed',
+  scheduledGrant:'Scheduled grant: {time}', scheduledReset:'Scheduled reset: {time}', originalGrant:'Originally scheduled grant: {time}', originalReset:'Originally scheduled reset: {time}',
+  localAnnouncementTime:'{date} (local {zone})', dateOnlySchedule:'{date} (time not announced)', scheduleUnknown:'Delivery time not announced', published:'Published: {time}',
   scheduled:'Scheduled', source:'Source', announcementHistory:'Announcements and delivery records', historyEmpty:'No announcement records available', compact:'Switch to compact', hide:'Hide floating widget',
   viewAnnouncement:'View announcement', details:'Details', completed:'Completed', original:'Scheduled', retention:'Completed results retained for 24h', publicPending:'Public information pending update', lastSuccess:'Last source update', cadence:'Auto-refresh: quota every 1 min · public data every 10 min',
   sevenDays:'7d', historyAttribution:'Earlier historical records',
@@ -28,6 +30,8 @@ const zh = {
   confirmedAnnouncements:'已确认预告', confirmedGrant:'已确认重置次数赠送', confirmedReset:'已确认全局额度重置',
   noAnnouncements:'监控来源暂无已确认的赠送或全局额度重置公告', announcementsUnavailable:'预告信息暂不可用', informationPending:'信息待更新',
   upcoming:'即将到来', waitingDelivery:'时间已到，等待确认', announcedWaiting:'已公告，等待送达确认', historyDeliveryUnknown:'来源未提供送达记录', grantDone:'已赠送', resetDone:'已重置',
+  scheduledGrant:'预定送达 {time}', scheduledReset:'预定重置 {time}', originalGrant:'原定送达 {time}', originalReset:'原定重置 {time}',
+  localAnnouncementTime:'{date}（本地 {zone}）', dateOnlySchedule:'{date}（具体时间未公布）', scheduleUnknown:'送达时间尚未公布', published:'公告发布 {time}',
   scheduled:'预定', source:'来源', announcementHistory:'公告与送达记录', historyEmpty:'暂无公告记录', compact:'切换到极简', hide:'隐藏悬浮窗',
   viewAnnouncement:'查看公告', details:'详情', completed:'确认完成', original:'原定', retention:'完成结果保留 24 小时', publicPending:'公开数据待更新', lastSuccess:'上次来源更新', cadence:'自动刷新：额度每 1 分钟 · 公共信息每 10 分钟',
   sevenDays:'7 天', historyAttribution:'早期历史记录',
@@ -68,6 +72,13 @@ export function formatShortDate(milliseconds,timeZone,language,now=Date.now(),da
   const year = new Intl.DateTimeFormat('en',{timeZone,year:'numeric'});
   const options={timeZone,month:'2-digit',day:'2-digit'};
   if(year.format(milliseconds)!==year.format(now))options.year='numeric';
-  if(!dateOnly)Object.assign(options,{hour:'2-digit',minute:'2-digit',hour12:false});
+  if(!dateOnly)Object.assign(options,{hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
   return new Intl.DateTimeFormat(language,options).format(milliseconds);
+}
+export function formatLocalAnnouncementDate(milliseconds,timeZone,language,now=Date.now()) {
+  if (!Number.isFinite(milliseconds) || Math.abs(milliseconds)>8640000000000000) return t(language,'dateUnknown');
+  // The offset must belong to the event instant, including future DST changes.
+  const offset=new Intl.DateTimeFormat('en',{timeZone,timeZoneName:'longOffset'}).formatToParts(milliseconds).find(part=>part.type==='timeZoneName').value;
+  const zone=offset==='GMT'?'UTC+00:00':offset.replace('GMT','UTC');
+  return t(language,'localAnnouncementTime',{date:formatShortDate(milliseconds,timeZone,language,now),zone});
 }

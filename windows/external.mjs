@@ -17,8 +17,13 @@ function safeHttpsUrl(value) {
 }
 
 const emptyAnnouncements = () => ({ status: 'unavailable', items: [], history: [], sourceUpdatedAt: null, stale: true });
+function preciseTimestamp(value) {
+  // A calendar date or an unzoned clock time cannot be converted reliably.
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/i.test(value) || !dateOnly(value.slice(0,10))) return NaN;
+  return Date.parse(value);
+}
 function timestamp(value, now, earliest = -Infinity) {
-  const ms = typeof value === 'string' ? Date.parse(value) : NaN;
+  const ms = preciseTimestamp(value);
   return Number.isFinite(ms) && ms <= now && ms >= earliest ? new Date(ms).toISOString() : null;
 }
 function dateOnly(value) {
@@ -34,7 +39,7 @@ function normalizedAnnouncement(raw, now, scheduled = false, persisted = false) 
   const announcedAt = timestamp(persisted ? raw.announcedAt : raw.ts, now);
   const deliveredAt = timestamp(persisted ? raw.deliveredAt : raw.delivered_at, now, announcedAt ? Date.parse(announcedAt) : -Infinity);
   const schedule = persisted ? raw.scheduledAt : scheduled ? raw.scheduled_at : null;
-  const scheduledMs = typeof schedule === 'string' ? Date.parse(schedule) : NaN;
+  const scheduledMs = preciseTimestamp(schedule);
   return {
     id: sourceUrl + '#' + raw.kind,
     kind: raw.kind, announcedAt,

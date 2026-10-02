@@ -33,7 +33,9 @@ $script:WidgetStrings = @{
         creditDetailsRow = '{0} · Details ›'; confirmedBanked = 'Confirmed banked reset grant'; confirmedRegular = 'Confirmed global reset'
         noAnnouncements = 'Monitored sources report no confirmed banked reset grants or global resets'; announcementsUnavailable = 'Confirmed announcements unavailable'; pendingUpdate = 'Information pending update'
         retention = 'Completed results retained for 24h'; forecastPending = 'Public estimates pending update'; phaseUpcoming = 'Upcoming'; phaseWaiting = 'Awaiting delivery'; phaseAnnounced = 'Announced · awaiting delivery'; phaseUnknown = 'Source did not provide a delivery record'; phaseDelivered = 'Delivered'; phaseArchived = 'Delivered'
-        scheduled = 'Scheduled {0}'; originalScheduled = 'Originally scheduled {0}'; scheduleUnknown = 'Delivery time not announced'; announcedOn = 'Announced {0}'; deliveredOn = 'Completed {0}'
+        scheduled = 'Scheduled {0}'; originalScheduled = 'Originally scheduled {0}'; scheduleUnknown = 'Delivery time not announced'; announcedOn = 'Published: {0}'; deliveredOn = 'Completed {0}'
+        scheduledGrant = 'Scheduled grant: {0}'; scheduledReset = 'Scheduled reset: {0}'; originalGrant = 'Originally scheduled grant: {0}'; originalReset = 'Originally scheduled reset: {0}'
+        localAnnouncementTime = '{0} (local {1})'; dateOnlySchedule = '{0} (time not announced)'
         publicUpdated = 'Public data updated {0}'; publicUpdateUnknown = 'Public update time unavailable'; refreshCadence = 'Auto-refresh: quota every 1 min · public data every 10 min'; sourceLinks = 'codexreset.ai / whenreset.app'
         announcementSource = 'View announcement'; deliverySource = 'Delivery record'; announcementHistory = 'Announcement & delivery history'; historyEmpty = 'No announcement or delivery records'
         oddsTitle = 'Estimated global reset odds'; odds24 = '24 hours'; odds48 = '48 hours'; odds7d = '7 days'; oddsNote = 'Historical frequency estimate, not a promised reset or your weekly account reset.'
@@ -72,7 +74,9 @@ $script:WidgetStrings = @{
         creditDetailsRow = '{0} · 查看明细 ›'; confirmedBanked = '已确认重置次数赠送'; confirmedRegular = '已确认全局额度重置'
         noAnnouncements = '监控来源暂无已确认的重置次数赠送或全局额度重置公告'; announcementsUnavailable = '已确认公告暂不可用'; pendingUpdate = '信息待更新'
         retention = '完成结果保留24小时'; forecastPending = '公开概率信息待更新'; phaseUpcoming = '即将进行'; phaseWaiting = '等待送达'; phaseAnnounced = '已公告 · 等待送达'; phaseUnknown = '来源未提供送达记录'; phaseDelivered = '已送达'; phaseArchived = '已送达'
-        scheduled = '计划 {0}'; originalScheduled = '原定 {0}'; scheduleUnknown = '送达时间尚未公布'; announcedOn = '公告 {0}'; deliveredOn = '确认完成 {0}'
+        scheduled = '计划 {0}'; originalScheduled = '原定 {0}'; scheduleUnknown = '送达时间尚未公布'; announcedOn = '公告发布 {0}'; deliveredOn = '确认完成 {0}'
+        scheduledGrant = '预定送达 {0}'; scheduledReset = '预定重置 {0}'; originalGrant = '原定送达 {0}'; originalReset = '原定重置 {0}'
+        localAnnouncementTime = '{0}（本地 {1}）'; dateOnlySchedule = '{0}（具体时间未公布）'
         publicUpdated = '公告数据更新 {0}'; publicUpdateUnknown = '公告更新时间暂不可用'; refreshCadence = '自动刷新：额度每1分钟 · 公共信息每10分钟'; sourceLinks = 'codexreset.ai / whenreset.app'
         announcementSource = '查看公告'; deliverySource = '送达记录'; announcementHistory = '公告与送达记录'; historyEmpty = '暂无公告与送达记录'
         oddsTitle = '未来全局额度重置概率'; odds24 = '24小时'; odds48 = '48小时'; odds7d = '7天'; oddsNote = '历史频率估计，不代表重置承诺，也不是账号每周重置时间。'
@@ -105,6 +109,21 @@ function Format-WidgetDate([DateTimeOffset]$date, [string]$language) {
     $cultureName = if ((Resolve-WidgetLanguage $language) -eq 'zh-CN') { 'zh-CN' } else { 'en-US' }
     $format = if ($cultureName -eq 'zh-CN') { 'M月d日 HH:mm' } else { 'MMM d HH:mm' }
     $date.ToLocalTime().ToString($format, [Globalization.CultureInfo]::GetCultureInfo($cultureName))
+}
+
+function Format-WidgetAnnouncementDate([DateTimeOffset]$date, [string]$language, [TimeZoneInfo]$timeZone = [TimeZoneInfo]::Local, [DateTimeOffset]$now = [DateTimeOffset]::UtcNow) {
+    $local=[TimeZoneInfo]::ConvertTime($date,$timeZone)
+    $cultureName=if ((Resolve-WidgetLanguage $language) -eq 'zh-CN') {'zh-CN'} else {'en-US'}
+    $format=if ($cultureName -eq 'zh-CN') {'M月d日 HH:mm'} else {'MMM d HH:mm'}
+    if ($local.Year -ne ([TimeZoneInfo]::ConvertTime($now,$timeZone)).Year) {
+        $format=if ($cultureName -eq 'zh-CN') {'yyyy年M月d日 HH:mm'} else {'MMM d yyyy HH:mm'}
+    }
+    # ConvertTime selects the offset at this event instant, including DST.
+    $offset=[int]$local.Offset.TotalMinutes
+    $sign=if ($offset -lt 0) {'-'} else {'+'}
+    $magnitude=[Math]::Abs($offset)
+    $zone=[string]::Format([Globalization.CultureInfo]::InvariantCulture,'UTC{0}{1:00}:{2:00}', $sign, [int][Math]::Floor($magnitude/60), ($magnitude%60))
+    Get-WidgetText 'localAnnouncementTime' $language @($local.ToString($format,[Globalization.CultureInfo]::GetCultureInfo($cultureName)),$zone)
 }
 
 function Format-WidgetRelativeUpdate($updatedAt, [string]$language, [DateTimeOffset]$now = [DateTimeOffset]::UtcNow) {
@@ -247,34 +266,40 @@ function Get-WidgetNoticeBounds([double]$width, [double]$height) {
     $diameter=[Math]::Max(5,[Math]::Min(8,[Math]::Min($width,$height)*0.12))
     [pscustomobject]@{x=$width-$diameter-5;y=5;width=$diameter;height=$diameter}
 }
-function ConvertTo-WidgetAnnouncementRow($row, [string]$language, [DateTimeOffset]$now, [bool]$historical = $false) {
+function ConvertTo-WidgetAnnouncementRow($row, [string]$language, [DateTimeOffset]$now, [bool]$historical = $false, [TimeZoneInfo]$timeZone = [TimeZoneInfo]::Local) {
     $phase=Get-WidgetAnnouncementPhase $row $now
     $completed=$phase -in @('delivered','archived')
     if ($historical -and -not $completed) { $phase='unknown' }
-    $scheduleKey=if ($completed) {'originalScheduled'} else {'scheduled'}
-    $scheduledText=$null; $completedText=$null
+    $scheduleKey=$(if ($completed) {'original'} else {'scheduled'})+$(if ($row.kind -eq 'banked') {'Grant'} else {'Reset'})
+    $scheduledText=$null; $completedText=$null; $announcedText=$null
     $delivered=ConvertTo-WidgetTimestamp $row.deliveredAt
     $scheduled=ConvertTo-WidgetTimestamp $row.scheduledAt
-    if ($scheduled) { $scheduledText=Get-WidgetText $scheduleKey $language @((Format-WidgetDate $scheduled $language)) }
+    if ($scheduled) { $scheduledText=Get-WidgetText $scheduleKey $language @((Format-WidgetAnnouncementDate $scheduled $language $timeZone $now)) }
     elseif ($row.scheduledDate -match '^\d{4}-\d{2}-\d{2}$') {
         $date=[datetime]::MinValue
         if ([datetime]::TryParseExact([string]$row.scheduledDate,'yyyy-MM-dd',[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::None,[ref]$date)) {
             $format=if ((Resolve-WidgetLanguage $language) -eq 'zh-CN') {'M月d日'} else {'MMM d'}
             $culture=if ((Resolve-WidgetLanguage $language) -eq 'zh-CN') {'zh-CN'} else {'en-US'}
-            $scheduledText=Get-WidgetText $scheduleKey $language @($date.ToString($format,[Globalization.CultureInfo]::GetCultureInfo($culture)))
+            $dateText=Get-WidgetText 'dateOnlySchedule' $language @($date.ToString($format,[Globalization.CultureInfo]::GetCultureInfo($culture)))
+            $scheduledText=Get-WidgetText $scheduleKey $language @($dateText)
         }
     }
-    if (-not $scheduledText) { $scheduledText=Get-WidgetText 'scheduleUnknown' $language }
-    if ($completed) { $completedText=Get-WidgetText 'deliveredOn' $language @((Format-WidgetDate $delivered $language)) }
+    if (-not $scheduledText -and -not $completed -and -not $historical) { $scheduledText=Get-WidgetText 'scheduleUnknown' $language }
+    if ($completed) { $completedText=Get-WidgetText 'deliveredOn' $language @((Format-WidgetAnnouncementDate $delivered $language $timeZone $now)) }
+    $announced=ConvertTo-WidgetTimestamp $row.announcedAt
+    if ($announced) { $announcedText=Get-WidgetText 'announcedOn' $language @((Format-WidgetAnnouncementDate $announced $language $timeZone $now)) }
     $scope=if ($row.scope -eq 'paid') {Get-WidgetText 'paid' $language} elseif ($row.scope -eq 'all') {Get-WidgetText 'all' $language} elseif ($row.scopeLabel) {[string]$row.scopeLabel} else {Get-WidgetText 'unknownScope' $language}
     $phaseKey='phase'+(Get-Culture).TextInfo.ToTitleCase($phase)
     $summary=if ((Resolve-WidgetLanguage $language) -eq 'zh-CN' -and $row.summaryZh) {[string]$row.summaryZh} elseif ($row.summary) {[string]$row.summary} else {''}
-    $details=@((Get-WidgetText $phaseKey $language),$scheduledText)
-    if ($completedText) {$details+=,$completedText}; $details+=,$scope
+    $details=@((Get-WidgetText $phaseKey $language))
+    if ($scheduledText) {$details+=,$scheduledText}
+    if ($completedText) {$details+=,$completedText}
+    if ($announcedText) {$details+=,$announcedText}
+    $details+=,$scope
     [pscustomobject]@{
         key=Get-WidgetAnnouncementKey $row; phase=$phase
         title=Get-WidgetText $(if ($row.kind -eq 'banked') {'confirmedBanked'} else {'confirmedRegular'}) $language
-        details=$details -join ' · '; scheduledText=$scheduledText; completedText=$completedText; scopeText=$scope
+        details=$details -join ' · '; scheduledText=$scheduledText; completedText=$completedText; announcedText=$announcedText; scopeText=$scope
         summary=$summary
         retentionText=$(if ($phase -eq 'delivered') {Get-WidgetText 'retention' $language} else {''})
         sourceUrl=$(if (Test-WidgetHttpsUrl $row.sourceUrl) {[string]$row.sourceUrl} else {$null})

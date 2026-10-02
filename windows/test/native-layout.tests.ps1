@@ -150,11 +150,29 @@ Test-Case 'completed announcements retain planned and completion timestamps plus
         if (-not $row.details.Contains((Format-WidgetDate ([DateTimeOffset]$event.scheduledAt) $language))) { throw 'Original planned time was replaced by completion time' }
         if (-not $row.details.Contains((Format-WidgetDate ([DateTimeOffset]$event.deliveredAt) $language))) { throw 'Completion timestamp omitted' }
         if (-not $row.details.Contains((Get-WidgetText 'paid' $language))) { throw 'Completed event scope omitted' }
-        Assert-Equal $row.scheduledText (Get-WidgetText 'originalScheduled' $language @((Format-WidgetDate ([DateTimeOffset]$event.scheduledAt) $language))) 'Explicit original plan'
+        Assert-Equal $row.scheduledText (Get-WidgetText 'originalGrant' $language @((Format-WidgetAnnouncementDate ([DateTimeOffset]$event.scheduledAt) $language ([TimeZoneInfo]::Local) $now))) 'Explicit original plan'
     }
     $event.scheduledAt=$null; $event.scheduledDate='2026-09-30'
     $row=(Get-WidgetAnnouncementView (New-External @($event)) 'en' $now).active[0]
     if ($row.scheduledText -match '00:00' -or -not $row.scheduledText.Contains('Sep 30')) { throw 'Completed date-only event invented an original clock time' }
+}
+Test-Case 'precise schedules show event-time local offsets and independent publication times' {
+    $zone=[TimeZoneInfo]::CreateCustomTimeZone('Test +08',[TimeSpan]::FromHours(8),'Test +08','Test +08')
+    $event=New-Event 'timed-grant'; $event.scheduledAt='2026-10-01T20:30:00Z'; $event.announcedAt='2026-09-30T10:00:00Z'
+    $row=ConvertTo-WidgetAnnouncementRow $event 'zh-CN' $now $false $zone
+    if ($row.scheduledText -notmatch '预定送达.*10月2日 04:30.*本地 UTC\+08:00') { throw 'Scheduled time did not convert across the local date boundary' }
+    if ($row.announcedText -notmatch '公告发布.*9月30日 18:00.*本地 UTC\+08:00') { throw 'Publication time omitted or confused with delivery' }
+    $india=[TimeZoneInfo]::CreateCustomTimeZone('Test +0530',[TimeSpan]::FromMinutes(330),'Test +0530','Test +0530')
+    if ((Format-WidgetAnnouncementDate ([DateTimeOffset]'2026-10-01T18:30:00Z') 'en' $india $now) -notmatch 'Oct 2 00:00.*UTC\+05:30') { throw 'Fractional offset or midnight conversion failed' }
+    $pacific=[TimeZoneInfo]::FindSystemTimeZoneById('Pacific Standard Time')
+    if ((Format-WidgetAnnouncementDate ([DateTimeOffset]'2026-11-01T08:30:00Z') 'en' $pacific $now) -notmatch '01:30.*UTC-07:00') { throw 'Pre-DST-change offset incorrect' }
+    if ((Format-WidgetAnnouncementDate ([DateTimeOffset]'2026-11-01T09:30:00Z') 'en' $pacific $now) -notmatch '01:30.*UTC-08:00') { throw 'Post-DST-change offset incorrect' }
+    $event.scheduledAt=$null; $event.scheduledDate='2026-10-01'
+    $row=ConvertTo-WidgetAnnouncementRow $event 'en' $now $false $pacific
+    if ($row.scheduledText -notmatch 'Oct 1.*time not announced' -or $row.scheduledText -match 'UTC|00:00') { throw 'Date-only source invented a local clock or zone' }
+    $event.scheduledDate=$null
+    $row=ConvertTo-WidgetAnnouncementRow $event 'en' $now $false $zone
+    Assert-Equal $row.scheduledText 'Delivery time not announced' 'Missing delivery time remains unknown'
 }
 Test-Case 'Plus five-hour view preserves percent and reset time while other plans omit it' {
     $quota=[pscustomobject]@{status='ok'; plan='plus'; updatedAt=$now.ToUnixTimeMilliseconds(); fiveHour=[pscustomobject]@{remainingPercent=32; resetsAt=$now.AddHours(1).ToUnixTimeSeconds()}}

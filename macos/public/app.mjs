@@ -1,4 +1,4 @@
-import { t, resolveLanguage, formatDate, formatRelativeUpdate, formatShortDate } from './i18n.mjs';
+import { t, resolveLanguage, formatDate, formatRelativeUpdate, formatShortDate, formatLocalAnnouncementDate } from './i18n.mjs';
 const TEN_MINUTES = 10 * 60 * 1000;
 const PUBLIC_MAX_AGE = 24 * 60 * 60 * 1000;
 function publicSourceFresh(state,now) {
@@ -47,11 +47,12 @@ export function deriveAnnouncementsView(state,now=Date.now(),timeZone=Intl.DateT
     const day=typeof item.scheduledDate==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(item.scheduledDate)?Date.parse(item.scheduledDate+'T00:00:00Z'):NaN;
     const phase=confirmed?(now-delivered>=86400000?'archived':'delivered'):historical?'unknown':Number.isFinite(scheduled)?(scheduled<=now?'waiting':'upcoming'):Number.isFinite(day)?(now>=day+86400000?'waiting':'upcoming'):'announced';
     const planDate=Number.isFinite(scheduled)?scheduled:day;
-    const plannedDate=Number.isFinite(planDate)?formatShortDate(planDate,Number.isFinite(scheduled)?timeZone:'UTC',language,now,!Number.isFinite(scheduled)):'';
+    const plannedDate=Number.isFinite(scheduled)?formatLocalAnnouncementDate(scheduled,timeZone,language,now):Number.isFinite(planDate)?t(language,'dateOnlySchedule',{date:formatShortDate(planDate,'UTC',language,now,true)}):'';
     const scopeText=item.scope==='paid'?t(language,'paid'):item.scope==='all'?t(language,'all'):(language==='zh-CN'?item.scopeLabel:item.scope)||t(language,'unknownScope');
-    const plannedText=plannedDate?`${t(language,phase==='upcoming'?'scheduled':'original')} ${plannedDate}`:'';
-    const completedText=confirmed?`${t(language,'completed')} ${formatShortDate(delivered,timeZone,language,now)}`:'';
-    const announcedText=!plannedText&&!completedText&&Number.isFinite(announced)?`${t(language,'announcement')} ${formatShortDate(announced,timeZone,language,now)}`:'';
+    const scheduleKey=(confirmed?'original':'scheduled')+(item.kind==='banked'?'Grant':'Reset');
+    const plannedText=plannedDate?t(language,scheduleKey,{time:plannedDate}):!confirmed&&!historical?t(language,'scheduleUnknown'):'';
+    const completedText=confirmed?`${t(language,'completed')} ${formatLocalAnnouncementDate(delivered,timeZone,language,now)}`:'';
+    const announcedText=Number.isFinite(announced)?t(language,'published',{time:formatLocalAnnouncementDate(announced,timeZone,language,now)}):'';
     const status=confirmed?t(language,item.kind==='banked'?'grantDone':'resetDone'):t(language,phase==='unknown'?'historyDeliveryUnknown':phase==='waiting'?'waitingDelivery':phase==='upcoming'?'upcoming':'announcedWaiting');
     return {id:item.id||item.sourceUrl+'#'+item.kind,kind:item.kind,phase,title:t(language,item.kind==='banked'?'confirmedGrant':'confirmedReset'),status,
       plannedText,completedText,announcedText,scopeText,retentionText:phase==='delivered'?t(language,'retention'):'',

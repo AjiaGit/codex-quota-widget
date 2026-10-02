@@ -270,3 +270,47 @@ test('public lookup failures show source freshness separately from quota freshne
   assert.match(status, /11:00/);
   assert.doesNotMatch(status, /Quota|Updated \d+ min/);
 });
+
+test('precise pending schedules show local time and offset independently from announcement publication', () => {
+  const item = { id: 'timed-grant', kind: 'banked', announcedAt: '2026-09-30T10:00:00Z', scheduledAt: '2026-10-01T20:30:00Z', scope: 'paid', sourceUrl: 'https://example.org/announcement' };
+  const state = { status: 'ok', items: [item], history: [] };
+  const shanghai = view.deriveAnnouncementsView(state, now, 'Asia/Shanghai', 'zh-CN').rows[0];
+  assert.match(shanghai.plannedText, /预定送达.*10\/02.*04:30.*本地 UTC\+08:00/);
+  assert.match(shanghai.announcedText, /公告发布.*09\/30.*18:00.*本地 UTC\+08:00/);
+  const pacific = view.deriveAnnouncementsView({ ...state, items: [{ ...item, kind: 'regular' }] }, now, 'America/Los_Angeles', 'en').rows[0];
+  assert.match(pacific.plannedText, /Scheduled reset.*10\/01.*13:30.*local UTC-07:00/);
+  assert.match(pacific.announcedText, /Published.*09\/30.*03:00.*local UTC-07:00/);
+});
+
+test('local offsets belong to the event instant across DST and include fractional-hour zones', () => {
+  assert.equal(typeof locale.formatLocalAnnouncementDate, 'function');
+  const before = locale.formatLocalAnnouncementDate(Date.parse('2026-11-01T08:30:00Z'), 'America/Los_Angeles', 'en', now);
+  const after = locale.formatLocalAnnouncementDate(Date.parse('2026-11-01T09:30:00Z'), 'America/Los_Angeles', 'en', now);
+  assert.match(before, /01:30.*UTC-07:00/);
+  assert.match(after, /01:30.*UTC-08:00/);
+  assert.match(locale.formatLocalAnnouncementDate(Date.parse('2026-10-01T18:30:00Z'), 'Asia/Kolkata', 'en', now), /10\/02.*00:00.*UTC\+05:30/);
+  assert.match(locale.formatLocalAnnouncementDate(now, 'UTC', 'zh-CN', now), /本地 UTC\+00:00/);
+});
+
+test('date-only and unspecified schedules never masquerade as precise local delivery times', () => {
+  const item = { id: 'date-only', kind: 'banked', announcedAt: at(-hour), scheduledDate: '2026-10-01', sourceUrl: 'https://example.org/announcement' };
+  const state = { status: 'ok', items: [item], history: [] };
+  const dateOnly = view.deriveAnnouncementsView(state, now, 'America/Los_Angeles', 'zh-CN').rows[0];
+  assert.match(dateOnly.plannedText, /10\/01.*具体时间未公布/);
+  assert.doesNotMatch(dateOnly.plannedText, /UTC|\d\d:\d\d|09\/30/);
+  const unknown = view.deriveAnnouncementsView({ ...state, items: [{ ...item, scheduledDate: null }] }, now, 'Asia/Shanghai', 'en').rows[0];
+  assert.equal(unknown.plannedText, 'Delivery time not announced');
+  assert.match(unknown.announcedText, /Published.*19:00.*local UTC\+08:00/);
+  assert.equal(unknown.completedText, '');
+});
+
+test('source timestamps without a timezone cannot invent a local schedule or delivery', () => {
+  for (const scheduled_at of ['2026-10-01', '2026-10-01T12:00:00', '2026-02-30T12:00:00Z']) {
+    const result = source.normalizeAnnouncements(feed({ ...scheduled(), scheduled_at }), now);
+    assert.equal(result.items[0].scheduledAt, null);
+    assert.equal(result.items[0].scheduledDate, '2026-10-01');
+  }
+  const result = source.normalizeAnnouncements(feed({ ...scheduled(), scheduled_at: '2026-10-01T12:00:00+05:30', delivered_at: '2026-09-30T11:30:00' }), now);
+  assert.equal(result.items[0].scheduledAt, '2026-10-01T06:30:00.000Z');
+  assert.equal(result.items[0].deliveredAt, null);
+});
