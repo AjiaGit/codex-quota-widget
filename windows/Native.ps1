@@ -455,6 +455,30 @@ function Initialize-WidgetStorage([string]$repositoryPath, [string]$dataDirector
     }
     Write-WidgetJson $migrationMarker @{ version = 1 }
 }
+function Get-WidgetModePosition($saved, [ValidateSet('Detail','Compact')][string]$mode) {
+    if (-not $saved) { return $null }
+    $prefix = $mode.ToLowerInvariant()
+    $x = $saved.($prefix + 'X'); $y = $saved.($prefix + 'Y')
+    if ($null -eq $x -or $null -eq $y) {
+        if ($saved.mode -ne $mode) { return $null }
+        $x = $saved.x; $y = $saved.y
+    }
+    if ([string]$x -notmatch '^-?\d{1,9}$' -or [string]$y -notmatch '^-?\d{1,9}$') { return $null }
+    return [pscustomobject]@{ x = [int]$x; y = [int]$y }
+}
+function Get-WidgetTransitionPosition($current, $remembered, $size, $screen) {
+    if ($remembered) { $x = $remembered.x; $y = $remembered.y }
+    else {
+        $rightAnchor = ($current.Left + $current.Width / 2) -gt ($screen.Left + $screen.Width / 2)
+        $bottomAnchor = ($current.Top + $current.Height / 2) -gt ($screen.Top + $screen.Height / 2)
+        $x = if ($rightAnchor) { $current.Right - $size.Width } else { $current.Left }
+        $y = if ($bottomAnchor) { $current.Bottom - $size.Height } else { $current.Top }
+    }
+    return [pscustomobject]@{
+        x = [int][Math]::Max($screen.Left, [Math]::Min($x, $screen.Right - $size.Width))
+        y = [int][Math]::Max($screen.Top, [Math]::Min($y, $screen.Bottom - $size.Height))
+    }
+}
 function Get-WidgetLanguageSetting([string]$dataDirectory = (Get-WidgetDataDirectory)) {
     $settings = Read-WidgetJson (Join-Path $dataDirectory 'settings.json')
     if ($settings -and $settings.language -in @('auto','en','zh-CN')) { return [string]$settings.language }

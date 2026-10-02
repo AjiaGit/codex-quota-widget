@@ -81,6 +81,7 @@ $script:setupCode = $null
 $script:ownedTrayIcon = $null
 $script:compactSize = [System.Drawing.Size]::new(52, 76)
 $script:detailSize = [System.Drawing.Size]::new(404, 390)
+$script:modePositions = @{ Detail = $null; Compact = $null }
 
 function New-Color([string]$html) {
     [System.Drawing.ColorTranslator]::FromHtml($html)
@@ -123,11 +124,14 @@ if ($saved) {
 }
 if ($saved -and $null -ne $saved.topMost) { $form.TopMost = [bool]$saved.topMost }
 if ($saved -and $saved.mode -eq 'Compact') { $script:mode = 'Compact' }
+foreach ($savedMode in @('Detail','Compact')) { $script:modePositions[$savedMode] = Get-WidgetModePosition $saved $savedMode }
 $form.ClientSize = if ($script:mode -eq 'Compact') { $script:compactSize } else { $script:detailSize }
 $form.Location = New-Object System.Drawing.Point(($bounds.Right - $form.Width - 24), ($bounds.Top + 88))
 if ($saved) {
     try {
-        $x = [int]$saved.x; $y = [int]$saved.y
+        $savedPosition = $script:modePositions[$script:mode]
+        $x = if ($savedPosition) { [int]$savedPosition.x } else { [int]$saved.x }
+        $y = if ($savedPosition) { [int]$savedPosition.y } else { [int]$saved.y }
         foreach ($screen in [System.Windows.Forms.Screen]::AllScreens) {
             $area = $screen.WorkingArea
             if ($x -ge $area.Left -and $y -ge $area.Top -and $x -lt $area.Right -and $y -lt $area.Bottom) {
@@ -812,15 +816,17 @@ function Start-ModeTransition([string]$nextMode) {
     if ($script:animating -or $script:mode -eq $nextMode) { return }
     $compact = $nextMode -eq 'Compact'
     $size = if ($compact) { $script:compactSize } else { [System.Drawing.Size]::new($script:detailSize.Width, ($script:detailSize.Height + $(if ($script:layoutPlus) { 62 } else { 0 }))) }
+    $script:modePositions[$script:mode] = [pscustomobject]@{ x = $form.Left; y = $form.Top }
+    $remembered = $script:modePositions[$nextMode]
     $screen = [System.Windows.Forms.Screen]::FromControl($form).WorkingArea
-    $rightAnchor = ($form.Left + $form.Width / 2) -gt ($screen.Left + $screen.Width / 2)
-    $bottomAnchor = ($form.Top + $form.Height / 2) -gt ($screen.Top + $screen.Height / 2)
-    $x = if ($rightAnchor) { $form.Right - $size.Width } else { $form.Left }
-    $y = if ($bottomAnchor) { $form.Bottom - $size.Height } else { $form.Top }
-    $x = [Math]::Max($screen.Left, [Math]::Min($x, $screen.Right - $size.Width))
-    $y = [Math]::Max($screen.Top, [Math]::Min($y, $screen.Bottom - $size.Height))
+    if ($remembered) {
+        foreach ($display in [System.Windows.Forms.Screen]::AllScreens) {
+            if ($display.WorkingArea.Contains([Drawing.Point]::new($remembered.x, $remembered.y))) { $screen = $display.WorkingArea; break }
+        }
+    }
+    $placement = Get-WidgetTransitionPosition $form $remembered $size $screen
     $script:animationFrom = $form.Bounds
-    $script:animationTo = [System.Drawing.Rectangle]::new([int]$x, [int]$y, $size.Width, $size.Height)
+    $script:animationTo = [System.Drawing.Rectangle]::new($placement.x, $placement.y, $size.Width, $size.Height)
     $ringOrigin=$form.PointToClient($ring.Parent.PointToScreen($ring.Location))
     $ring.Parent=$form; $ring.Location=$ringOrigin; $ring.BringToFront()
     $script:ringFrom = $ring.Bounds
@@ -1041,8 +1047,11 @@ $script:tray.Visible = $true
 $script:tray.Add_DoubleClick({ $form.Show(); $form.Activate(); Start-Request $true })
 function Save-WindowPosition {
     if ($script:animating) { return }
+    $script:modePositions[$script:mode] = [pscustomobject]@{ x = $form.Left; y = $form.Top }
     Write-WidgetJson $script:positionPath @{
         x = $form.Left; y = $form.Top; mode = $script:mode
+        compactX = $script:modePositions.Compact.x; compactY = $script:modePositions.Compact.y
+        detailX = $script:modePositions.Detail.x; detailY = $script:modePositions.Detail.y
         compactWidth = $script:compactSize.Width; compactHeight = $script:compactSize.Height
         detailWidth = $script:detailSize.Width; detailHeight = $script:detailSize.Height
         topMost = $form.TopMost
