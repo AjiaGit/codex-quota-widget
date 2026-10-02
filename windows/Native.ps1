@@ -6,7 +6,7 @@ $script:WidgetStrings = @{
         compact = 'Mini'; refresh = 'Refresh'; weekly = 'Weekly remaining'; untilReset = 'Until reset'; reset = 'Resets {0}'; resetUnknown = 'Reset time —'
         lastUpdated = 'Updated {0}'; stale = 'Data is stale. Refresh to update.'; cards = 'Banked resets {0}'; cardsUnknown = 'Banked resets —'
         fiveHour = 'Plus · 5-hour quota'; percentRemaining = '{0}% remaining'; external = 'Public global resets'; lastAnnouncement = 'Announced {0} · {1}'
-        paid = 'Paid accounts'; all = 'All accounts'; unknownScope = 'Scope unknown'; delivered = 'Delivered {0}'; deliveryUnknown = 'Delivery not confirmed'
+        paid = 'Paid accounts'; all = 'All accounts'; unknownScope = 'Account scope: see announcement'; delivered = 'Delivered {0}'; deliveryUnknown = 'Delivery not confirmed'
         publicUnavailable = 'Public reset data unavailable'; deliveryEmpty = 'Delivery time —'; probability = 'Estimated odds: 24h {0}% · 48h {1}% · 7d {2}%'
         oddsUnknown = 'Estimated odds unavailable'; attribution = 'Historical estimate · codexreset.ai / whenreset.app'; publicSource = 'Public data · codexreset.ai'
         tipRefresh = 'Refresh quota now'; tipHide = 'Hide to tray'; tipCompact = 'Switch to mini widget'; tipExpand = 'Click to expand; drag to move'
@@ -36,6 +36,7 @@ $script:WidgetStrings = @{
         scheduled = 'Scheduled {0}'; originalScheduled = 'Originally scheduled {0}'; scheduleUnknown = 'Delivery time not announced'; announcedOn = 'Published: {0}'; deliveredOn = 'Completed {0}'
         scheduledGrant = 'Scheduled grant: {0}'; scheduledReset = 'Scheduled reset: {0}'; originalGrant = 'Originally scheduled grant: {0}'; originalReset = 'Originally scheduled reset: {0}'
         localAnnouncementTime = '{0} (local {1})'; dateOnlySchedule = '{0} (time not announced)'
+        sourceTimeZoneNote = 'Converted from {0} by the monitoring source; see original post.'; sourceWithdrawn = 'Monitoring sources no longer list this record'; withdrawnRecord = 'Record withdrawn by sources'
         publicUpdated = 'Public data updated {0}'; publicUpdateUnknown = 'Public update time unavailable'; refreshCadence = 'Auto-refresh: quota every 1 min · public data every 10 min'; sourceLinks = 'codexreset.ai / whenreset.app'
         announcementSource = 'View announcement'; deliverySource = 'Delivery record'; announcementHistory = 'Announcement & delivery history'; historyEmpty = 'No announcement or delivery records'
         oddsTitle = 'Estimated global reset odds'; odds24 = '24 hours'; odds48 = '48 hours'; odds7d = '7 days'; oddsNote = 'Historical frequency estimate, not a promised reset or your weekly account reset.'
@@ -47,7 +48,7 @@ $script:WidgetStrings = @{
         compact = '极简'; refresh = '刷新'; weekly = '本周剩余'; untilReset = '距离重置'; reset = '重置 {0}'; resetUnknown = '重置时间 —'
         lastUpdated = '最近更新 {0}'; stale = '数据已过期，请刷新'; cards = '可用重置 {0}次'; cardsUnknown = '可用重置 —'
         fiveHour = 'Plus · 5小时额度'; percentRemaining = '{0}% 剩余'; external = '公开全局额度重置'; lastAnnouncement = '上次公告 {0} · {1}'
-        paid = '付费账号'; all = '全部账号'; unknownScope = '范围未明'; delivered = '记录送达 {0}'; deliveryUnknown = '送达时间未确认'
+        paid = '付费账号'; all = '全部账号'; unknownScope = '适用范围详见公告'; delivered = '记录送达 {0}'; deliveryUnknown = '送达时间未确认'
         publicUnavailable = '上次公开重置暂不可用'; deliveryEmpty = '送达时间 —'; probability = '历史估计 24h {0}% · 48h {1}% · 7天 {2}%'
         oddsUnknown = '历史概率估计暂不可用'; attribution = '历史频率估计 · codexreset.ai / whenreset.app'; publicSource = '公开数据 · codexreset.ai'
         tipRefresh = '立即刷新额度'; tipHide = '隐藏到系统托盘'; tipCompact = '切换到极简悬浮窗'; tipExpand = '单击展开，拖动可调整位置'
@@ -77,6 +78,7 @@ $script:WidgetStrings = @{
         scheduled = '计划 {0}'; originalScheduled = '原定 {0}'; scheduleUnknown = '送达时间尚未公布'; announcedOn = '公告发布 {0}'; deliveredOn = '确认完成 {0}'
         scheduledGrant = '预定送达 {0}'; scheduledReset = '预定重置 {0}'; originalGrant = '原定送达 {0}'; originalReset = '原定重置 {0}'
         localAnnouncementTime = '{0}（本地 {1}）'; dateOnlySchedule = '{0}（具体时间未公布）'
+        sourceTimeZoneNote = '来源按 {0} 时区换算；原文见公告。'; sourceWithdrawn = '监控来源已撤下此记录'; withdrawnRecord = '来源已撤下的公告记录'
         publicUpdated = '公告数据更新 {0}'; publicUpdateUnknown = '公告更新时间暂不可用'; refreshCadence = '自动刷新：额度每1分钟 · 公共信息每10分钟'; sourceLinks = 'codexreset.ai / whenreset.app'
         announcementSource = '查看公告'; deliverySource = '送达记录'; announcementHistory = '公告与送达记录'; historyEmpty = '暂无公告与送达记录'
         oddsTitle = '未来全局额度重置概率'; odds24 = '24小时'; odds48 = '48小时'; odds7d = '7天'; oddsNote = '历史频率估计，不代表重置承诺，也不是账号每周重置时间。'
@@ -171,6 +173,7 @@ function ConvertTo-WidgetTimestamp($value) {
     return $null
 }
 function Get-WidgetAnnouncementPhase($row, [DateTimeOffset]$now = [DateTimeOffset]::UtcNow) {
+    if ($row.sourceWithdrawn) { return 'unknown' }
     $delivered=ConvertTo-WidgetTimestamp $row.deliveredAt
     if ($delivered -and $delivered -le $now) {
         if (($now-$delivered).TotalHours -ge 24) { return 'archived' }
@@ -289,17 +292,19 @@ function ConvertTo-WidgetAnnouncementRow($row, [string]$language, [DateTimeOffse
     $announced=ConvertTo-WidgetTimestamp $row.announcedAt
     if ($announced) { $announcedText=Get-WidgetText 'announcedOn' $language @((Format-WidgetAnnouncementDate $announced $language $timeZone $now)) }
     $scope=if ($row.scope -eq 'paid') {Get-WidgetText 'paid' $language} elseif ($row.scope -eq 'all') {Get-WidgetText 'all' $language} elseif ($row.scopeLabel) {[string]$row.scopeLabel} else {Get-WidgetText 'unknownScope' $language}
-    $phaseKey='phase'+(Get-Culture).TextInfo.ToTitleCase($phase)
+    $phaseKey=if ($row.sourceWithdrawn) {'sourceWithdrawn'} else {'phase'+(Get-Culture).TextInfo.ToTitleCase($phase)}
+    $scheduleNote=if ($scheduled -and $row.scheduledTimeZone) {Get-WidgetText 'sourceTimeZoneNote' $language @([string]$row.scheduledTimeZone)} else {''}
     $summary=if ((Resolve-WidgetLanguage $language) -eq 'zh-CN' -and $row.summaryZh) {[string]$row.summaryZh} elseif ($row.summary) {[string]$row.summary} else {''}
     $details=@((Get-WidgetText $phaseKey $language))
     if ($scheduledText) {$details+=,$scheduledText}
     if ($completedText) {$details+=,$completedText}
     if ($announcedText) {$details+=,$announcedText}
+    if ($scheduleNote) {$details+=,$scheduleNote}
     $details+=,$scope
     [pscustomobject]@{
         key=Get-WidgetAnnouncementKey $row; phase=$phase
-        title=Get-WidgetText $(if ($row.kind -eq 'banked') {'confirmedBanked'} else {'confirmedRegular'}) $language
-        details=$details -join ' · '; scheduledText=$scheduledText; completedText=$completedText; announcedText=$announcedText; scopeText=$scope
+        title=Get-WidgetText $(if ($row.sourceWithdrawn) {'withdrawnRecord'} elseif ($row.kind -eq 'banked') {'confirmedBanked'} else {'confirmedRegular'}) $language
+        details=$details -join ' · '; scheduledText=$scheduledText; completedText=$completedText; announcedText=$announcedText; scheduleNote=$scheduleNote; scopeText=$scope
         summary=$summary
         retentionText=$(if ($phase -eq 'delivered') {Get-WidgetText 'retention' $language} else {''})
         sourceUrl=$(if (Test-WidgetHttpsUrl $row.sourceUrl) {[string]$row.sourceUrl} else {$null})
@@ -317,7 +322,7 @@ function Get-WidgetAnnouncementView($external, [string]$language, [DateTimeOffse
         $key=Get-WidgetAnnouncementKey $row
         if ($seen.ContainsKey($key)) { continue }; $seen[$key]=$true
         $view=ConvertTo-WidgetAnnouncementRow $row $language $now
-        if ($view.phase -eq 'archived') {$history.Add($view)} else {$active.Add($view)}
+        if ($view.phase -eq 'archived' -or $row.sourceWithdrawn) {$history.Add($view)} else {$active.Add($view)}
     }
     foreach ($row in @($feed.history)) {
         if (-not $row -or $row.kind -notin @('banked','regular')) { continue }

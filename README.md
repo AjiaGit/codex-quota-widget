@@ -36,6 +36,8 @@ Quota queries and cache checks run every **60 seconds**. Manual refresh, reopeni
 
 Confirmed banked reset grants and global reset announcements stay visible until delivery is confirmed, then remain for 24 hours before moving into history. Known pending announcements survive source outages and app restarts. Five-hour usage is shown only for a confirmed Plus plan; Pro and unknown plans hide that row.
 
+Precise public schedules and publication times are displayed separately in your local timezone, with the UTC offset. Date-only schedules keep their original calendar date. Timezone interpretations supplied by a tracker are labelled as source conversions. If both fresh, complete tracker feeds no longer list an unconfirmed record, it moves into history with a source-withdrawal label; withdrawal is not proof of delivery.
+
 Historical announcements without delivery evidence say **Source did not provide a delivery record**. An account's personal grant date does not confirm delivery of a public announcement to every account.
 
 Public reset announcements and historical odds from [codexreset.ai](https://codexreset.ai/) and [whenreset.app](https://whenreset.app/) refresh separately every **10 minutes**. Historical odds do not promise a future reset time.

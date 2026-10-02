@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeResets, normalizeForecast } from '../external.mjs';
+import { normalizeResets, normalizeForecast, queryExternal } from '../external.mjs';
 
 const now = Date.parse('2026-09-29T09:00:00Z');
 
@@ -42,4 +42,23 @@ test('declines unavailable, invalid and stale odds', () => {
   assert.equal(normalizeForecast({ ...sample, available: false }, now), null);
   assert.equal(normalizeForecast({ ...sample, probabilities: { ...sample.probabilities, raw_48h: 1.5 } }, now), null);
   assert.equal(normalizeForecast({ ...sample, generated_at: '2026-09-27T00:00:00Z' }, now), null);
+});
+
+test('reconciliation requires two complete fresh valid feeds and includes schedules absent from history', async () => {
+  const event={kind:'regular',url:'https://example.org/record',ts:'2026-09-28T00:00:00Z',announced_at:'2026-09-28T00:00:00Z'};
+  const resets={schema_version:1,generated_at:new Date(now).toISOString(),events:[event]};
+  const scheduled={day:'2026-09-30',scheduled_for:'2026-09-30T17:00:00Z',announced_at:'2026-09-28T00:00:00Z',certainty:'announced',url:'https://example.org/scheduled'};
+  const announcements={schema:'whenreset/v1',generated_at:new Date(now).toISOString(),products:{codex:{scheduled,events:[]}}};
+  const query=async(resetValue,announcementValue=announcements)=>queryExternal({now,fetchFn:async url=>{
+    if(url.includes('forecast'))return {ok:true,json:async()=>({})};
+    const value=url.includes('whenreset')?announcementValue:resetValue;
+    if(value instanceof Error)throw value;
+    return {ok:true,json:async()=>value};
+  }});
+  const good=await query(resets);
+  assert.deepEqual(good.announcements.reconciledIds,['https://example.org/record#regular','https://example.org/scheduled#regular']);
+  for(const bad of [new Error('network'),{...resets,generated_at:'2026-09-25T00:00:00Z'},{...resets,events:[event,{kind:'unexpected',url:'https://example.org/bad'}]}]) {
+    assert.equal((await query(bad)).announcements.reconciledIds,undefined,'One unavailable, stale or malformed feed cannot withdraw cached records');
+  }
+  assert.equal((await query(resets,{...announcements,products:{codex:{scheduled:{...scheduled,kind:'unexpected'},events:[]}}})).announcements.reconciledIds,undefined);
 });

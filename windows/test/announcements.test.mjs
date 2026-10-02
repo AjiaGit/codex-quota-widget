@@ -13,6 +13,71 @@ const hour = 3600000;
 const feed = (scheduled = null, events = []) => ({ schema: 'whenreset/v1', generated_at: at(0), products: { codex: { scheduled, events } } });
 const scheduled = (kind = 'banked') => ({ id: kind, kind, certainty: 'announced', date: '2026-10-01', ts: at(-hour), scope: 'paid', url: `https://x.com/thsottiaux/status/${kind}`, summary: 'Public announcement' });
 
+test('the published WhenReset schedule shape preserves its real UTC time, publication, day and timezone label', () => {
+  const time = Date.parse('2026-10-02T06:00:00Z');
+  const signal = {day:'2026-10-02',tz_label:'PT',scheduled_for:'2026-10-02T17:00:00Z',announced_at:'2026-10-02T02:14:51Z',certainty:'announced',url:'https://x.com/thsottiaux/status/2105843926221660585',note_zh:'来源预告及其时区换算说明'};
+  const result = source.normalizeAnnouncements({...feed(signal),generated_at:new Date(time).toISOString()},time);
+  assert.equal(result.status,'ok');
+  assert.equal(result.items.length,1);
+  assert.equal(result.items[0].kind,'regular');
+  assert.equal(result.items[0].scheduledAt,'2026-10-02T17:00:00.000Z');
+  assert.equal(result.items[0].announcedAt,'2026-10-02T02:14:51.000Z');
+  assert.equal(result.items[0].scheduledDate,'2026-10-02');
+  assert.equal(result.items[0].scheduledTimeZone,'PT');
+  assert.equal(result.items[0].summaryZh,signal.note_zh);
+  assert.equal(result.items[0].scope,null,'Missing scope is not inferred from free text');
+  const row=view.deriveAnnouncementsView(result,time,'Asia/Shanghai','zh-CN').rows[0];
+  assert.match(row.plannedText,/10\/03.*01:00.*UTC\+08:00/);
+  assert.match(row.scheduleNote,/来源.*PT.*换算/);
+  assert.equal(row.scheduleNoteDetail,signal.note_zh);
+  const hinted=source.normalizeAnnouncements({...feed({...signal,certainty:'hinted'}),generated_at:new Date(time).toISOString()},time);
+  assert.deepEqual(hinted.items,[]);
+});
+
+test('only a complete fresh reconciliation from both sources withdraws a cached unconfirmed record', async () => {
+  const dir=await mkdtemp(join(tmpdir(),'quota-reconcile-'));
+  const file=join(dir,'announcements.json');
+  try {
+    const store=await source.createAnnouncementStore({file,now:()=>now});
+    const old=source.normalizeAnnouncements(feed(scheduled('regular')),now);
+    await store.update(old);
+    await store.update({status:'unavailable',items:[],history:[],sourceUpdatedAt:at(0),reconciledIds:[]});
+    assert.equal(store.state.items.length,1,'Failure cannot withdraw an announcement');
+    await store.update({...source.normalizeAnnouncements(feed(),now),sourceUpdatedAt:at(-25*hour),reconciledIds:[]});
+    assert.equal(store.state.items.length,1,'Stale evidence cannot withdraw an announcement');
+    await store.update({...source.normalizeAnnouncements(feed(),now),reconciledIds:[]});
+    assert.equal(store.state.items.length,0,'Both fresh complete feeds no longer list this record');
+    assert.equal(store.state.history[0].sourceWithdrawn,true);
+    assert.equal(store.state.history[0].deliveredAt,null,'Withdrawal is not delivery');
+    const row=view.deriveAnnouncementsView(store.state,now,'UTC','zh-CN').history[0];
+    assert.equal(row.title,'来源已撤下的公告记录');
+    assert.equal(row.status,'监控来源已撤下此记录');
+    const restored=await source.createAnnouncementStore({file,now:()=>now});
+    assert.equal(restored.state.items.length,0);
+    assert.equal(restored.state.history[0].sourceWithdrawn,true);
+    await restored.update(old);
+    assert.equal(restored.state.items.length,1,'A source can explicitly restore an announcement');
+    assert.equal(restored.state.items[0].sourceWithdrawn,false);
+  } finally {await rm(dir,{recursive:true,force:true});}
+});
+
+test('reconciliation clears withdrawn unread notices but never withdraws evidenced completed records', async () => {
+  let time=now;
+  const store=await source.createAnnouncementStore({now:()=>time});
+  await store.update(source.normalizeAnnouncements(feed(),time));
+  time+=hour;
+  const fresh={...scheduled(),ts:at(hour)};
+  await store.update(source.normalizeAnnouncements({...feed(fresh),generated_at:at(hour)},time));
+  assert.equal(store.alerts.unread.length,1);
+  await store.update({...source.normalizeAnnouncements({...feed(),generated_at:at(hour)},time),reconciledIds:[]});
+  assert.deepEqual(store.alerts.unread,[]);
+  const done={...fresh,delivered_at:at(hour)};
+  await store.update(source.normalizeAnnouncements({...feed(done),generated_at:at(hour)},time));
+  await store.update({...source.normalizeAnnouncements({...feed(),generated_at:at(hour)},time),reconciledIds:[]});
+  assert.equal(store.state.items.length,1);
+  assert.equal(store.state.items[0].deliveredAt,at(hour));
+});
+
 test('explicit announced signals preserve both kinds and date-only promises without interpreting historical estimates', () => {
   assert.equal(typeof source.normalizeAnnouncements, 'function');
   const result = source.normalizeAnnouncements({ ...feed([scheduled(), scheduled('regular')]), next_estimate: '2026-10-02' }, now);

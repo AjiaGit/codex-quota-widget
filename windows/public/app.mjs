@@ -53,8 +53,9 @@ export function deriveAnnouncementsView(state,now=Date.now(),timeZone=Intl.DateT
     const plannedText=plannedDate?t(language,scheduleKey,{time:plannedDate}):!confirmed&&!historical?t(language,'scheduleUnknown'):'';
     const completedText=confirmed?`${t(language,'completed')} ${formatLocalAnnouncementDate(delivered,timeZone,language,now)}`:'';
     const announcedText=Number.isFinite(announced)?t(language,'published',{time:formatLocalAnnouncementDate(announced,timeZone,language,now)}):'';
-    const status=confirmed?t(language,item.kind==='banked'?'grantDone':'resetDone'):t(language,phase==='unknown'?'historyDeliveryUnknown':phase==='waiting'?'waitingDelivery':phase==='upcoming'?'upcoming':'announcedWaiting');
-    return {id:item.id||item.sourceUrl+'#'+item.kind,kind:item.kind,phase,title:t(language,item.kind==='banked'?'confirmedGrant':'confirmedReset'),status,
+    const status=confirmed?t(language,item.kind==='banked'?'grantDone':'resetDone'):t(language,item.sourceWithdrawn?'sourceWithdrawn':phase==='unknown'?'historyDeliveryUnknown':phase==='waiting'?'waitingDelivery':phase==='upcoming'?'upcoming':'announcedWaiting');
+    return {id:item.id||item.sourceUrl+'#'+item.kind,kind:item.kind,phase,title:t(language,item.sourceWithdrawn?'withdrawnRecord':item.kind==='banked'?'confirmedGrant':'confirmedReset'),status,
+      scheduleNote:Number.isFinite(scheduled)&&item.scheduledTimeZone?t(language,'sourceTimeZoneNote',{zone:item.scheduledTimeZone}):'',scheduleNoteDetail:language==='zh-CN'?(item.summaryZh||''):(item.summary||item.summaryZh||''),
       plannedText,completedText,announcedText,scopeText,retentionText:phase==='delivered'?t(language,'retention'):'',
       timeText:[completedText||plannedText||announcedText,scopeText].filter(Boolean).join(' · '),
       sourceUrl:safeSource(item.sourceUrl),deliverySourceUrl:confirmed?safeSource(item.deliverySourceUrl):null,
@@ -138,6 +139,7 @@ if(typeof document!=='undefined') {
       if(row.phase!=='upcoming'){const phase=document.createElement('p');phase.className='phase';phase.textContent=row.status;content.append(phase);}
       let factLine;
       for(const text of[row.plannedText,row.completedText,row.announcedText].filter(Boolean)){factLine=document.createElement('p');factLine.className='announcement-fact';factLine.textContent=text;content.append(factLine);}
+      if(row.scheduleNote){const note=document.createElement('p');note.className='announcement-fact retention-note';note.textContent=row.scheduleNote;note.title=row.scheduleNoteDetail;content.append(note);}
       if(!factLine){factLine=document.createElement('p');content.append(factLine);}
       const scope=document.createElement('span');scope.className='announcement-scope';scope.textContent=row.scopeText;factLine.append(scope);
       if(history&&row.summary){const p=document.createElement('p');p.textContent=row.summary;content.append(p);}

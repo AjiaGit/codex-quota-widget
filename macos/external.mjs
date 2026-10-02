@@ -33,21 +33,25 @@ function dateOnly(value) {
 }
 const text = value => typeof value === 'string' ? value.slice(0, 2000) : null;
 function normalizedAnnouncement(raw, now, scheduled = false, persisted = false) {
-  if (!['banked', 'regular'].includes(raw?.kind)) return null;
+  // WhenReset's Codex scheduled object describes a global reset and may omit kind.
+  const kind=scheduled && raw?.kind === undefined ? 'regular' : raw?.kind;
+  if (!['banked', 'regular'].includes(kind)) return null;
   const sourceUrl = safeHttpsUrl(persisted ? raw.sourceUrl : raw.url);
   if (!sourceUrl) return null;
-  const announcedAt = timestamp(persisted ? raw.announcedAt : raw.ts, now);
+  const announcedAt = timestamp(persisted ? raw.announcedAt : raw.announced_at ?? raw.ts, now);
   const deliveredAt = timestamp(persisted ? raw.deliveredAt : raw.delivered_at, now, announcedAt ? Date.parse(announcedAt) : -Infinity);
-  const schedule = persisted ? raw.scheduledAt : scheduled ? raw.scheduled_at : null;
+  const schedule = persisted ? raw.scheduledAt : scheduled ? raw.scheduled_for ?? raw.scheduled_at : null;
   const scheduledMs = preciseTimestamp(schedule);
   return {
-    id: sourceUrl + '#' + raw.kind,
-    kind: raw.kind, announcedAt,
+    id: sourceUrl + '#' + kind,
+    kind, announcedAt,
     scheduledAt: Number.isFinite(scheduledMs) ? new Date(scheduledMs).toISOString() : null,
-    scheduledDate: dateOnly(persisted ? raw.scheduledDate : scheduled ? raw.date : null),
+    scheduledDate: dateOnly(persisted ? raw.scheduledDate : scheduled ? raw.day ?? raw.date : null),
+    scheduledTimeZone: text(persisted ? raw.scheduledTimeZone : scheduled ? raw.tz_label : null),
     deliveredAt, scope: text(raw.scope), scopeLabel: text(persisted ? raw.scopeLabel : raw.scope_label),
     sourceUrl, deliverySourceUrl: deliveredAt ? safeHttpsUrl(persisted ? raw.deliverySourceUrl : raw.delivered_source_url) : null,
-    summary: text(raw.summary), summaryZh: text(persisted ? raw.summaryZh : raw.summary_zh),
+    summary: text(raw.summary ?? (scheduled ? raw.note_en : null)), summaryZh: text(persisted ? raw.summaryZh : raw.summary_zh ?? (scheduled ? raw.note_zh : null)),
+    sourceWithdrawn: persisted && raw.sourceWithdrawn === true,
   };
 }
 function deduplicate(items) {
@@ -62,7 +66,7 @@ function deduplicate(items) {
   }
   return [...map.values()];
 }
-const active = (item, now) => !item.deliveredAt || now - Date.parse(item.deliveredAt) < MAX_AGE_MS;
+const active = (item, now) => !item.sourceWithdrawn && (!item.deliveredAt || now - Date.parse(item.deliveredAt) < MAX_AGE_MS);
 
 export function normalizeAnnouncements(data, now = Date.now()) {
   const product = data?.products?.codex;
@@ -138,7 +142,8 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
     },
     async update(input) {
       const freshItems = clean(input?.items), freshHistory = clean(input?.history);
-      if(input?.status === 'ok' && !input.stale && recentTimestamp(input.sourceUpdatedAt,now())) {
+      const fresh=input?.status === 'ok' && !input.stale && recentTimestamp(input.sourceUpdatedAt,now());
+      if(fresh) {
         if(baselineAt !== null)for(const item of freshItems) {
           if(!observed.has(item.id) && item.announcedAt && Date.parse(item.announcedAt) >= baselineAt)
             unread.set(item.id,{id:item.id,kind:item.kind});
@@ -148,12 +153,17 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
       }
       const previous = project(), previousItems = previous.items;
       const evidence = new Map([...freshHistory, ...freshItems].map(item => [item.id, item]));
-      const retained = previousItems.map(item => evidence.has(item.id) ? deduplicate([item, evidence.get(item.id)])[0] : item);
+      // Absence only changes status when both complete, fresh feeds agree. Failure
+      // or an empty single-source lookup must preserve the pending announcement.
+      const reconciled=fresh && Array.isArray(input.reconciledIds) && input.reconciledIds.every(id=>alertIdentity(id)) ? new Set(input.reconciledIds) : null;
+      const retained = previousItems.map(item => evidence.has(item.id) ? deduplicate([item, evidence.get(item.id)])[0] :
+        reconciled && !reconciled.has(item.id) && !item.deliveredAt ? {...item,sourceWithdrawn:true} : item);
+      for(const item of retained)if(item.sourceWithdrawn)unread.delete(item.id);
       snapshot = { status: input?.status === 'ok' ? 'ok' : 'unavailable',
         items: deduplicate([...retained, ...freshItems]),
-        history: deduplicate([...previous.history, ...freshHistory]),
+        history: deduplicate([...previous.history, ...freshHistory, ...retained.filter(item=>item.sourceWithdrawn)]),
         sourceUpdatedAt: timestamp(input?.sourceUpdatedAt, now()) || snapshot.sourceUpdatedAt,
-        stale: input?.status !== 'ok' || input?.stale === true || previousItems.some(item => !evidence.has(item.id)) };
+        stale: input?.status !== 'ok' || input?.stale === true || retained.some(item => !item.sourceWithdrawn && !evidence.has(item.id)) };
       await persist();
       return project();
     },
@@ -210,11 +220,20 @@ export async function queryExternal({ fetchFn = fetch, now = Date.now() } = {}) 
   ]);
   const lastGlobal = resets.status === 'fulfilled' ? normalizeResets(resets.value, now) : null;
   const odds = forecast.status === 'fulfilled' ? normalizeForecast(forecast.value, now) : null;
+  const announcementView=announcements.status === 'fulfilled' ? normalizeAnnouncements(announcements.value, now) : emptyAnnouncements();
+  if (lastGlobal && announcementView.status === 'ok') {
+    const events=[...resets.value.events,...announcements.value.products.codex.events];
+    const records=events.map(raw=>normalizedAnnouncement(raw,now));
+    if(records.every(Boolean))announcementView.reconciledIds=[...new Set([
+      ...records.map(item=>item.id),
+      ...announcementView.items.map(item=>item.id),
+    ])];
+  }
   return {
     status: lastGlobal || odds ? 'ok' : 'unavailable',
     lastGlobal,
     forecast: odds,
-    announcements: announcements.status === 'fulfilled' ? normalizeAnnouncements(announcements.value, now) : emptyAnnouncements(),
+    announcements: announcementView,
     updatedAt: now,
   };
 }

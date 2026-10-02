@@ -174,6 +174,20 @@ Test-Case 'precise schedules show event-time local offsets and independent publi
     $row=ConvertTo-WidgetAnnouncementRow $event 'en' $now $false $zone
     Assert-Equal $row.scheduledText 'Delivery time not announced' 'Missing delivery time remains unknown'
 }
+Test-Case 'source-withdrawn records stay neutral in history after native cache reconciliation' {
+    $event=New-Event 'withdrawn-source'
+    $withdrawn=$event | ConvertTo-Json | ConvertFrom-Json
+    $withdrawn | Add-Member -NotePropertyName sourceWithdrawn -NotePropertyValue $true
+    $merged=Merge-WidgetExternalData (New-External @($event)) (New-External @() @($withdrawn)) $false
+    $view=Get-WidgetAnnouncementView $merged 'zh-CN' $now
+    Assert-Equal $view.active.Count 0 'Withdrawn event must leave active announcements'
+    Assert-Equal $view.history[0].title '来源已撤下的公告记录' 'Neutral withdrawn title'
+    if ($view.history[0].details -notmatch '监控来源已撤下此记录') { throw 'Source correction status omitted' }
+    $event.scheduledAt=$now.AddHours(1).ToString('o')
+    $event | Add-Member -NotePropertyName scheduledTimeZone -NotePropertyValue 'PT'
+    $view=Get-WidgetAnnouncementView (New-External @($event)) 'en' $now
+    if ($view.active[0].scheduleNote -notmatch 'PT.*monitoring source') { throw 'Upstream timezone interpretation not attributed' }
+}
 Test-Case 'Plus five-hour view preserves percent and reset time while other plans omit it' {
     $quota=[pscustomobject]@{status='ok'; plan='plus'; updatedAt=$now.ToUnixTimeMilliseconds(); fiveHour=[pscustomobject]@{remainingPercent=32; resetsAt=$now.AddHours(1).ToUnixTimeSeconds()}}
     $view=Get-WidgetFiveHourView $quota 'en' $now
