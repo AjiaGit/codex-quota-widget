@@ -40,6 +40,8 @@ Precise public schedules and publication times are displayed separately in your 
 
 Historical announcements without delivery evidence say **Source did not provide a delivery record**. An account's personal grant date does not confirm delivery of a public announcement to every account.
 
+After a scheduled time passes, a missing public completion record is shown neutrally as a monitoring-source status. Your account's quota updates independently; restored personal quota does not prove that a global reset has finished for all accounts.
+
 Public reset announcements and historical odds from [codexreset.ai](https://codexreset.ai/) and [whenreset.app](https://whenreset.app/) refresh separately every **10 minutes**. Historical odds do not promise a future reset time.
 
 The footer states **Auto-refresh: quota every 1 min · public data every 10 min**. The widget reads structured tracker APIs; it does not search or interpret X posts. Provider records may be delayed or incomplete. See [terms and data sources](docs/TERMINOLOGY.md) for official reset names, translated labels and source boundaries.

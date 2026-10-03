@@ -55,7 +55,7 @@ details p { color:var(--muted); font-size:13px; margin:8px 0; }
 .announcement h2 { margin-bottom:4px; }
 .announcement p { color:var(--muted); margin:2px 0; font-size:14px; line-height:1.5; }
 .announcement .phase { color:var(--muted); font-size:13px; font-weight:600; }
-.announcement[data-phase="waiting"] .phase,.announcement[data-phase="announced"] .phase { color:var(--warning); }
+.announcement[data-phase="announced"] .phase { color:var(--warning); }
 .announcement[data-phase="delivered"] .phase { color:#24d3a5; }
 .announcement .announcement-source,.announcement .retention-note { font-size:13px; }
 .announcement-source a { text-decoration:underline; }

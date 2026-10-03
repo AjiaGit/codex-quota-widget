@@ -44,6 +44,8 @@ macOS 应用仅有临时签名，没有 Developer ID 签名或 Apple 公证；Wi
 
 历史公告没有送达证据时显示**来源未提供送达记录**。个人账号的发放日期，不能用来确认某条公共公告已向所有账号送达。
 
+预定时间已过但缺少公共完成记录时，界面用中性文字说明监控来源的记录状态。个人额度独立更新；本账号额度恢复不代表全局重置已对所有账号完成。
+
 ## 隐私与故障排查
 
 本机服务通过 [Codex App Server](https://learn.chatgpt.com/docs/app-server) 的只读 `account/read` 和 `account/rateLimits/read` 获取数据，只监听本机回环地址，无需 OpenAI API Key。不会向公开重置站点发送个人额度或登录信息；设置与日志留在本机。
