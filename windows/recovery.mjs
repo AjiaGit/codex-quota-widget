@@ -5,7 +5,8 @@ const MAX_RECORDS=50, MAX_ACCOUNTS=5;
 const percent=value=>Number.isInteger(value)&&value>=0&&value<=100;
 const stamp=value=>Number.isSafeInteger(value)&&value>0;
 const validRecord=row=>row&&stamp(row.observedFrom)&&stamp(row.detectedAt)&&row.detectedAt>row.observedFrom&&
-  percent(row.beforePercent)&&percent(row.afterPercent)&&row.afterPercent>row.beforePercent&&stamp(row.previousResetsAt)&&stamp(row.resetsAt);
+  percent(row.beforePercent)&&percent(row.afterPercent)&&row.afterPercent>row.beforePercent&&
+  (row.previousResetsAt===null||stamp(row.previousResetsAt))&&stamp(row.resetsAt);
 const recordFields=row=>({observedFrom:row.observedFrom,detectedAt:row.detectedAt,beforePercent:row.beforePercent,
   afterPercent:row.afterPercent,previousResetsAt:row.previousResetsAt,resetsAt:row.resetsAt});
 

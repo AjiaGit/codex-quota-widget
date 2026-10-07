@@ -71,6 +71,17 @@ test('storage failure preserves live observations with an explicit unsaved statu
   const store=await createRecoveryStore({file:join(file,'blocked.json'),now:()=>initial});
   assert.equal((await store.observe('account-a',quota(45))).status,'unsaved');
 }));
+test('a recovery evidenced by earlier local queries survives restart with an unknown previous reset date',async()=>fixture(async({file,open,tick})=>{
+  let store=await open();await store.observe('account-a',quota(45));tick();await store.observe('account-a',quota(99));
+  const saved=JSON.parse(await readFile(file,'utf8')),account=Object.values(saved.accounts)[0];
+  account.records[0].previousResetsAt=null;
+  await writeFile(file,JSON.stringify(saved));tick();store=await open();
+  const result=await store.observe('account-a',quota(98));
+  assert.equal(result.records.length,1);
+  assert.equal(result.records[0].beforePercent,45);
+  assert.equal(result.records[0].afterPercent,99);
+  assert.equal(result.records[0].previousResetsAt,null,'An unknown historical reset date is not invented');
+}));
 test('local records are bounded and sorted with the latest detection first',async()=>fixture(async({open,tick})=>{
   const store=await open();await store.observe('account-a',quota(0));
   let view;
