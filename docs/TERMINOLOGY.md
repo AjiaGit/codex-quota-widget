@@ -16,7 +16,7 @@ The English reset names and distinctions follow [OpenAI's banked-reset guide](ht
 
 ## What updates automatically?
 
-**Account quota recoveries / 本账号额度恢复** is this widget's label for locally observed quota increases, not an official reset type. It shows before/after percentages and the interval between the previous observation and detection. A recovery does not establish its cause, exact time, or delivery to other accounts; it is separate from the public announcement history.
+**Account quota recoveries / 本账号额度恢复** is this widget's label for locally observed quota increases, not an official reset type. It shows before/after percentages and the interval between the previous observation and detection. Personal recoveries and public news share a chronological list, while their evidence remains independent. A recovery does not establish its cause, exact time, or delivery to other accounts.
 
 - **Quota every 1 minute:** reads the signed-in account through the local Codex App Server. The available banked-reset count comes from that account response.
 - **Public data every 10 minutes:** fetches public announcement and delivery records from the third-party services below. This interval is how often the widget checks, not how often OpenAI issues resets.

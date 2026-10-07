@@ -47,8 +47,21 @@ Test-Case 'narrow header keeps relative age below title and ordered equal toolba
     Assert-Equal (Get-WidgetHeaderLayout 620 132 145).statusSecondRow $false 'Wider inline status'
 }
 Test-Case 'Plus quota precedes credits and announcements lead directly to history' {
-    Assert-Equal ((Get-WidgetDetailSectionOrder $true) -join ',') 'hero,fiveHour,credits,recovery,announcements,history,sources' 'Plus section order'
+    Assert-Equal ((Get-WidgetDetailSectionOrder $true) -join ',') 'hero,fiveHour,credits,announcements,history,sources' 'Plus section order'
     Assert-Equal ((Get-WidgetDetailSectionOrder $false) -contains 'fiveHour') $false 'Non-Plus quota'
+}
+Test-Case 'personal recoveries share reset news and move into the same history after 24 hours' {
+    $start=$now.AddMinutes(-2).ToUnixTimeMilliseconds(); $found=$now.AddSeconds(-30).ToUnixTimeMilliseconds()
+    $data=[pscustomobject]@{status='ok';recoveryHistory=[pscustomobject]@{status='ok';trackingSince=$start;records=@([pscustomobject]@{observedFrom=$start;detectedAt=$found;beforePercent=45;afterPercent=99})}}
+    $event=New-Event 'public'; $event.announcedAt=$now.AddMinutes(-1).ToString('o')
+    $feed=New-External @($event)
+    $view=Get-WidgetResetActivityView $data $feed 'en' $now
+    Assert-Equal $view.active.Count 2 'Both sources in one list'
+    Assert-Equal $view.active[0].kind 'recovery' 'Newest personal recovery first'
+    Assert-Equal $view.active[1].phase 'announced' 'Personal recovery does not confirm public delivery'
+    $later=Get-WidgetResetActivityView $data $feed 'en' ($now.AddHours(24))
+    Assert-Equal $later.history[0].kind 'recovery' 'Older recovery shares history'
+    Assert-Equal $later.active.Count 1 'Pending public announcement remains active'
 }
 Test-Case 'confirmed announcements move from upcoming to waiting without inferred delivery' {
     $row = New-Event 'hidden-event-key'; $row.scheduledAt=$now.AddMinutes(1).ToString('o')

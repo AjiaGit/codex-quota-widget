@@ -33,7 +33,7 @@ export function deriveRecoveryView(state,language='en',timeZone=Intl.DateTimeFor
   const rows=ready?(history.records||[]).filter(row=>Number.isFinite(row.detectedAt)&&row.detectedAt<=now&&
     Number.isFinite(row.observedFrom)&&row.observedFrom<row.detectedAt&&Number.isInteger(row.beforePercent)&&
     Number.isInteger(row.afterPercent)&&row.beforePercent>=0&&row.afterPercent<=100&&row.afterPercent>row.beforePercent)
-    .sort((a,b)=>b.detectedAt-a.detectedAt).slice(0,50).map(row=>({change:`${row.beforePercent}% → ${row.afterPercent}%`,
+    .sort((a,b)=>b.detectedAt-a.detectedAt).slice(0,50).map(row=>({detectedAt:row.detectedAt,change:`${row.beforePercent}% → ${row.afterPercent}%`,
       detected:t(language,'recoveryDetected',{time:formatLocalAnnouncementDate(row.detectedAt,timeZone,language,now)}),
       observed:t(language,'recoveryObserved',{time:formatLocalAnnouncementDate(row.observedFrom,timeZone,language,now)})})):[];
   const started=ready&&Number.isFinite(history.trackingSince)?t(language,'recoveryTracking',{time:formatLocalAnnouncementDate(history.trackingSince,timeZone,language,now)}):'';
@@ -71,6 +71,18 @@ export function deriveAnnouncementsView(state,now=Date.now(),timeZone=Intl.DateT
   const newestFirst=(a,b)=>a.announcedAt===b.announcedAt?0:(b.announcedAt??-Infinity)-(a.announcedAt??-Infinity);
   rows.sort(newestFirst);history.sort(newestFirst);
   return {rows,history,notice:state?.stale||state?.status!=='ok'||!publicSourceFresh(state,now)?t(language,rows.length?'informationPending':'announcementsUnavailable'):rows.length?'':t(language,'noAnnouncements')};
+}
+export function deriveResetActivityView(quotaState,publicState,now=Date.now(),timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone,language='en') {
+  const publicView=deriveAnnouncementsView(publicState,now,timeZone,language);
+  const recovery=deriveRecoveryView(quotaState,language,timeZone,now);
+  const rows=[...publicView.rows],history=[...publicView.history];
+  for(const record of recovery.rows) {
+    const row={...record,kind:'recovery',phase:'recovered',title:t(language,'recoveryTitle')};
+    (now-record.detectedAt<PUBLIC_MAX_AGE?rows:history).push(row);
+  }
+  const newestFirst=(a,b)=>(b.detectedAt??b.announcedAt??-Infinity)-(a.detectedAt??a.announcedAt??-Infinity);
+  rows.sort(newestFirst);history.sort(newestFirst);
+  return {rows,history,publicView,recoveryWarning:quotaState?.status==='ok'&&quotaState.recoveryHistory?.status==='unsaved'?t(language,'recoveryUnsaved'):''};
 }
 export function derivePublicStatus(state,now=Date.now(),timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone,language='en') {
   if(state?.announcements?.status==='ok'&&!state.announcements.stale&&publicSourceFresh(state.announcements,now))return '';
@@ -132,11 +144,13 @@ if(typeof document!=='undefined') {
     byId('caption').hidden=view.percentText!=='—';
     byId('five-hour').hidden=!view.showFiveHour;
     const publicStatus=derivePublicStatus(externalState,Date.now(),undefined,lang);
-    document.querySelector('.announcements').setAttribute('aria-label',t(lang,'confirmedAnnouncements'));
+    document.querySelector('.announcements').setAttribute('aria-label',t(lang,'resetActivity'));
     byId('public-status').textContent=publicStatus;byId('public-status').hidden=!publicStatus;
-    const announcements=deriveAnnouncementsView(externalState.announcements,Date.now(),undefined,lang);
+    const activity=deriveResetActivityView(state,externalState.announcements,Date.now(),undefined,lang);
+    const announcements=activity.publicView;
     const icon=(kind)=>{
       const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('aria-hidden','true');svg.classList.add('section-icon');
+      if(kind==='recovery'){const path=document.createElementNS(svg.namespaceURI,'path');path.setAttribute('d','M3 11a9 9 0 1 1 3 8M3 5v6h6M12 7v5l3 2');svg.append(path);return svg;}
       const path=document.createElementNS(svg.namespaceURI,'path');path.setAttribute('d',kind==='banked'?'M3 9h18v4H3zM5 13v9h14v-9M12 9v13M12 9H8a3 3 0 1 1 3-3l1 3Zm0 0h4a3 3 0 1 0-3-3l-1 3Z':'M4 9h4l11-5v16l-11-5H4V9Zm4 6 2 7H6l-2-7M22 9v6');svg.append(path);return svg;
     };
     const announcementNode=(row,history=false)=>{
@@ -144,6 +158,11 @@ if(typeof document!=='undefined') {
       if(!history)item.append(icon(row.kind));
       const content=document.createElement('div');content.className='announcement-content';
       const heading=document.createElement(history?'strong':'h2');heading.textContent=row.title;content.append(heading);
+      if(row.kind==='recovery') {
+        const change=document.createElement('p');change.className='recovery-change';change.textContent=row.change;content.append(change);
+        for(const text of [row.detected,history?row.observed:''].filter(Boolean)){const line=document.createElement('p');line.textContent=text;content.append(line);}
+        item.append(content);return item;
+      }
       if(row.phase!=='upcoming'){const phase=document.createElement('p');phase.className='phase';phase.textContent=row.status;content.append(phase);}
       let factLine;
       for(const text of[row.plannedText,row.completedText,row.announcedText].filter(Boolean)){factLine=document.createElement('p');factLine.className='announcement-fact';factLine.textContent=text;content.append(factLine);}
@@ -157,23 +176,16 @@ if(typeof document!=='undefined') {
       if(row.retentionText&&!history){const p=document.createElement('p');p.className='retention-note';p.textContent=row.retentionText;content.append(p);}
       item.append(content);return item;
     };
-    replaceList('announcement-list',JSON.stringify([lang,announcements.rows]),()=>announcements.rows.map(row=>announcementNode(row)));
+    replaceList('announcement-list',JSON.stringify([lang,activity.rows]),()=>activity.rows.map(row=>announcementNode(row)));
     const notice=announcements.rows.length&&publicStatus?'':announcements.notice;
     byId('announcement-notice').textContent=notice;byId('announcement-notice').hidden=!notice;
-    replaceList('announcement-history-list',JSON.stringify([lang,announcements.history]),()=>{
-      if(announcements.history.length)return announcements.history.map(row=>announcementNode(row,true));
+    byId('recovery-warning').textContent=activity.recoveryWarning;byId('recovery-warning').hidden=!activity.recoveryWarning;
+    replaceList('announcement-history-list',JSON.stringify([lang,activity.history]),()=>{
+      if(activity.history.length)return activity.history.map(row=>announcementNode(row,true));
       const item=document.createElement('li');item.textContent=t(lang,'historyEmpty');return [item];
     });
     const details=deriveResetDetails(state,lang);byId('reset-details-note').textContent=details.note;
     replaceList('reset-details-list',JSON.stringify([lang,details.rows]),()=>details.rows.map(row=>{const item=document.createElement('li'),title=document.createElement('strong');title.textContent=row.title;item.append(title);for(const text of[row.description,row.granted,row.expires].filter(Boolean)){const line=document.createElement('p');line.textContent=text;item.append(line);}return item;}));
-    const recovery=deriveRecoveryView(state,lang);
-    byId('recovery-count').textContent=t(lang,recovery.rows.length?'recoveryCount':'recoveryNone',{count:recovery.rows.length});
-    byId('recovery-note').textContent=recovery.note;
-    replaceList('recovery-list',JSON.stringify([lang,recovery]),()=>{
-      if(!recovery.rows.length){const item=document.createElement('li');item.textContent=recovery.empty;return [item];}
-      return recovery.rows.map(row=>{const item=document.createElement('li'),title=document.createElement('strong');title.textContent=row.change;item.append(title);
-        for(const text of [row.detected,row.observed]){const line=document.createElement('p');line.textContent=text;item.append(line);}return item;});
-    });
     byId('ring').setAttribute('aria-label',t(lang,'weekly'));byId('ring').setAttribute('aria-valuenow',String(view.ringPercent));byId('ring').setAttribute('aria-valuetext',view.percentText==='—'?view.statusText:t(lang,'percentRemaining',{percent:view.ringPercent}));
     byId('language').value=setting;refreshButton.disabled=loading;byId('setup-link').hidden=state.errorCode!=='cli_missing';
     reportDetailLayout();

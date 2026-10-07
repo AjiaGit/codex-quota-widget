@@ -92,3 +92,28 @@ test('recovery presentation uses local detection times and distinguishes first u
   assert.match(view.deriveRecoveryView({...state,recoveryHistory:{status:'ok',trackingSince:initial,records:[]}},'en').empty,/No new quota recovery/);
   assert.match(view.deriveRecoveryView({status:'unavailable'},'en').empty,/Refresh/);
 });
+test('reset activity merges personal recoveries with public news without implying global delivery',()=>{
+  const now=initial+120000;
+  const data={status:'ok',recoveryHistory:{status:'ok',trackingSince:initial,records:[{observedFrom:initial,detectedAt:initial+60000,beforePercent:45,afterPercent:99}]}};
+  const feed={status:'ok',sourceUpdatedAt:new Date(initial).toISOString(),items:[{id:'public',kind:'regular',announcedAt:new Date(initial).toISOString(),sourceUrl:'https://example.org/reset',certainty:'unconfirmed'}],history:[]};
+  assert.equal(typeof view.deriveResetActivityView,'function');
+  for(const language of ['en','zh-CN']) {
+    const activity=view.deriveResetActivityView(data,feed,now,'Asia/Shanghai',language);
+    assert.deepEqual(activity.rows.map(row=>row.kind),['recovery','regular']);
+    assert.equal(activity.rows[0].change,'45% → 99%');
+    assert.equal(activity.rows[1].phase,'unconfirmed');
+    assert.deepEqual(view.announcementIdsForReading({unread:[{id:'public',kind:'regular'}]},activity.publicView,true),['public']);
+  }
+});
+test('older personal recoveries share history and empty personal history creates no extra activity row',()=>{
+  const now=initial+86400000;
+  const data={status:'ok',recoveryHistory:{status:'ok',trackingSince:initial-60000,records:[{observedFrom:initial-60000,detectedAt:initial,beforePercent:45,afterPercent:99}]}};
+  const feed={status:'ok',sourceUpdatedAt:new Date(now).toISOString(),items:[],history:[{id:'old-public',kind:'regular',announcedAt:new Date(initial-3600000).toISOString(),sourceUrl:'https://example.org/reset'}]};
+  assert.equal(typeof view.deriveResetActivityView,'function');
+  const activity=view.deriveResetActivityView(data,feed,now,'UTC','en');
+  assert.equal(activity.rows.length,0);
+  assert.deepEqual(activity.history.map(row=>row.kind),['recovery','regular']);
+  const empty=view.deriveResetActivityView({...data,recoveryHistory:{...data.recoveryHistory,records:[]}},feed,now,'UTC','en');
+  assert.equal(empty.rows.length,0);
+  assert.equal(empty.history.length,1);
+});

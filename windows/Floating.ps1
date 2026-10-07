@@ -112,9 +112,6 @@ $script:colors = @{}
 $script:layoutPlus = $null
 $script:layoutBusy = $false
 $script:historyExpanded = $false
-$script:recoveryExpanded = $false
-$script:recoveryRenderKey = ''
-$script:recoveryRows = @()
 $script:announcementRenderKey = ''
 $script:announcementRows = @()
 $script:historyRows = @()
@@ -262,13 +259,12 @@ $body.Name='detail-scroll-body'; $body.AutoScroll=$true; $body.TabStop=$false; $
 $content = New-Object Windows.Forms.Panel
 $content.Name='detail-content'; [void]$body.Controls.Add($content)
 $script:sectionPanels=@{}
-foreach ($section in @('hero','fiveHour','credits','recovery','announcements','history','sources')) {
+foreach ($section in @('hero','fiveHour','credits','announcements','history','sources')) {
     $panel=New-Object Windows.Forms.Panel; $panel.Name='section-'+$section
     $script:sectionPanels[$section]=$panel; [void]$content.Controls.Add($panel)
 }
 $heroPanel=$script:sectionPanels.hero; $fivePanel=$script:sectionPanels.fiveHour
 $creditsPanel=$script:sectionPanels.credits; $announcementPanel=$script:sectionPanels.announcements
-$recoveryPanel=$script:sectionPanels.recovery
 $historyPanel=$script:sectionPanels.history
 $sourcesPanel=$script:sectionPanels.sources
 
@@ -330,12 +326,6 @@ $cards=New-Object Windows.Forms.LinkLabel; $cards.Name='reset-credit-details'
 $cards.Font=[Drawing.Font]::new('Segoe UI',10.5); $cards.LinkBehavior=[Windows.Forms.LinkBehavior]::HoverUnderline
 $cards.Cursor=[Windows.Forms.Cursors]::Hand; $cards.TabStop=$true; $cards.UseMnemonic=$false
 $cards.Add_LinkClicked({ Show-ResetDetails }); [void]$creditsPanel.Controls.Add($cards)
-$recoveryButton=New-Object Windows.Forms.Button; $recoveryButton.Name='account-recovery-toggle'
-$recoveryButton.FlatStyle=[Windows.Forms.FlatStyle]::Flat; $recoveryButton.FlatAppearance.BorderSize=0
-$recoveryButton.TextAlign=[Drawing.ContentAlignment]::MiddleLeft; $recoveryButton.Font=[Drawing.Font]::new('Segoe UI',10)
-$recoveryButton.Cursor=[Windows.Forms.Cursors]::Hand; $recoveryButton.TabStop=$true; $recoveryButton.UseMnemonic=$false
-[void]$recoveryPanel.Controls.Add($recoveryButton)
-$recoveryRowsPanel=New-Object Windows.Forms.Panel; [void]$recoveryPanel.Controls.Add($recoveryRowsPanel)
 $historyButton=New-Object Windows.Forms.Button; $historyButton.Name='announcement-history-toggle'
 $historyButton.FlatStyle=[Windows.Forms.FlatStyle]::Flat; $historyButton.FlatAppearance.BorderSize=0
 $historyButton.TextAlign=[Drawing.ContentAlignment]::MiddleLeft; $historyButton.Font=[Drawing.Font]::new('Segoe UI',10)
@@ -448,16 +438,6 @@ function Update-ResponsiveLayout {
             $fivePanel.Height=$fiveResetY+(Set-WrappedBox $fiveReset 0 $fiveResetY $cw 22)+10
             Set-ControlBox $divider 0 0 $cw 1
             $creditsPanel.Height=10+(Set-WrappedBox $cards 0 10 $cw 26)+10
-            $recoveryHeight=Set-WrappedBox $recoveryButton 0 0 $cw 30
-            $recoveryRowsPanel.Visible=$script:recoveryExpanded
-            if ($script:recoveryExpanded) {
-                Set-ControlBox $recoveryRowsPanel 0 ($recoveryHeight+6) $cw 1
-                $noteHeight=(Set-WrappedBox $script:recoveryNote 0 0 $cw 22)+8
-                $rowsHeight=Layout-AnnouncementRows $recoveryRowsPanel $script:recoveryRows $cw $noteHeight
-                if ($script:recoveryEmpty) {$rowsHeight=$noteHeight+(Set-WrappedBox $script:recoveryEmpty 0 $noteHeight $cw 22)}
-                $recoveryRowsPanel.Height=[Math]::Max(1,$rowsHeight); $recoveryHeight+=$rowsHeight+6
-            }
-            $recoveryPanel.Height=$recoveryHeight
             $noticeHeight=0
             if ($script:announcementStale) { $noticeHeight=(Set-WrappedBox $script:announcementStale 0 0 $cw 22)+8 }
             $aHeight=Layout-AnnouncementRows $announcementPanel $script:announcementRows $cw $noticeHeight
@@ -482,7 +462,7 @@ function Update-ResponsiveLayout {
                 $y+=$panel.Height+8
             }
             Set-ControlBox $content 13 0 $cw ($y+8)
-            if ($script:automaticDetailHeight -and -not $script:historyExpanded -and -not $script:recoveryExpanded -and -not $script:resizing) {
+            if ($script:automaticDetailHeight -and -not $script:historyExpanded -and -not $script:resizing) {
                 $screen=[Windows.Forms.Screen]::FromControl($form).WorkingArea
                 $fitted=Get-WidgetDetailFittedFrame $form.Bounds ($y+8) $header.height $screen
                 if ($form.Bounds -ne $fitted) {
@@ -609,8 +589,7 @@ function Show-Quota {
     if ($setupItem) { $setupItem.Visible = $null -ne $script:setupCode }
     $ring.Invalidate()
     Set-Tray-QuotaIcon
-    Show-Recovery
-    Update-ResponsiveLayout
+    Show-External
 }
 
 function New-AnnouncementControl($row) {
@@ -654,22 +633,8 @@ function Clear-PanelControls($panel) {
         foreach ($font in $fonts) { $font.Dispose() }
     }
 }
-function Show-Recovery {
-    $view=Get-WidgetRecoveryView $script:data $script:language
-    $key=$view | ConvertTo-Json -Depth 8 -Compress
-    if ($key -cne $script:recoveryRenderKey) {
-        Clear-PanelControls $recoveryRowsPanel; $script:recoveryRows=@(); $script:recoveryEmpty=$null
-        $script:recoveryNote=New-Label $view.note 0 0 346 24 9
-        [void]$recoveryRowsPanel.Controls.Add($script:recoveryNote)
-        foreach ($row in $view.rows) {$panel=New-AnnouncementControl $row; [void]$recoveryRowsPanel.Controls.Add($panel); $script:recoveryRows+=,$panel}
-        if (-not $view.rows.Count) {$script:recoveryEmpty=New-Label $view.empty 0 0 346 24 9.5; [void]$recoveryRowsPanel.Controls.Add($script:recoveryEmpty)}
-        Set-ControlTheme $recoveryRowsPanel; $script:recoveryRenderKey=$key
-    }
-    $recoveryButton.Text=$(if ($script:recoveryExpanded) {'⌄ '} else {'› '})+(T 'recoveryTitle')+' · '+$(if ($view.rows.Count) {T 'recoveryCount' @($view.rows.Count)} else {T 'recoveryNone'})
-    $recoveryButton.AccessibleName=$recoveryButton.Text
-}
 function Show-External {
-    $view=Get-WidgetAnnouncementView $script:externalData $script:language ([DateTimeOffset]::UtcNow)
+    $view=Get-WidgetResetActivityView $script:data $script:externalData $script:language ([DateTimeOffset]::UtcNow)
     $key=$view | ConvertTo-Json -Depth 8 -Compress
     if ($key -cne $script:announcementRenderKey) {
         Clear-PanelControls $announcementPanel; Clear-PanelControls $historyRowsPanel
@@ -681,7 +646,7 @@ function Show-External {
             [void]$announcementPanel.Controls.Add($script:announcementEmpty)
         }
         if ($view.staleText) {
-            $pendingText=$view.staleText+' · '+$view.sourceUpdateText
+            $pendingText=(@($view.staleText,$view.sourceUpdateText) | Where-Object {$_}) -join ' · '
             $script:announcementStale=New-Label $pendingText 0 0 346 24 9
             [void]$announcementPanel.Controls.Add($script:announcementStale)
         }
@@ -960,7 +925,6 @@ $refresh.Add_Click({ Start-Request $true })
 $compactButton.Add_Click({ Start-ModeTransition 'Compact' })
 $close.Add_Click({ $form.Hide() })
 $historyButton.Add_Click({ $script:historyExpanded=-not $script:historyExpanded; Show-External })
-$recoveryButton.Add_Click({ $script:recoveryExpanded=-not $script:recoveryExpanded; Show-Recovery; Update-ResponsiveLayout })
 $attribution.Add_LinkClicked({
     param($sender, $e)
     $url = [string]$e.Link.LinkData

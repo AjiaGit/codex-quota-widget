@@ -2,7 +2,7 @@
 $script:WidgetStrings = @{
     en = @{
         recoveryCount = '{0} records'; recoveryNone = 'No records'; relatedBanked = 'Banked reset news'; relatedRegular = 'Global reset news'; phaseUnconfirmed = 'Tracker has no completion time'; sourceScope = 'Tracker scope: {0}'; postedOn = 'Posted: {0}'
-        recoveryTitle = 'My quota recoveries'; recoveryDetected = 'Recovery noticed: {0}'; recoveryObserved = 'Previous reading: {0}'; recoveryExplanation = 'Changes to your own quota.'; recoveryTracking = 'Recording since {0}.'; recoveryEmpty = 'No new quota recovery recorded yet.'; recoveryUnavailable = 'Tracking unavailable. Refresh after signing in to Codex.'; recoveryUnsaved = 'Local saving failed; new records may be lost when the app closes.'
+        recoveryTitle = 'My quota recoveries'; recoveryDetected = 'Noticed locally: {0}'; recoveryObserved = 'Previous reading: {0}'; recoveryExplanation = 'Changes to your own quota.'; recoveryTracking = 'Recording since {0}.'; recoveryEmpty = 'No new quota recovery recorded yet.'; recoveryUnavailable = 'Tracking unavailable. Refresh after signing in to Codex.'; recoveryUnsaved = 'Local saving failed; new records may be lost when the app closes.'
         newGrant = 'New banked reset grant announcement · Click for details'; newGlobalReset = 'New global reset announcement · Click for details'; newAnnouncements = 'New banked reset grant and global reset announcements · Click for details'
         app = 'Codex Quota'; loading = 'Loading'; reading = 'Reading quota'; updated = 'Updated'; unavailable = 'Unavailable'; refreshing = 'Refreshing'
         compact = 'Mini'; refresh = 'Refresh'; weekly = 'Weekly remaining'; untilReset = 'Until reset'; reset = 'Resets {0}'; resetUnknown = 'Reset time —'
@@ -40,13 +40,13 @@ $script:WidgetStrings = @{
         localAnnouncementTime = '{0} (local {1})'; dateOnlySchedule = '{0} (time not announced)'
         sourceTimeZoneNote = 'Converted from {0} by the monitoring source; see original post.'; sourceWithdrawn = 'Monitoring sources no longer list this record'; withdrawnRecord = 'Record withdrawn by sources'
         publicUpdated = 'Public data updated {0}'; publicUpdateUnknown = 'Public update time unavailable'; refreshCadence = 'Auto-refresh: quota every 1 min · public data every 10 min'; sourceLinks = 'codexreset.ai / whenreset.app'
-        announcementSource = 'View announcement'; deliverySource = 'Delivery record'; announcementHistory = 'Announcement & delivery history'; historyEmpty = 'No announcement or delivery records'
+        announcementSource = 'View announcement'; deliverySource = 'Delivery record'; announcementHistory = 'History'; historyEmpty = 'No history yet'
 
-        expandHistory = 'Show announcement and delivery history'; collapseHistory = 'Hide announcement and delivery history'
+        expandHistory = 'Show history'; collapseHistory = 'Hide history'
     }
     'zh-CN' = @{
         recoveryCount = '{0} 条记录'; recoveryNone = '暂无记录'; relatedBanked = '重置次数赠送消息'; relatedRegular = '全局重置消息'; phaseUnconfirmed = '网站未提供完成时间'; sourceScope = '网站标注：{0}'; postedOn = '消息发布 {0}'
-        recoveryTitle = '我的额度恢复'; recoveryDetected = '发现额度恢复：{0}'; recoveryObserved = '上次读取：{0}'; recoveryExplanation = '这里只记录你自己的额度变化。'; recoveryTracking = '从 {0} 开始记录。'; recoveryEmpty = '还没有新的额度恢复记录。'; recoveryUnavailable = '记录暂不可用，登录 Codex 后刷新。'; recoveryUnsaved = '本地保存失败，本次新记录可能在关闭应用后丢失。'
+        recoveryTitle = '我的额度恢复'; recoveryDetected = '本机发现：{0}'; recoveryObserved = '上次读取：{0}'; recoveryExplanation = '这里只记录你自己的额度变化。'; recoveryTracking = '从 {0} 开始记录。'; recoveryEmpty = '还没有新的额度恢复记录。'; recoveryUnavailable = '记录暂不可用，登录 Codex 后刷新。'; recoveryUnsaved = '本地保存失败，本次新记录可能在关闭应用后丢失。'
         newGrant = '有新的重置次数赠送公告，点击查看详情'; newGlobalReset = '有新的全局额度重置公告，点击查看详情'; newAnnouncements = '有新的重置次数赠送和全局额度重置公告，点击查看详情'
         app = 'Codex 周额度'; loading = '读取中'; reading = '正在读取额度'; updated = '数据已更新'; unavailable = '暂不可用'; refreshing = '正在刷新'
         compact = '极简'; refresh = '刷新'; weekly = '本周剩余'; untilReset = '距离重置'; reset = '重置 {0}'; resetUnknown = '重置时间 —'
@@ -84,9 +84,9 @@ $script:WidgetStrings = @{
         localAnnouncementTime = '{0}（本地 {1}）'; dateOnlySchedule = '{0}（具体时间未公布）'
         sourceTimeZoneNote = '来源按 {0} 时区换算；原文见公告。'; sourceWithdrawn = '监控来源已撤下此记录'; withdrawnRecord = '来源已撤下的公告记录'
         publicUpdated = '公告数据更新 {0}'; publicUpdateUnknown = '公告更新时间暂不可用'; refreshCadence = '自动刷新：额度每1分钟 · 公共信息每10分钟'; sourceLinks = 'codexreset.ai / whenreset.app'
-        announcementSource = '查看公告'; deliverySource = '送达记录'; announcementHistory = '公告与送达记录'; historyEmpty = '暂无公告与送达记录'
+        announcementSource = '查看公告'; deliverySource = '送达记录'; announcementHistory = '历史记录'; historyEmpty = '暂无历史记录'
 
-        expandHistory = '展开公告与送达记录'; collapseHistory = '收起公告与送达记录'
+        expandHistory = '展开历史记录'; collapseHistory = '收起历史记录'
     }
 }
 
@@ -180,7 +180,7 @@ function Get-WidgetRecoveryView($data, [string]$language, [DateTimeOffset]$now =
                 $detected=[DateTimeOffset]::FromUnixTimeMilliseconds([long]$row.detectedAt)
                 $observed=[DateTimeOffset]::FromUnixTimeMilliseconds([long]$row.observedFrom)
                 if ($detected -gt $now -or $detected -le $observed -or $row.beforePercent -lt 0 -or $row.afterPercent -gt 100 -or $row.afterPercent -le $row.beforePercent) {continue}
-                $rows+=,[pscustomobject]@{title=([string]$row.beforePercent+'% → '+[string]$row.afterPercent+'%'); details=(Get-WidgetText 'recoveryDetected' $language @((Format-WidgetAnnouncementDate $detected $language))); summary=(Get-WidgetText 'recoveryObserved' $language @((Format-WidgetAnnouncementDate $observed $language))); sourceUrl=$null; deliverySourceUrl=$null; retention=$null}
+                $rows+=,[pscustomobject]@{kind='recovery';detectedAt=[long]$row.detectedAt;sortAt=[long]$row.detectedAt;title=((Get-WidgetText 'recoveryTitle' $language)+' · '+[string]$row.beforePercent+'% → '+[string]$row.afterPercent+'%'); details=(Get-WidgetText 'recoveryDetected' $language @((Format-WidgetAnnouncementDate $detected $language))); summary=(Get-WidgetText 'recoveryObserved' $language @((Format-WidgetAnnouncementDate $observed $language))); sourceUrl=$null; deliverySourceUrl=$null; retention=$null}
             }catch{}
         }
     }
@@ -194,7 +194,7 @@ function Get-WidgetRecoveryView($data, [string]$language, [DateTimeOffset]$now =
 function Get-WidgetDetailSectionOrder([bool]$plus) {
     'hero'
     if ($plus) { 'fiveHour' }
-    'credits'; 'recovery'; 'announcements'; 'history'; 'sources'
+    'credits'; 'announcements'; 'history'; 'sources'
 }
 function ConvertTo-WidgetTimestamp($value) {
     if ([string]::IsNullOrWhiteSpace([string]$value)) { return $null }
@@ -316,7 +316,7 @@ function ConvertTo-WidgetAnnouncementRow($row, [string]$language, [DateTimeOffse
     if ($scheduleNote) {$details+=,$scheduleNote}
     $details+=,$scope
     [pscustomobject]@{
-        key=Get-WidgetAnnouncementKey $row; phase=$phase
+        key=Get-WidgetAnnouncementKey $row; phase=$phase; sortAt=$(if ($announced) {$announced.ToUnixTimeMilliseconds()} else {[long]::MinValue})
         title=Get-WidgetText $(if ($row.sourceWithdrawn) {'withdrawnRecord'} elseif ($row.kind -eq 'banked') {if ($explicit) {'confirmedBanked'} else {'relatedBanked'}} else {if ($explicit) {'confirmedRegular'} else {'relatedRegular'}}) $language
         details=$details -join ' · '; scheduledText=$scheduledText; completedText=$completedText; announcedText=$announcedText; scheduleNote=$scheduleNote; scopeText=$scope
         summary=$summary
@@ -350,6 +350,23 @@ function Get-WidgetAnnouncementView($external, [string]$language, [DateTimeOffse
         staleText=$(if ($active.Count -gt 0 -and $stale) {Get-WidgetText 'pendingUpdate' $language} else {''})
         sourceUpdateText=$(if ($active.Count -gt 0 -and $stale) {Format-WidgetPublicUpdate $feed $language $now} else {''})
     }
+}
+function Get-WidgetResetActivityView($data, $external, [string]$language, [DateTimeOffset]$now = [DateTimeOffset]::UtcNow) {
+    $public=Get-WidgetAnnouncementView $external $language $now
+    $recovery=Get-WidgetRecoveryView $data $language $now
+    $active=@($public.active); $history=@($public.history)
+    foreach ($record in $recovery.rows) {
+        $row=$record | ConvertTo-Json -Depth 8 | ConvertFrom-Json
+        if ($now.ToUnixTimeMilliseconds()-$record.detectedAt -lt 86400000) {
+            $row.summary=$null; $active+=,$row
+        } else { $history+=,$row }
+    }
+    $stale=$public.staleText; $sourceUpdate=$public.sourceUpdateText
+    if ($active.Count -and -not $public.active.Count) {$stale=$public.emptyText; $sourceUpdate=$null}
+    if ($data -and $data.status -eq 'ok' -and $data.recoveryHistory.status -eq 'unsaved') {
+        $stale=(@($stale,(Get-WidgetText 'recoveryUnsaved' $language)) | Where-Object {$_}) -join ' · '
+    }
+    [pscustomobject]@{active=@($active | Sort-Object sortAt -Descending);history=@($history | Sort-Object sortAt -Descending);emptyText=$public.emptyText;staleText=$stale;sourceUpdateText=$sourceUpdate}
 }
 function Merge-WidgetExternalData($previous, $incoming, [bool]$transportFailure = $false) {
     # Clone the public response so a failure cannot mutate a previously cached
