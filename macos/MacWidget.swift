@@ -414,6 +414,7 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
     private var transitioning = false
     private var pollTimer: Timer?
     private var ageTimer: Timer?
+    private var outsideClickMonitor: Any?
     private var automaticDetailHeight = UserDefaults.standard.object(forKey: "detailAutoHeight") as? Bool ?? true
     private var detailMeasurement: NativeDetailMeasurement?
     private var fittingDetailHeight = false
@@ -425,13 +426,13 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
         let defaultFrame = NSRect(x: (NSScreen.main?.visibleFrame.maxX ?? 800) - 626,
                                   y: (NSScreen.main?.visibleFrame.maxY ?? 800) - 620,
                                   width: 606, height: 585)
-        if UserDefaults.standard.integer(forKey: "detailLayoutVersion") < 3 {
+        if UserDefaults.standard.integer(forKey: "detailLayoutVersion") < 4 {
             let previous = savedFrame("detailFrame", fallback: defaultFrame)
             let updated = NSRect(x: previous.minX, y: previous.maxY - 585, width: 606, height: 585)
             UserDefaults.standard.set(NSStringFromRect(visibleFrame(updated)), forKey: "detailFrame")
             automaticDetailHeight = true
             UserDefaults.standard.set(true, forKey: "detailAutoHeight")
-            UserDefaults.standard.set(3, forKey: "detailLayoutVersion")
+            UserDefaults.standard.set(4, forKey: "detailLayoutVersion")
         }
         let detailFrame = visibleFrame(savedFrame("detailFrame", fallback: defaultFrame))
         let frame = isCompact
@@ -541,6 +542,7 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
         layoutViews()
         saveFrame()
         panel.orderFrontRegardless()
+        publishDetailVisibility()
         poll()
         pollTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in self?.poll() }
         ageTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
@@ -559,6 +561,8 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        if let outsideClickMonitor { NSEvent.removeMonitor(outsideClickMonitor) }
+        outsideClickMonitor = nil
         ageTimer?.invalidate()
         pollTimer?.invalidate()
         web.configuration.userContentController.removeScriptMessageHandler(forName: "detailLayout")
@@ -807,6 +811,19 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
 
     private func publishDetailVisibility() {
         let visible = !isCompact && panel.isVisible && !transitioning
+        if visible && outsideClickMonitor == nil {
+            outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(
+                matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] _ in
+                guard let self, NSApp.modalWindow == nil,
+                      nativeShouldCollapseDetail(at: NSEvent.mouseLocation, frame: self.panel.frame,
+                        isCompact: self.isCompact, isVisible: self.panel.isVisible,
+                        transitioning: self.transitioning) else { return }
+                self.setCompact(true)
+            }
+        } else if !visible, let monitor = outsideClickMonitor {
+            NSEvent.removeMonitor(monitor)
+            outsideClickMonitor = nil
+        }
         web.evaluateJavaScript("window.dispatchEvent(new CustomEvent('quota-detail-visibility', {detail: \(visible ? "true" : "false")}))", completionHandler: nil)
     }
 

@@ -242,6 +242,11 @@ func nativeDetailFittedFrame(_ frame: CGRect, contentHeight: CGFloat, headerHeig
     return CGRect(x: x, y: y, width: width, height: height)
 }
 
+func nativeShouldCollapseDetail(at point: CGPoint, frame: CGRect, isCompact: Bool,
+                                isVisible: Bool, transitioning: Bool) -> Bool {
+    !isCompact && isVisible && !transitioning && !frame.contains(point)
+}
+
 struct NativeUsage {
     let percent: Int?
     let errorCode: String?

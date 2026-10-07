@@ -60,6 +60,30 @@ import CoreGraphics
   }
 });
 
+test('outside clicks collapse only a visible settled detail window', { skip: process.platform !== 'darwin' }, () => {
+  const output = runNative(`import Foundation
+import CoreGraphics
+@main struct OutsideClickTest {
+  static func main() throws {
+    let frame = CGRect(x: -606, y: 100, width: 606, height: 585)
+    func collapse(_ point: CGPoint, compact: Bool = false, visible: Bool = true, transitioning: Bool = false) -> Bool {
+      nativeShouldCollapseDetail(at: point, frame: frame, isCompact: compact,
+                                isVisible: visible, transitioning: transitioning)
+    }
+    let outside = CGPoint(x: 20, y: 300)
+    let output = ["outside": collapse(outside),
+      "inside": collapse(CGPoint(x: -300, y: 300)),
+      "edge": collapse(CGPoint(x: -606, y: 100)),
+      "above": collapse(CGPoint(x: -300, y: 700)),
+      "compact": collapse(outside, compact: true),
+      "hidden": collapse(outside, visible: false),
+      "animating": collapse(outside, transitioning: true)]
+    print(String(data: try JSONSerialization.data(withJSONObject: output), encoding: .utf8)!)
+  }
+}`);
+  assert.deepEqual(output, {outside:true,inside:false,edge:false,above:true,compact:false,hidden:false,animating:false});
+});
+
 test('native header reports the successful cache age in the selected language', { skip: process.platform !== 'darwin' }, () => {
   const output = runNative(`import Foundation
 @main struct HeaderTest {

@@ -154,6 +154,18 @@ function Get-WidgetHeaderLayout([int]$width, [int]$titleWidth, [int]$statusWidth
         statusSecondRow=$secondRow; height=$(if ($secondRow) {72} else {54}); buttons=$buttons
     }
 }
+function Test-WidgetOutsideClick([string]$mode, [bool]$visible, [bool]$animating,
+                                 [Drawing.Rectangle]$frame, [Drawing.Point]$point) {
+    return $mode -eq 'Detail' -and $visible -and -not $animating -and -not $frame.Contains($point)
+}
+function Get-WidgetDetailFittedFrame([Drawing.Rectangle]$frame, [int]$contentHeight,
+                                    [int]$headerHeight, [Drawing.Rectangle]$screen) {
+    $width=[Math]::Min($frame.Width,$screen.Width)
+    $height=[Math]::Min($screen.Height,[Math]::Max(390,$contentHeight+$headerHeight+10))
+    $x=[Math]::Max($screen.Left,[Math]::Min($frame.Left,$screen.Right-$width))
+    $y=[Math]::Max($screen.Top,[Math]::Min($frame.Top,$screen.Bottom-$height))
+    return [Drawing.Rectangle]::new($x,$y,$width,$height)
+}
 function Get-WidgetDetailSectionOrder([bool]$plus) {
     'hero'
     if ($plus) { 'fiveHour' }

@@ -22,7 +22,7 @@ function T([string]$key, [object[]]$values = @()) { Get-WidgetText $key $script:
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Net.Http
-Add-Type -TypeDefinition @'
+Add-Type -ReferencedAssemblies @('System.dll','System.Core.dll','System.Windows.Forms.dll','System.Drawing.dll') -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 public static class WidgetPower {
@@ -33,6 +33,51 @@ public static class WidgetPower {
         if (e.Mode == Microsoft.Win32.PowerModes.Resume) System.Threading.Interlocked.Exchange(ref resumed, 1);
     }
     public static bool ConsumeResume() { return System.Threading.Interlocked.Exchange(ref resumed, 0) != 0; }
+}
+// Observe button presses without consuming input. The callback only queues UI work.
+public static class WidgetOutsideClick {
+    [StructLayout(LayoutKind.Sequential)] private struct Point { public int x, y; }
+    [StructLayout(LayoutKind.Sequential)] private struct MouseData {
+        public Point point; public uint mouseData, flags, time; public UIntPtr extraInfo;
+    }
+    private delegate IntPtr MouseProc(int code, IntPtr message, IntPtr data);
+    private static readonly MouseProc procedure = OnMouse;
+    private static readonly uint processId = (uint)System.Diagnostics.Process.GetCurrentProcess().Id;
+    private static IntPtr hook;
+    private static System.Windows.Forms.Control receiver;
+    private static Action<System.Drawing.Point> clicked;
+    [DllImport("user32.dll", CharSet = CharSet.Auto)] private static extern IntPtr SetWindowsHookEx(int kind, MouseProc proc, IntPtr module, uint thread);
+    [DllImport("user32.dll")] private static extern bool UnhookWindowsHookEx(IntPtr hook);
+    [DllImport("user32.dll")] private static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr message, IntPtr data);
+    [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(Point point);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
+    [DllImport("kernel32.dll", CharSet = CharSet.Auto)] private static extern IntPtr GetModuleHandle(string name);
+    public static void Enable(System.Windows.Forms.Control control, Action<System.Drawing.Point> action) {
+        if (hook != IntPtr.Zero) return;
+        receiver = control; clicked = action;
+        hook = SetWindowsHookEx(14, procedure, GetModuleHandle(null), 0);
+    }
+    public static void Disable() {
+        if (hook != IntPtr.Zero) UnhookWindowsHookEx(hook);
+        hook = IntPtr.Zero; receiver = null; clicked = null;
+    }
+    private static IntPtr OnMouse(int code, IntPtr message, IntPtr data) {
+        int kind = message.ToInt32();
+        var control = receiver; var action = clicked;
+        if (code >= 0 && (kind == 0x0201 || kind == 0x0204 || kind == 0x0207 || kind == 0x020B)
+            && control != null && action != null && control.IsHandleCreated && !control.IsDisposed) {
+            var input = (MouseData)Marshal.PtrToStructure(data, typeof(MouseData));
+            uint targetProcess;
+            GetWindowThreadProcessId(WindowFromPoint(input.point), out targetProcess);
+            // Our menus and owned dialogs remain interactive, even outside the main form.
+            if (targetProcess != processId) {
+                var point = new System.Drawing.Point(input.point.x, input.point.y);
+                try { control.BeginInvoke(action, new object[] { point }); }
+                catch (InvalidOperationException) { }
+            }
+        }
+        return CallNextHookEx(hook, code, message, data);
+    }
 }
 public static class WidgetDrag {
     [DllImport("user32.dll")] public static extern bool ReleaseCapture();
@@ -80,7 +125,8 @@ $script:trayIconKey = ''
 $script:setupCode = $null
 $script:ownedTrayIcon = $null
 $script:compactSize = [System.Drawing.Size]::new(52, 76)
-$script:detailSize = [System.Drawing.Size]::new(404, 390)
+$script:detailSize = [System.Drawing.Size]::new(560, 585)
+$script:automaticDetailHeight = $true
 $script:modePositions = @{ Detail = $null; Compact = $null }
 
 function New-Color([string]$html) {
@@ -112,17 +158,23 @@ if (Test-Path -LiteralPath $script:positionPath) {
 }
 if ($saved) {
     try {
+        $maxSavedHeight=([Windows.Forms.Screen]::AllScreens | ForEach-Object {$_.WorkingArea.Height} | Measure-Object -Maximum).Maximum
         $cw = [int]$saved.compactWidth; $ch = [int]$saved.compactHeight
         if ($cw -ge 48 -and $cw -le 160 -and $ch -ge 64 -and $ch -le 200) {
             $script:compactSize = [System.Drawing.Size]::new($cw, $ch)
         }
         $dw = [int]$saved.detailWidth; $dh = [int]$saved.detailHeight
-        if ($dw -ge 404 -and $dw -le 720 -and $dh -ge 390 -and $dh -le 650) {
+        if ($dw -ge 404 -and $dw -le 720 -and $dh -ge 390 -and $dh -le $maxSavedHeight) {
             $script:detailSize = [System.Drawing.Size]::new($dw, $dh)
         }
     } catch { }
 }
 if ($saved -and $null -ne $saved.topMost) { $form.TopMost = [bool]$saved.topMost }
+if ($saved -and [int]$saved.detailLayoutVersion -ge 4) {
+    if ($null -ne $saved.detailAutoHeight) { $script:automaticDetailHeight = [bool]$saved.detailAutoHeight }
+} else {
+    $script:detailSize = [Drawing.Size]::new([Math]::Max(560,$script:detailSize.Width),$script:detailSize.Height)
+}
 if ($saved -and $saved.mode -eq 'Compact') { $script:mode = 'Compact' }
 foreach ($savedMode in @('Detail','Compact')) { $script:modePositions[$savedMode] = Get-WidgetModePosition $saved $savedMode }
 $form.ClientSize = if ($script:mode -eq 'Compact') { $script:compactSize } else { $script:detailSize }
@@ -407,9 +459,20 @@ function Update-ResponsiveLayout {
             $y=0
             foreach ($name in $order) {
                 $panel=$script:sectionPanels[$name]; $panel.Location=[Drawing.Point]::new(0,$y); $panel.Width=$cw
-                $y+=$panel.Height+12
+                $y+=$panel.Height+8
             }
             Set-ControlBox $content 13 0 $cw ($y+8)
+            if ($script:automaticDetailHeight -and -not $script:historyExpanded -and -not $script:resizing) {
+                $screen=[Windows.Forms.Screen]::FromControl($form).WorkingArea
+                $fitted=Get-WidgetDetailFittedFrame $form.Bounds ($y+8) $header.height $screen
+                if ($form.Bounds -ne $fitted) {
+                    $form.Bounds=$fitted; $height=$form.ClientSize.Height
+                    $offset=if ($script:layoutPlus) {62} else {0}
+                    $script:detailSize=[Drawing.Size]::new($width,($height-$offset))
+                    Set-ControlBox $body 7 $header.height ($width-14) ($height-$header.height-10)
+                    $script:positionDirty=$true
+                }
+            }
             $body.AutoScrollMinSize=[Drawing.Size]::new(0,$y+8)
             $body.AutoScrollPosition=[Drawing.Point]::new(0,[int]$scrollY)
             Update-ResizeEdges $width $height $false
@@ -771,6 +834,18 @@ function Set-Tray-QuotaIcon {
 function Save-PublicSnapshot {
     try { Write-WidgetJson $script:externalCachePath $script:externalData } catch { }
 }
+$script:outsideClickAction = [Action[Drawing.Point]]{
+    param($point)
+    if (Test-WidgetOutsideClick $script:mode $form.Visible $script:animating $form.Bounds $point) {
+        if ($script:resizing -or ($script:detailsForm -and $script:detailsForm.Visible)) { return }
+        Start-ModeTransition 'Compact'
+    }
+}
+function Update-OutsideClickMonitor {
+    if ($form.Visible -and $script:mode -eq 'Detail' -and -not $script:animating -and -not $script:reallyExit) {
+        [WidgetOutsideClick]::Enable($form,$script:outsideClickAction)
+    } else { [WidgetOutsideClick]::Disable() }
+}
 function Set-ModeVisual([bool]$compact) {
     foreach ($control in $script:detailControls) { $control.Visible=-not $compact }
     foreach ($zone in $script:resizeEdges.Values) { $zone.Visible=$true }
@@ -778,10 +853,12 @@ function Set-ModeVisual([bool]$compact) {
     Update-ResponsiveLayout
     Update-AnnouncementIndicator
     Start-AnnouncementRead
+    Update-OutsideClickMonitor
 }
 
 function Start-ModeTransition([string]$nextMode) {
     if ($script:animating -or $script:mode -eq $nextMode) { return }
+    [WidgetOutsideClick]::Disable()
     $compact = $nextMode -eq 'Compact'
     $size = if ($compact) { $script:compactSize } else { [System.Drawing.Size]::new($script:detailSize.Width, ($script:detailSize.Height + $(if ($script:layoutPlus) { 62 } else { 0 }))) }
     $script:modePositions[$script:mode] = [pscustomobject]@{ x = $form.Left; y = $form.Top }
@@ -805,6 +882,7 @@ function Start-ModeTransition([string]$nextMode) {
         $targetHeader=Get-WidgetHeaderLayout $size.Width ([Windows.Forms.TextRenderer]::MeasureText($title.Text,$title.Font).Width+6) ([Windows.Forms.TextRenderer]::MeasureText($status.Text,$status.Font).Width+6)
         $script:ringTo=[Drawing.Rectangle]::new(20,$targetHeader.height+8,110,110)
     }
+    if (-not $compact) { $body.AutoScrollPosition=[Drawing.Point]::Empty }
     $script:targetMode = $nextMode
     $script:animationStart = [DateTime]::UtcNow
     $script:animating = $true
@@ -913,6 +991,7 @@ function Complete-Resize {
 $resizeDown = {
     param($sender, $e)
     if ($script:animating -or $e.Button -ne [System.Windows.Forms.MouseButtons]::Left) { return }
+    if ($script:mode -eq 'Detail') { $script:automaticDetailHeight=$false }
     $script:resizing = $true
     $script:resizeControl = $sender
     $script:resizeDirection = [string]$sender.Tag
@@ -1023,6 +1102,7 @@ function Save-WindowPosition {
         compactWidth = $script:compactSize.Width; compactHeight = $script:compactSize.Height
         detailWidth = $script:detailSize.Width; detailHeight = $script:detailSize.Height
         topMost = $form.TopMost
+        detailAutoHeight = $script:automaticDetailHeight; detailLayoutVersion = 4
     }
     $script:positionDirty = $false
     $script:lastPositionSave = [DateTime]::UtcNow
@@ -1124,7 +1204,7 @@ $timer.Add_Tick({
     if (($now - $script:lastThemeCheck).TotalMinutes -ge 1) { Set-Theme; $script:lastThemeCheck = $now }
 })
 
-$form.Add_VisibleChanged({if ($form.Visible) {Start-AnnouncementRead}})
+$form.Add_VisibleChanged({if ($form.Visible) {Start-AnnouncementRead}; Update-OutsideClickMonitor})
 $form.Add_Shown({
     if ($script:mode -eq 'Compact') {
         $form.Bounds = [System.Drawing.Rectangle]::new($form.Left, $form.Top, $script:compactSize.Width, $script:compactSize.Height)
@@ -1134,6 +1214,7 @@ $form.Add_Shown({
     Start-ExternalRequest
 })
 $form.Add_FormClosed({
+    [WidgetOutsideClick]::Disable()
     $timer.Stop()
     $script:animationTimer.Stop()
     $script:tray.Visible = $false
@@ -1151,4 +1232,4 @@ Set-Language
 [WidgetPower]::Enable()
 $timer.Start()
 try { [System.Windows.Forms.Application]::Run($form) }
-finally { [WidgetPower]::Disable() }
+finally { [WidgetOutsideClick]::Disable(); [WidgetPower]::Disable() }

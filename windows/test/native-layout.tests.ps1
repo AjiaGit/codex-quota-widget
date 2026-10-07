@@ -15,6 +15,22 @@ function New-Event([string]$id, [string]$kind = 'banked') {
 function New-External($items = @(), $history = @(), [string]$status = 'ok') {
     [pscustomobject]@{ status='ok'; announcements=[pscustomobject]@{ status=$status; items=@($items); history=@($history); sourceUpdatedAt='2026-09-30T11:00:00Z'; stale=$false } }
 }
+Test-Case 'outside clicks collapse only a visible settled detail window' {
+    $frame=[Drawing.Rectangle]::new(-606,100,606,585)
+    $outside=[Drawing.Point]::new(20,300)
+    Assert-Equal (Test-WidgetOutsideClick 'Detail' $true $false $frame $outside) $true 'Outside detail'
+    Assert-Equal (Test-WidgetOutsideClick 'Detail' $true $false $frame ([Drawing.Point]::new(-300,300))) $false 'Inside detail'
+    Assert-Equal (Test-WidgetOutsideClick 'Detail' $true $false $frame ([Drawing.Point]::new(-606,100))) $false 'Window edge'
+    Assert-Equal (Test-WidgetOutsideClick 'Compact' $true $false $frame $outside) $false 'Compact stays visible'
+    Assert-Equal (Test-WidgetOutsideClick 'Detail' $false $false $frame $outside) $false 'Hidden stays hidden'
+    Assert-Equal (Test-WidgetOutsideClick 'Detail' $true $true $frame $outside) $false 'Transition not interrupted'
+}
+Test-Case 'automatic detail height fits content while respecting the working screen' {
+    $frame=[Drawing.Rectangle]::new(800,200,606,585)
+    $screen=[Drawing.Rectangle]::new(0,0,1440,900)
+    Assert-Equal (Get-WidgetDetailFittedFrame $frame 600 54 $screen) ([Drawing.Rectangle]::new(800,200,606,664)) 'Fits content and keeps the top'
+    Assert-Equal (Get-WidgetDetailFittedFrame $frame 1800 54 $screen) ([Drawing.Rectangle]::new(800,0,606,900)) 'Long history stays on screen'
+}
 Test-Case 'relative quota age uses source updatedAt in both languages' {
     Assert-Equal (Format-WidgetRelativeUpdate ($now.AddSeconds(-10).ToUnixTimeMilliseconds()) 'en' $now) 'Updated just now' 'Fresh quota'
     Assert-Equal (Format-WidgetRelativeUpdate ($now.AddSeconds(-59).ToUnixTimeMilliseconds()) 'zh-CN' $now) '刚刚更新' 'Sub-minute age'

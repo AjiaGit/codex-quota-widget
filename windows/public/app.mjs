@@ -85,7 +85,10 @@ if(typeof document!=='undefined') {
       if(response.ok){externalState.announcementAlerts=await response.json();window.webkit?.messageHandlers?.announcementRead?.postMessage({});}
     }catch{}finally{acknowledging=false;}
   }
-  window.addEventListener('quota-detail-visibility',event=>{detailVisible=event.detail===true;if(detailVisible)loadExternal();});
+  window.addEventListener('quota-detail-visibility',event=>{
+    const wasVisible=detailVisible;detailVisible=event.detail===true;
+    if(detailVisible){if(!wasVisible)window.scrollTo(0,0);loadExternal();}
+  });
   const renderedLists=new Map();
   const replaceList=(id,signature,children)=>{if(renderedLists.get(id)===signature)return;byId(id).replaceChildren(...children());renderedLists.set(id,signature);};
   const language=()=>resolveLanguage(setting,navigator.language);

@@ -15,7 +15,7 @@ The widget installer is unsigned, so Windows may display an unknown-publisher or
 
 ## Daily use
 
-- Click the **minus icon** to collapse; click the ring to expand. Drag the window to move it or its edges/corners to resize.
+- Click the **minus icon** or outside the detailed window to collapse; click the ring to expand. Each mode remembers its position and size. Drag the window to move it or its edges/corners to resize. The default detail window fits current content within the screen; expanded history or a manually reduced window can scroll.
 - Click `×` to hide to the tray. Double-click the tray icon to show it again. The tray menu includes mode, refresh, always-on-top, language, and quit controls.
 - Choose **Language → System / English / 简体中文**. Native UI and browser detail page share the saved choice.
 - Open **Banked resets / Details** to view the available count and any provided grant/expiry dates. The widget never uses a banked reset.

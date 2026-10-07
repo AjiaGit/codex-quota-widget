@@ -17,7 +17,7 @@ Only run one copy. The service uses `127.0.0.1:39224`.
 
 - Click the menu-bar percentage to show or hide the window, select compact/detail mode, refresh, open the browser detail page, change language, or quit.
 - Choose **Language → System / English / 简体中文**. The choice is saved and shared with the browser detail page.
-- Click the compact ring to expand. Drag the window to move it, or its edges/corners to resize. Each mode remembers its geometry; detailed content can scroll.
+- Click the compact ring to expand; click outside the detailed window to return to its saved compact position and size. Drag the window to move it, or its edges/corners to resize. The default detail window fits its content when screen space permits; long history or a manually reduced window can scroll.
 - Open **Banked resets / Details** for the available reset count and any provided grant/expiry dates. The widget only reads this information.
 - The Dock icon shows remaining weekly quota, or `—` when data is unavailable. Clicking it reopens the widget.
 

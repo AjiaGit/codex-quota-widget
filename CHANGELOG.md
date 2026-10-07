@@ -2,6 +2,7 @@
 
 ## 0.1.0
 
+- Clicking outside the detail widget returns to its saved compact geometry. Tighter detail spacing and automatic default sizing reduce scrolling while keeping long records accessible.
 - Windows compact and detailed views remember separate positions across switches and restarts, preserving legacy placement and keeping restored windows within the available screen.
 - Quiet unread-announcement dot in compact mode, with localized hover text, persistent read state, and no first-use alerts for existing records.
 - Neutral labels for historical announcements without delivery records; macOS Dock quota numbers omit the percent sign and leave space inside the ring.
