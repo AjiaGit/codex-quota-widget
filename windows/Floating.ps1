@@ -207,13 +207,13 @@ $body.Name='detail-scroll-body'; $body.AutoScroll=$true; $body.TabStop=$false; $
 $content = New-Object Windows.Forms.Panel
 $content.Name='detail-content'; [void]$body.Controls.Add($content)
 $script:sectionPanels=@{}
-foreach ($section in @('hero','fiveHour','credits','announcements','probability','history','sources')) {
+foreach ($section in @('hero','fiveHour','credits','announcements','history','sources')) {
     $panel=New-Object Windows.Forms.Panel; $panel.Name='section-'+$section
     $script:sectionPanels[$section]=$panel; [void]$content.Controls.Add($panel)
 }
 $heroPanel=$script:sectionPanels.hero; $fivePanel=$script:sectionPanels.fiveHour
 $creditsPanel=$script:sectionPanels.credits; $announcementPanel=$script:sectionPanels.announcements
-$probabilityPanel=$script:sectionPanels.probability; $historyPanel=$script:sectionPanels.history
+$historyPanel=$script:sectionPanels.history
 $sourcesPanel=$script:sectionPanels.sources
 
 $ring = New-Object System.Windows.Forms.Panel
@@ -274,17 +274,6 @@ $cards=New-Object Windows.Forms.LinkLabel; $cards.Name='reset-credit-details'
 $cards.Font=[Drawing.Font]::new('Segoe UI',10.5); $cards.LinkBehavior=[Windows.Forms.LinkBehavior]::HoverUnderline
 $cards.Cursor=[Windows.Forms.Cursors]::Hand; $cards.TabStop=$true; $cards.UseMnemonic=$false
 $cards.Add_LinkClicked({ Show-ResetDetails }); [void]$creditsPanel.Controls.Add($cards)
-$externalTitle=New-Label (T 'oddsTitle') 0 0 346 26 10.5 $true; $externalTitle.Tag='strong'
-[void]$probabilityPanel.Controls.Add($externalTitle)
-$odds=New-Object Windows.Forms.Panel; $odds.Name='three-column-probability'; [void]$probabilityPanel.Controls.Add($odds)
-$script:oddsValues=@(); $script:oddsCaptions=@()
-for ($i=0; $i -lt 3; $i++) {
-    $value=New-Label '—' 0 0 100 30 17 $true; $value.Tag='strong'; $value.Name='odds-value-'+$i
-    $value.TextAlign=[Drawing.ContentAlignment]::MiddleCenter
-    $label=New-Label '' 0 34 100 24 9.5; $label.TextAlign=[Drawing.ContentAlignment]::MiddleCenter
-    [void]$odds.Controls.Add($value); [void]$odds.Controls.Add($label)
-    $script:oddsValues+=,$value; $script:oddsCaptions+=,$label
-}
 $historyButton=New-Object Windows.Forms.Button; $historyButton.Name='announcement-history-toggle'
 $historyButton.FlatStyle=[Windows.Forms.FlatStyle]::Flat; $historyButton.FlatAppearance.BorderSize=0
 $historyButton.TextAlign=[Drawing.ContentAlignment]::MiddleLeft; $historyButton.Font=[Drawing.Font]::new('Segoe UI',10)
@@ -294,7 +283,6 @@ $historyRowsPanel=New-Object Windows.Forms.Panel; [void]$historyPanel.Controls.A
 $attribution=New-Object Windows.Forms.LinkLabel
 $attribution.Font=[Drawing.Font]::new('Segoe UI',9); $attribution.LinkBehavior=[Windows.Forms.LinkBehavior]::HoverUnderline
 $attribution.TabStop=$true; [void]$sourcesPanel.Controls.Add($attribution)
-$estimateNote=New-Label (T 'oddsNote') 0 28 346 44 9; [void]$probabilityPanel.Controls.Add($estimateNote)
 $cadence=New-Label (T 'refreshCadence') 0 28 346 24 9; [void]$sourcesPanel.Controls.Add($cadence)
 foreach ($control in @($title,$status,$refresh,$compactButton,$close,$body)) { [void]$form.Controls.Add($control) }
 $script:resizeEdges = @{}
@@ -318,7 +306,6 @@ $tooltip.SetToolTip($close, (T 'tipHide'))
 $tooltip.SetToolTip($compactButton, (T 'tipCompact'))
 $tooltip.SetToolTip($ring, (T 'tipExpand'))
 foreach ($zone in $script:resizeEdges.Values) { $tooltip.SetToolTip($zone, (T 'tipResize')) }
-$tooltip.SetToolTip($odds, (T 'tipOdds'))
 
 function Set-ControlBox($control, [double]$x, [double]$y, [double]$width, [double]$height) {
     $control.Bounds = [System.Drawing.Rectangle]::new(
@@ -404,15 +391,6 @@ function Update-ResponsiveLayout {
             $aHeight=Layout-AnnouncementRows $announcementPanel $script:announcementRows $cw $noticeHeight
             if ($script:announcementEmpty) { $aHeight=Set-WrappedBox $script:announcementEmpty 0 0 $cw 22 }
             $announcementPanel.Height=[Math]::Max(1,$aHeight)
-            $oddsTitleHeight=Set-WrappedBox $externalTitle 0 0 $cw 24
-            Set-ControlBox $odds 0 ($oddsTitleHeight+6) $cw 62
-            $columns=@(Get-WidgetOddsColumns $cw)
-            for ($i=0; $i -lt 3; $i++) {
-                Set-ControlBox $script:oddsValues[$i] $columns[$i].x 0 $columns[$i].width 32
-                Set-ControlBox $script:oddsCaptions[$i] $columns[$i].x 35 $columns[$i].width 24
-            }
-            $noteY=$oddsTitleHeight+76
-            $probabilityPanel.Height=$noteY+(Set-WrappedBox $estimateNote 0 $noteY $cw 22)
             $historyHeight=Set-WrappedBox $historyButton 0 0 $cw 34
             $historyRowsPanel.Visible=$script:historyExpanded
             if ($script:historyExpanded) {
@@ -619,16 +597,6 @@ function Show-External {
     }
     $historyButton.Text=$(if ($script:historyExpanded) {'⌄ '} else {'› '})+(T 'announcementHistory')
     $historyButton.AccessibleName=T $(if ($script:historyExpanded) {'collapseHistory'} else {'expandHistory'})
-    $externalTitle.Text=T 'oddsTitle'; $estimateNote.Text=T 'oddsNote'
-    $forecastView=Get-WidgetForecastView $script:externalData $script:language ([DateTimeOffset]::UtcNow)
-    if ($forecastView.pendingText -and -not $view.staleText) {$estimateNote.Text+=' '+$forecastView.pendingText}
-    $fields=@('next24h','next48h','next7d'); $captionKeys=@('odds24','odds48','odds7d')
-    for ($i=0; $i -lt 3; $i++) {
-        $number=$forecastView.values[$i]
-        $script:oddsValues[$i].Text=if ($null -ne $number -and [double]$number -ge 0 -and [double]$number -le 100) { [string]$number+'%' } else {'—'}
-        $script:oddsCaptions[$i].Text=T $captionKeys[$i]
-        $tooltip.SetToolTip($script:oddsValues[$i],(T 'tipOdds'))
-    }
     Set-AttributionLinks (T 'sourceLinks')
     $cadence.Text=T 'refreshCadence'
     Update-ResponsiveLayout
@@ -669,7 +637,7 @@ function Set-Language {
     $languageMenu.Text = T 'language'; $autoLanguageItem.Text = T 'languageAuto'; $englishLanguageItem.Text = T 'languageEn'; $chineseLanguageItem.Text = T 'languageZh'
     foreach ($item in @($autoLanguageItem,$englishLanguageItem,$chineseLanguageItem)) { $item.Checked = $item.Tag -eq $script:languageSetting }
     $detailsItem.Text = T 'openDetails'; $setupItem.Text = T 'setup'
-    $tooltip.SetToolTip($refresh, (T 'tipRefresh')); $tooltip.SetToolTip($close, (T 'tipHide')); $tooltip.SetToolTip($compactButton, (T 'tipCompact')); $tooltip.SetToolTip($odds, (T 'tipOdds'))
+    $tooltip.SetToolTip($refresh, (T 'tipRefresh')); $tooltip.SetToolTip($close, (T 'tipHide')); $tooltip.SetToolTip($compactButton, (T 'tipCompact'))
     foreach ($zone in $script:resizeEdges.Values) { $tooltip.SetToolTip($zone, (T 'tipResize')) }
     if ($script:detailsForm -and -not $script:detailsForm.IsDisposed) { $script:detailsForm.Text = T 'detailsTitle' }
     $script:message = if ($script:data) { Get-WidgetErrorText ([string]$script:data.errorCode) $script:language } else { T 'service_unavailable' }

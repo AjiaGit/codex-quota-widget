@@ -34,7 +34,7 @@ macOS 应用仅有临时签名，没有 Developer ID 签名或 Apple 公证；Wi
 
 账号额度查询和缓存检查均每 **60 秒**进行。手动刷新、重新打开和电脑唤醒后及时刷新，同时发起的请求会合并。临时查询失败后按 **15、30、60 秒**重试。不可用、已到重置时间或过旧的额度显示为 `—`，旧百分比不会继续当作当前数据。
 
-[codexreset.ai](https://codexreset.ai/) 和 [whenreset.app](https://whenreset.app/) 的公开重置记录及历史概率单独每 **10 分钟**更新。历史概率不代表未来必然重置，也不是时间承诺。
+[codexreset.ai](https://codexreset.ai/) 和 [whenreset.app](https://whenreset.app/) 的公开公告及送达记录单独每 **10 分钟**更新。
 
 界面底部的**自动刷新：额度每 1 分钟 · 公共信息每 10 分钟**指上述读取间隔。工具读取监控站点的结构化接口，不会搜索或解读 X 推文；站点记录可能延迟或遗漏。官方英文名称、中文译法与来源范围见[术语与公开数据来源](docs/TERMINOLOGY.zh-CN.md)。
 

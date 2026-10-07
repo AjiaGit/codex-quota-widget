@@ -7,10 +7,10 @@ $script:WidgetStrings = @{
         lastUpdated = 'Updated {0}'; stale = 'Data is stale. Refresh to update.'; cards = 'Banked resets {0}'; cardsUnknown = 'Banked resets —'
         fiveHour = 'Plus · 5-hour quota'; percentRemaining = '{0}% remaining'; external = 'Public global resets'; lastAnnouncement = 'Announced {0} · {1}'
         paid = 'Paid accounts'; all = 'All accounts'; unknownScope = 'Account scope: see announcement'; delivered = 'Delivered {0}'; deliveryUnknown = 'Delivery not confirmed'
-        publicUnavailable = 'Public reset data unavailable'; deliveryEmpty = 'Delivery time —'; probability = 'Estimated odds: 24h {0}% · 48h {1}% · 7d {2}%'
-        oddsUnknown = 'Estimated odds unavailable'; attribution = 'Historical estimate · codexreset.ai / whenreset.app'; publicSource = 'Public data · codexreset.ai'
+        publicUnavailable = 'Public reset data unavailable'; deliveryEmpty = 'Delivery time —';
+        attribution = 'Public reset data · codexreset.ai / whenreset.app'; publicSource = 'Public data · codexreset.ai'
         tipRefresh = 'Refresh quota now'; tipHide = 'Hide to tray'; tipCompact = 'Switch to mini widget'; tipExpand = 'Click to expand; drag to move'
-        tipResize = 'Drag the edge to resize'; tipOdds = 'Estimate from public global reset history; not an account reset time or an OpenAI promise.'
+        tipResize = 'Drag the edge to resize';
         tipRemaining = 'Weekly remaining {0}% · click to expand'; tipUnavailable = 'Quota unavailable · click to expand'; tipDrag = 'Drag to move'
         show = 'Show widget'; mode = 'Switch mini / detail'; hide = 'Hide to tray'; refreshNow = 'Refresh now'; onTop = 'Always on top'; quit = 'Quit quota widget'
         language = 'Language'; languageAuto = 'System'; languageEn = 'English'; languageZh = '简体中文'; languageSaveFailed = 'Could not save the language. Try again.'
@@ -32,14 +32,14 @@ $script:WidgetStrings = @{
         justNow = 'Updated just now'; minuteAgo = 'Updated 1 minute ago'; minutesAgo = 'Updated {0} minutes ago'; updateUnknown = 'Update time unavailable'
         creditDetailsRow = '{0} · Details ›'; confirmedBanked = 'Confirmed banked reset grant'; confirmedRegular = 'Confirmed global reset'
         noAnnouncements = 'Monitored sources report no confirmed banked reset grants or global resets'; announcementsUnavailable = 'Confirmed announcements unavailable'; pendingUpdate = 'Information pending update'
-        retention = 'Completed results retained for 24h'; forecastPending = 'Public estimates pending update'; phaseUpcoming = 'Upcoming'; phaseWaiting = 'Scheduled time passed; monitoring sources have no completion record'; phaseAnnounced = 'Announced · awaiting delivery'; phaseUnknown = 'Source did not provide a delivery record'; phaseDelivered = 'Delivered'; phaseArchived = 'Delivered'
+        retention = 'Completed results retained for 24h'; phaseUpcoming = 'Upcoming'; phaseWaiting = 'Scheduled time passed; monitoring sources have no completion record'; phaseAnnounced = 'Announced · awaiting delivery'; phaseUnknown = 'Source did not provide a delivery record'; phaseDelivered = 'Delivered'; phaseArchived = 'Delivered'
         scheduled = 'Scheduled {0}'; originalScheduled = 'Originally scheduled {0}'; scheduleUnknown = 'Delivery time not announced'; announcedOn = 'Published: {0}'; deliveredOn = 'Completed {0}'
         scheduledGrant = 'Scheduled grant: {0}'; scheduledReset = 'Scheduled reset: {0}'; originalGrant = 'Originally scheduled grant: {0}'; originalReset = 'Originally scheduled reset: {0}'
         localAnnouncementTime = '{0} (local {1})'; dateOnlySchedule = '{0} (time not announced)'
         sourceTimeZoneNote = 'Converted from {0} by the monitoring source; see original post.'; sourceWithdrawn = 'Monitoring sources no longer list this record'; withdrawnRecord = 'Record withdrawn by sources'
         publicUpdated = 'Public data updated {0}'; publicUpdateUnknown = 'Public update time unavailable'; refreshCadence = 'Auto-refresh: quota every 1 min · public data every 10 min'; sourceLinks = 'codexreset.ai / whenreset.app'
         announcementSource = 'View announcement'; deliverySource = 'Delivery record'; announcementHistory = 'Announcement & delivery history'; historyEmpty = 'No announcement or delivery records'
-        oddsTitle = 'Estimated global reset odds'; odds24 = '24 hours'; odds48 = '48 hours'; odds7d = '7 days'; oddsNote = 'Historical frequency estimate, not a promised reset or your weekly account reset.'
+
         expandHistory = 'Show announcement and delivery history'; collapseHistory = 'Hide announcement and delivery history'
     }
     'zh-CN' = @{
@@ -49,10 +49,10 @@ $script:WidgetStrings = @{
         lastUpdated = '最近更新 {0}'; stale = '数据已过期，请刷新'; cards = '可用重置 {0}次'; cardsUnknown = '可用重置 —'
         fiveHour = 'Plus · 5小时额度'; percentRemaining = '{0}% 剩余'; external = '公开全局额度重置'; lastAnnouncement = '上次公告 {0} · {1}'
         paid = '付费账号'; all = '全部账号'; unknownScope = '适用范围详见公告'; delivered = '记录送达 {0}'; deliveryUnknown = '送达时间未确认'
-        publicUnavailable = '上次公开重置暂不可用'; deliveryEmpty = '送达时间 —'; probability = '历史估计 24h {0}% · 48h {1}% · 7天 {2}%'
-        oddsUnknown = '历史概率估计暂不可用'; attribution = '历史频率估计 · codexreset.ai / whenreset.app'; publicSource = '公开数据 · codexreset.ai'
+        publicUnavailable = '上次公开重置暂不可用'; deliveryEmpty = '送达时间 —';
+        attribution = '公开重置记录 · codexreset.ai / whenreset.app'; publicSource = '公开数据 · codexreset.ai'
         tipRefresh = '立即刷新额度'; tipHide = '隐藏到系统托盘'; tipCompact = '切换到极简悬浮窗'; tipExpand = '单击展开，拖动可调整位置'
-        tipResize = '拖动边缘调整大小'; tipOdds = '公开全局额度重置的历史频率估计，不是账号每周重置时间，也不是 OpenAI 承诺。'
+        tipResize = '拖动边缘调整大小';
         tipRemaining = '本周剩余 {0}% · 单击展开'; tipUnavailable = '额度暂不可用 · 单击展开'; tipDrag = '拖动悬浮窗'
         show = '显示悬浮窗'; mode = '切换极简 / 详细'; hide = '隐藏到托盘'; refreshNow = '立即刷新'; onTop = '始终置顶'; quit = '退出额度工具'
         language = '语言'; languageAuto = '跟随系统'; languageEn = 'English'; languageZh = '简体中文'; languageSaveFailed = '语言设置保存失败，请重试。'
@@ -74,14 +74,14 @@ $script:WidgetStrings = @{
         justNow = '刚刚更新'; minuteAgo = '1分钟前更新'; minutesAgo = '{0}分钟前更新'; updateUnknown = '更新时间暂不可用'
         creditDetailsRow = '{0} · 查看明细 ›'; confirmedBanked = '已确认重置次数赠送'; confirmedRegular = '已确认全局额度重置'
         noAnnouncements = '监控来源暂无已确认的重置次数赠送或全局额度重置公告'; announcementsUnavailable = '已确认公告暂不可用'; pendingUpdate = '信息待更新'
-        retention = '完成结果保留24小时'; forecastPending = '公开概率信息待更新'; phaseUpcoming = '即将进行'; phaseWaiting = '预定时间已过，监控来源未提供完成记录'; phaseAnnounced = '已公告 · 等待送达'; phaseUnknown = '来源未提供送达记录'; phaseDelivered = '已送达'; phaseArchived = '已送达'
+        retention = '完成结果保留24小时'; phaseUpcoming = '即将进行'; phaseWaiting = '预定时间已过，监控来源未提供完成记录'; phaseAnnounced = '已公告 · 等待送达'; phaseUnknown = '来源未提供送达记录'; phaseDelivered = '已送达'; phaseArchived = '已送达'
         scheduled = '计划 {0}'; originalScheduled = '原定 {0}'; scheduleUnknown = '送达时间尚未公布'; announcedOn = '公告发布 {0}'; deliveredOn = '确认完成 {0}'
         scheduledGrant = '预定送达 {0}'; scheduledReset = '预定重置 {0}'; originalGrant = '原定送达 {0}'; originalReset = '原定重置 {0}'
         localAnnouncementTime = '{0}（本地 {1}）'; dateOnlySchedule = '{0}（具体时间未公布）'
         sourceTimeZoneNote = '来源按 {0} 时区换算；原文见公告。'; sourceWithdrawn = '监控来源已撤下此记录'; withdrawnRecord = '来源已撤下的公告记录'
         publicUpdated = '公告数据更新 {0}'; publicUpdateUnknown = '公告更新时间暂不可用'; refreshCadence = '自动刷新：额度每1分钟 · 公共信息每10分钟'; sourceLinks = 'codexreset.ai / whenreset.app'
         announcementSource = '查看公告'; deliverySource = '送达记录'; announcementHistory = '公告与送达记录'; historyEmpty = '暂无公告与送达记录'
-        oddsTitle = '未来全局额度重置概率'; odds24 = '24小时'; odds48 = '48小时'; odds7d = '7天'; oddsNote = '历史频率估计，不代表重置承诺，也不是账号每周重置时间。'
+
         expandHistory = '展开公告与送达记录'; collapseHistory = '收起公告与送达记录'
     }
 }
@@ -154,17 +154,10 @@ function Get-WidgetHeaderLayout([int]$width, [int]$titleWidth, [int]$statusWidth
         statusSecondRow=$secondRow; height=$(if ($secondRow) {72} else {54}); buttons=$buttons
     }
 }
-function Get-WidgetOddsColumns([int]$width) {
-    $gap=8; $columnWidth=[int][Math]::Floor(($width-2*$gap)/3)
-    for ($i=0; $i -lt 3; $i++) {
-        $x=$i*($columnWidth+$gap)
-        [pscustomobject]@{ x=$x; width=$(if ($i -eq 2) {$width-$x} else {$columnWidth}) }
-    }
-}
 function Get-WidgetDetailSectionOrder([bool]$plus) {
     'hero'
     if ($plus) { 'fiveHour' }
-    'credits'; 'announcements'; 'probability'; 'history'; 'sources'
+    'credits'; 'announcements'; 'history'; 'sources'
 }
 function ConvertTo-WidgetTimestamp($value) {
     if ([string]::IsNullOrWhiteSpace([string]$value)) { return $null }
@@ -209,26 +202,6 @@ function Format-WidgetPublicUpdate($feed, [string]$language, [DateTimeOffset]$no
     $updated=ConvertTo-WidgetTimestamp $feed.sourceUpdatedAt
     if ($updated -and $updated -le $now) { return Get-WidgetText 'publicUpdated' $language @((Format-WidgetDate $updated $language)) }
     return Get-WidgetText 'publicUpdateUnknown' $language
-}
-function Get-WidgetForecastView($external, [string]$language, [DateTimeOffset]$now = [DateTimeOffset]::UtcNow) {
-    $forecast=if ($external -and $external.status -eq 'ok') {$external.forecast} else {$null}
-    $available=$false; $values=@($null,$null,$null)
-    if ($forecast) {
-        try {
-            $updated=ConvertTo-WidgetTimestamp $forecast.sourceUpdatedAt
-            if ($updated -and $updated -le $now.AddMinutes(5) -and ($now-$updated).TotalHours -le 24) {
-                $numbers=@(); $valid=$true
-                foreach ($field in @('next24h','next48h','next7d')) {
-                    if ($null -eq $forecast.$field) {$valid=$false;break}
-                    $number=[double]$forecast.$field
-                    if ([double]::IsNaN($number) -or [double]::IsInfinity($number) -or $number -lt 0 -or $number -gt 100) {$valid=$false;break}
-                    $numbers+=,$number
-                }
-                if ($valid -and $numbers.Count -eq 3 -and $numbers[0] -le $numbers[1] -and $numbers[1] -le $numbers[2]) {$available=$true;$values=$numbers}
-            }
-        } catch { }
-    }
-    [pscustomobject]@{available=$available;values=$values;pendingText=$(if (-not $available) {Get-WidgetText 'forecastPending' $language} else {''})}
 }
 function Get-WidgetFiveHourView($quota, [string]$language, [DateTimeOffset]$now = [DateTimeOffset]::UtcNow) {
     $visible=$quota -and $quota.status -eq 'ok' -and $quota.plan -eq 'plus'
@@ -340,8 +313,9 @@ function Get-WidgetAnnouncementView($external, [string]$language, [DateTimeOffse
 function Merge-WidgetExternalData($previous, $incoming, [bool]$transportFailure = $false) {
     # Clone the public response so a failure cannot mutate a previously cached
     # successful snapshot. Persisted known rows survive an empty schedule feed.
-    $basis=if ($incoming -and -not $transportFailure) {$incoming} elseif ($previous) {$previous} else {[pscustomobject]@{status='unavailable';forecast=$null}}
+    $basis=if ($incoming -and -not $transportFailure) {$incoming} elseif ($previous) {$previous} else {[pscustomobject]@{status='unavailable'}}
     $result=$basis | ConvertTo-Json -Depth 12 | ConvertFrom-Json
+    $result.PSObject.Properties.Remove('forecast')
     $fresh=if ($incoming -and -not $transportFailure) {$incoming.announcements} else {$null}
     $old=if ($previous) {$previous.announcements} else {$null}
     $feed=if ($fresh) {$fresh | ConvertTo-Json -Depth 12 | ConvertFrom-Json} elseif ($old) {$old | ConvertTo-Json -Depth 12 | ConvertFrom-Json} else {[pscustomobject]@{status='unavailable';items=@();history=@();sourceUpdatedAt=$null;stale=$true}}
@@ -371,7 +345,6 @@ function Merge-WidgetExternalData($previous, $incoming, [bool]$transportFailure 
     if ($transportFailure -or -not $fresh -or $fresh.status -ne 'ok') {
         if ($transportFailure -or -not $incoming) {
             $result | Add-Member -NotePropertyName status -NotePropertyValue 'unavailable' -Force
-            $result | Add-Member -NotePropertyName forecast -NotePropertyValue $null -Force
         }
         $feed | Add-Member -NotePropertyName stale -NotePropertyValue $true -Force
         if ($entries.Count -gt 0) {$feed | Add-Member -NotePropertyName status -NotePropertyValue 'ok' -Force}

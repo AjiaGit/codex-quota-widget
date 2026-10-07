@@ -412,8 +412,8 @@ test('completion keeps the original plan, completion evidence and account scope 
 
 test('public lookup failures show source freshness separately from quota freshness', () => {
   assert.equal(typeof view.derivePublicStatus, 'function');
-  assert.equal(view.derivePublicStatus({ status: 'ok', forecast: {next24h:15,next48h:33,next7d:69,sourceUpdatedAt:at(0)}, announcements: { status: 'ok', stale: false, sourceUpdatedAt:at(0) } }, now, 'UTC', 'en'), '');
-  const status = view.derivePublicStatus({ status: 'ok', forecast: {}, announcements: { status: 'unavailable', sourceUpdatedAt: at(-hour), stale: true } }, now, 'UTC', 'en');
+  assert.equal(view.derivePublicStatus({ status: 'ok', announcements: { status: 'ok', stale: false, sourceUpdatedAt:at(0) } }, now, 'UTC', 'en'), '');
+  const status = view.derivePublicStatus({ status: 'ok', announcements: { status: 'unavailable', sourceUpdatedAt: at(-hour), stale: true } }, now, 'UTC', 'en');
   assert.match(status, /Public information pending update/);
   assert.match(status, /11:00/);
   assert.doesNotMatch(status, /Quota|Updated \d+ min/);

@@ -1,8 +1,32 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeResets, normalizeForecast, queryExternal } from '../external.mjs';
+import { normalizeResets, queryExternal } from '../external.mjs';
 
 const now = Date.parse('2026-09-29T09:00:00Z');
+
+test('public refresh queries only reset records and preserves confirmed announcements without forecasts', async () => {
+  const urls=[];
+  const event={kind:'regular',certainty:'announced',url:'https://example.org/reset',ts:'2026-09-29T08:00:00Z',announced_at:'2026-09-29T08:00:00Z'};
+  const result=await queryExternal({now,fetchFn:async url=>{
+    urls.push(url);
+    return {ok:true,json:async()=>url.includes('whenreset')
+      ? {schema:'whenreset/v1',generated_at:new Date(now).toISOString(),products:{codex:{scheduled:null,events:[event]}}}
+      : {schema_version:1,generated_at:new Date(now).toISOString(),events:[event]}};
+  }});
+  assert.deepEqual(urls.sort(),['https://codexreset.ai/api/v1/resets.json','https://whenreset.app/api/v1/resets.json'].sort());
+  assert.equal(Object.hasOwn(result,'forecast'),false);
+  assert.equal(result.announcements.items[0].certainty,'announced');
+  assert.equal(result.lastGlobal.sourceUrl,event.url);
+});
+
+test('fresh announcement data remains usable when the secondary reset feed is unavailable', async () => {
+  const result=await queryExternal({now,fetchFn:async url=>{
+    if(!url.includes('whenreset'))throw Error('offline');
+    return {ok:true,json:async()=>({schema:'whenreset/v1',generated_at:new Date(now).toISOString(),products:{codex:{scheduled:null,events:[]}}})};
+  }});
+  assert.equal(result.status,'ok');
+  assert.equal(result.announcements.status,'ok');
+});
 
 test('uses the latest recorded regular global reset and delivery evidence', () => {
   const result = normalizeResets({
@@ -28,29 +52,12 @@ test('does not claim delivery from an announcement alone', () => {
   assert.equal(normalizeResets({ schema_version: 1, generated_at: '2026-09-26T00:00:00Z', events: [] }, now), null);
 });
 
-test('reads the published 24h, 48h and seven-day historical odds', () => {
-  assert.deepEqual(normalizeForecast({
-    schema_version: 1, generated_at: '2026-09-29T08:56:59Z', available: true,
-    probabilities: { raw_24h: 0.1458, raw_48h: 0.3333, raw_7d: 0.6875 },
-    source: 'https://whenreset.app/api/forecast',
-  }, now), { next24h: 15, next48h: 33, next7d: 69, sourceUpdatedAt: '2026-09-29T08:56:59Z' });
-});
-
-test('declines unavailable, invalid and stale odds', () => {
-  const sample = { schema_version: 1, generated_at: '2026-09-29T08:56:59Z', available: true,
-    probabilities: { raw_24h: 0.1, raw_48h: 0.3, raw_7d: 0.6 } };
-  assert.equal(normalizeForecast({ ...sample, available: false }, now), null);
-  assert.equal(normalizeForecast({ ...sample, probabilities: { ...sample.probabilities, raw_48h: 1.5 } }, now), null);
-  assert.equal(normalizeForecast({ ...sample, generated_at: '2026-09-27T00:00:00Z' }, now), null);
-});
-
 test('reconciliation requires two complete fresh valid feeds and includes schedules absent from history', async () => {
   const event={kind:'regular',url:'https://example.org/record',ts:'2026-09-28T00:00:00Z',announced_at:'2026-09-28T00:00:00Z'};
   const resets={schema_version:1,generated_at:new Date(now).toISOString(),events:[event]};
   const scheduled={day:'2026-09-30',scheduled_for:'2026-09-30T17:00:00Z',announced_at:'2026-09-28T00:00:00Z',certainty:'announced',url:'https://example.org/scheduled'};
   const announcements={schema:'whenreset/v1',generated_at:new Date(now).toISOString(),products:{codex:{scheduled,events:[]}}};
   const query=async(resetValue,announcementValue=announcements)=>queryExternal({now,fetchFn:async url=>{
-    if(url.includes('forecast'))return {ok:true,json:async()=>({})};
     const value=url.includes('whenreset')?announcementValue:resetValue;
     if(value instanceof Error)throw value;
     return {ok:true,json:async()=>value};

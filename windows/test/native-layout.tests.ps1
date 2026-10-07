@@ -13,7 +13,7 @@ function New-Event([string]$id, [string]$kind = 'banked') {
     [pscustomobject]@{ id=$id; kind=$kind; announcedAt='2026-09-29T12:00:00Z'; scheduledAt=$null; scheduledDate=$null; deliveredAt=$null; scope='paid'; scopeLabel=$null; sourceUrl='https://example.org/announcement'; deliverySourceUrl=$null; summary='Confirmed announcement'; summaryZh='已确认公告' }
 }
 function New-External($items = @(), $history = @(), [string]$status = 'ok') {
-    [pscustomobject]@{ status='ok'; forecast=$null; announcements=[pscustomobject]@{ status=$status; items=@($items); history=@($history); sourceUpdatedAt='2026-09-30T11:00:00Z'; stale=$false } }
+    [pscustomobject]@{ status='ok'; announcements=[pscustomobject]@{ status=$status; items=@($items); history=@($history); sourceUpdatedAt='2026-09-30T11:00:00Z'; stale=$false } }
 }
 Test-Case 'relative quota age uses source updatedAt in both languages' {
     Assert-Equal (Format-WidgetRelativeUpdate ($now.AddSeconds(-10).ToUnixTimeMilliseconds()) 'en' $now) 'Updated just now' 'Fresh quota'
@@ -30,16 +30,8 @@ Test-Case 'narrow header keeps relative age below title and ordered equal toolba
     if ($header.statusY -le $header.titleY -or $header.buttons[-1].x + 32 -gt 404) { throw 'Header overflow' }
     Assert-Equal (Get-WidgetHeaderLayout 620 132 145).statusSecondRow $false 'Wider inline status'
 }
-Test-Case 'public probability always has three nonoverlapping columns' {
-    foreach ($width in @(320,364,620)) {
-        $columns = @(Get-WidgetOddsColumns $width)
-        Assert-Equal $columns.Count 3 'Probability column count'
-        for ($i=0; $i -lt 2; $i++) { if ($columns[$i].x + $columns[$i].width -gt $columns[$i+1].x) { throw 'Overlapping columns' } }
-        Assert-Equal ($columns[-1].x + $columns[-1].width) $width 'Columns fit available width'
-    }
-}
-Test-Case 'Plus quota precedes credits and confirmed announcements precede probability' {
-    Assert-Equal ((Get-WidgetDetailSectionOrder $true) -join ',') 'hero,fiveHour,credits,announcements,probability,history,sources' 'Plus section order'
+Test-Case 'Plus quota precedes credits and announcements lead directly to history' {
+    Assert-Equal ((Get-WidgetDetailSectionOrder $true) -join ',') 'hero,fiveHour,credits,announcements,history,sources' 'Plus section order'
     Assert-Equal ((Get-WidgetDetailSectionOrder $false) -contains 'fiveHour') $false 'Non-Plus quota'
 }
 Test-Case 'confirmed announcements move from upcoming to waiting without inferred delivery' {
@@ -218,25 +210,6 @@ Test-Case 'inventory and evidence link terminology match the approved bilingual 
         $cadence=Get-WidgetText 'refreshCadence' $language
         if (-not $cadence.Contains('1') -or -not $cadence.Contains('10')) { throw 'Quota/public cadence omitted' }
     }
-}
-Test-Case 'forecast outage and restart never display cached odds as current without active notices' {
-    $previous=New-External
-    $previous.forecast=[pscustomobject]@{next24h=15;next48h=33;next7d=69;sourceUpdatedAt=$now.AddMinutes(-2).ToString('o')}
-    $offline=Merge-WidgetExternalData $previous $null $true
-    Assert-Equal $offline.status 'unavailable' 'Local connection failure invalidates public freshness'
-    $view=Get-WidgetForecastView $offline 'en' $now
-    Assert-Equal $view.available $false 'Cached odds cannot be presented as current'
-    if (-not $view.pendingText) {throw 'No source pending state without active notices'}
-    $base=Join-Path ([IO.Path]::GetTempPath()) ('quota-forecast-test-'+[guid]::NewGuid())
-    try {
-        Write-WidgetJson (Join-Path $base 'native-public-cache.json') $previous
-        $restored=Merge-WidgetExternalData (Read-WidgetJson (Join-Path $base 'native-public-cache.json')) $null $true
-        Assert-Equal (Get-WidgetForecastView $restored 'en' $now).available $false 'Restart requires a new successful response'
-        $fresh=Merge-WidgetExternalData $restored $previous $false
-        Assert-Equal (Get-WidgetForecastView $fresh 'en' $now).available $true 'Successful fresh response restores estimates'
-        $previous.forecast.sourceUpdatedAt=$now.AddDays(-30).ToString('o')
-        Assert-Equal (Get-WidgetForecastView $previous 'en' $now).available $false 'Old source data expires even with an ok status'
-    } finally {Remove-Item -LiteralPath $base -Recurse -Force -ErrorAction SilentlyContinue}
 }
 Test-Case 'completed results explain their 24 hour retention in both languages' {
     $event=New-Event 'retention-caption';$event.deliveredAt=$now.AddHours(-1).ToString('o')

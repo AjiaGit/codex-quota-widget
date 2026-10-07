@@ -17,18 +17,17 @@ The English reset names and distinctions follow [OpenAI's banked-reset guide](ht
 ## What updates automatically?
 
 - **Quota every 1 minute:** reads the signed-in account through the local Codex App Server. The available banked-reset count comes from that account response.
-- **Public data every 10 minutes:** fetches public announcement, delivery and historical-estimate data from the third-party services below. This interval is how often the widget checks, not how often OpenAI issues resets.
+- **Public data every 10 minutes:** fetches public announcement and delivery records from the third-party services below. This interval is how often the widget checks, not how often OpenAI issues resets.
 - The public services receive no account quota or sign-in credentials from this widget.
 
 | Data | Structured source |
 | --- | --- |
 | Recorded global resets | `https://codexreset.ai/api/v1/resets.json` |
-| Historical global-reset odds | `https://codexreset.ai/api/v1/forecast.json` (relays whenreset.app estimates) |
 | Confirmed scheduled announcements and history | `https://whenreset.app/api/v1/resets.json` |
 
 See the [CodexReset API documentation](https://codexreset.ai/developers/) and [WhenReset](https://whenreset.app/). These are independent trackers, not OpenAI APIs.
 
-The widget does not search X, scrape posts, or use an AI model to interpret them. Source links supplied by the trackers can point to X announcement posts or other evidence. Only a structured `announced` schedule is treated as confirmed; a hinted schedule or historical probability is not a confirmed announcement. Delivery is displayed only when the source provides a delivery timestamp; an elapsed scheduled time is not proof of delivery.
+The widget does not search X, scrape posts, or use an AI model to interpret them. Source links supplied by the trackers can point to X announcement posts or other evidence. Only a structured `announced` schedule is treated as confirmed; a hinted or conditional statement is not a confirmed announcement. Delivery is displayed only when the source provides a delivery timestamp; an elapsed scheduled time is not proof of delivery.
 
 New information appears after the provider records it and the widget successfully refreshes. Completeness, provider accuracy and instant delivery cannot be guaranteed. Failed, malformed or expired responses are shown as unavailable or pending update; previously known confirmed announcements are retained. The history contains public provider records, not proof that an individual account received a reset.
 

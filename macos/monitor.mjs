@@ -69,7 +69,7 @@ export function createQuotaCache({query=()=>queryAppServer(),now=Date.now}={}) {
 export async function startMonitor({port=PORT,settingsFile=settingsPath(),query,externalQuery=queryExternal}={}) {
   const cache=createQuotaCache({query});
   const announcements=await createAnnouncementStore({file:join(dirname(settingsFile),'announcements.json')});
-  let externalState={status:'loading',lastGlobal:null,forecast:null},externalPending=null,lastExternalFetch=0;
+  let externalState={status:'loading',lastGlobal:null},externalPending=null,lastExternalFetch=0;
   const refreshExternal=(force=false)=>{
     if(externalPending)return externalPending;
     if(force&&Date.now()-lastExternalFetch<60000)return Promise.resolve(externalState);

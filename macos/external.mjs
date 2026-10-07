@@ -195,21 +195,6 @@ export function normalizeResets(data, now = Date.now()) {
   };
 }
 
-export function normalizeForecast(data, now = Date.now()) {
-  if (data?.schema_version !== 1 || data.available !== true ||
-      !recentTimestamp(data.generated_at, now)) return null;
-  const values = [data.probabilities?.raw_24h, data.probabilities?.raw_48h,
-    data.probabilities?.raw_7d];
-  if (!values.every(value => Number.isFinite(value) && value >= 0 && value <= 1) ||
-      values[0] > values[1] || values[1] > values[2]) return null;
-  return {
-    next24h: Math.round(values[0] * 100),
-    next48h: Math.round(values[1] * 100),
-    next7d: Math.round(values[2] * 100),
-    sourceUpdatedAt: data.generated_at,
-  };
-}
-
 async function fetchJson(url, fetchFn) {
   const response = await fetchFn(url, {
     headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(15000),
@@ -219,13 +204,11 @@ async function fetchJson(url, fetchFn) {
 }
 
 export async function queryExternal({ fetchFn = fetch, now = Date.now() } = {}) {
-  const [resets, forecast, announcements] = await Promise.allSettled([
+  const [resets, announcements] = await Promise.allSettled([
     fetchJson(`${ROOT}/resets.json`, fetchFn),
-    fetchJson(`${ROOT}/forecast.json`, fetchFn),
     fetchJson('https://whenreset.app/api/v1/resets.json', fetchFn),
   ]);
   const lastGlobal = resets.status === 'fulfilled' ? normalizeResets(resets.value, now) : null;
-  const odds = forecast.status === 'fulfilled' ? normalizeForecast(forecast.value, now) : null;
   const announcementView=announcements.status === 'fulfilled' ? normalizeAnnouncements(announcements.value, now) : emptyAnnouncements();
   if (lastGlobal && announcementView.status === 'ok') {
     const events=[...resets.value.events,...announcements.value.products.codex.events];
@@ -236,9 +219,8 @@ export async function queryExternal({ fetchFn = fetch, now = Date.now() } = {}) 
     ])];
   }
   return {
-    status: lastGlobal || odds ? 'ok' : 'unavailable',
+    status: lastGlobal || announcementView.status === 'ok' ? 'ok' : 'unavailable',
     lastGlobal,
-    forecast: odds,
     announcements: announcementView,
     updatedAt: now,
   };
