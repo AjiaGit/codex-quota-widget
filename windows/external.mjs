@@ -67,7 +67,9 @@ function deduplicate(items) {
   }
   return [...map.values()];
 }
-const active = (item, now) => !item.sourceWithdrawn && (!item.deliveredAt || now - Date.parse(item.deliveredAt) < MAX_AGE_MS);
+const active = (item, now) => !item.sourceWithdrawn && (item.deliveredAt
+  ? now - Date.parse(item.deliveredAt) < MAX_AGE_MS
+  : item.certainty === 'announced' || item.announcedAt && now - Date.parse(item.announcedAt) < MAX_AGE_MS);
 const confirmedAnnouncement = item => item.certainty === 'announced' || Boolean(item.deliveredAt);
 
 export function normalizeAnnouncements(data, now = Date.now()) {

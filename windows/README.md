@@ -19,6 +19,7 @@ The widget installer is unsigned, so Windows may display an unknown-publisher or
 - Click `×` to hide to the tray. Double-click the tray icon to show it again. The tray menu includes mode, refresh, always-on-top, language, and quit controls.
 - Choose **Language → System / English / 简体中文**. Native UI and browser detail page share the saved choice.
 - Open **Banked resets / Details** to view the available count and any provided grant/expiry dates. The widget never uses a banked reset.
+- Expand **My quota recoveries** for locally observed before/after percentages and detection times. Tracking starts with the first observation and survives restarts, separately for each account. It does not confirm delivery of a global reset.
 
 Quota and cache checks run every 60 seconds. Manual refresh, reopening, and wake trigger a prompt update. Temporary failures retry at 15/30/60 seconds. Public reset data refreshes every 10 minutes.
 

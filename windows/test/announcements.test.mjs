@@ -13,6 +13,16 @@ const hour = 3600000;
 const feed = (scheduled = null, events = []) => ({ schema: 'whenreset/v1', generated_at: at(0), products: { codex: { scheduled, events } } });
 const scheduled = (kind = 'banked') => ({ id: kind, kind, certainty: 'announced', date: '2026-10-01', ts: at(-hour), scope: 'paid', url: `https://x.com/thsottiaux/status/${kind}`, summary: 'Public announcement' });
 
+test('old unconfirmed updates move into history while confirmed pending announcements remain visible',async()=>{
+  let time=now;
+  const store=await source.createAnnouncementStore({now:()=>time});
+  await store.update(source.normalizeAnnouncements(feed(null,[{...scheduled('regular'),certainty:undefined},scheduled('banked')]),time));
+  assert.equal(store.state.items.length,2);
+  time+=24*hour;
+  assert.deepEqual(store.state.items.map(item=>item.kind),['banked']);
+  assert.ok(store.state.history.some(item=>item.kind==='regular'));
+});
+
 test('a source reset category alone never confirms a conditional post or triggers a compact alert', async () => {
   let time=now;
   const store=await source.createAnnouncementStore({now:()=>time});
@@ -23,10 +33,10 @@ test('a source reset category alone never confirms a conditional post or trigger
   await store.update(normalized);
   const row=view.deriveAnnouncementsView(store.state,time,'UTC','zh-CN').rows[0];
   assert.equal(row.phase,'unconfirmed');
-  assert.equal(row.title,'全局额度重置相关动态');
-  assert.equal(row.status,'来源收录，尚未明确确认重置');
+  assert.equal(row.title,'全局重置消息');
+  assert.equal(row.status,'网站未提供完成时间');
   assert.equal(row.plannedText,'');
-  assert.match(row.scopeText,/来源标注/);
+  assert.match(row.scopeText,/网站标注/);
   assert.deepEqual(store.alerts.unread,[]);
 });
 

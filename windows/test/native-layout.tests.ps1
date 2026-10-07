@@ -10,7 +10,7 @@ function Test-Case([string]$name, [scriptblock]$body) {
 }
 $now = [DateTimeOffset]'2026-09-30T12:00:00Z'
 function New-Event([string]$id, [string]$kind = 'banked') {
-    [pscustomobject]@{ id=$id; kind=$kind; announcedAt='2026-09-29T12:00:00Z'; scheduledAt=$null; scheduledDate=$null; deliveredAt=$null; scope='paid'; scopeLabel=$null; sourceUrl='https://example.org/announcement'; deliverySourceUrl=$null; summary='Confirmed announcement'; summaryZh='已确认公告' }
+    [pscustomobject]@{ id=$id; kind=$kind; certainty='announced'; announcedAt='2026-09-29T12:00:00Z'; scheduledAt=$null; scheduledDate=$null; deliveredAt=$null; scope='paid'; scopeLabel=$null; sourceUrl='https://example.org/announcement'; deliverySourceUrl=$null; summary='Confirmed announcement'; summaryZh='已确认公告' }
 }
 function New-External($items = @(), $history = @(), [string]$status = 'ok') {
     [pscustomobject]@{ status='ok'; announcements=[pscustomobject]@{ status=$status; items=@($items); history=@($history); sourceUpdatedAt='2026-09-30T11:00:00Z'; stale=$false } }
@@ -47,7 +47,7 @@ Test-Case 'narrow header keeps relative age below title and ordered equal toolba
     Assert-Equal (Get-WidgetHeaderLayout 620 132 145).statusSecondRow $false 'Wider inline status'
 }
 Test-Case 'Plus quota precedes credits and announcements lead directly to history' {
-    Assert-Equal ((Get-WidgetDetailSectionOrder $true) -join ',') 'hero,fiveHour,credits,announcements,history,sources' 'Plus section order'
+    Assert-Equal ((Get-WidgetDetailSectionOrder $true) -join ',') 'hero,fiveHour,credits,recovery,announcements,history,sources' 'Plus section order'
     Assert-Equal ((Get-WidgetDetailSectionOrder $false) -contains 'fiveHour') $false 'Non-Plus quota'
 }
 Test-Case 'confirmed announcements move from upcoming to waiting without inferred delivery' {

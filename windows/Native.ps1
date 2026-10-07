@@ -1,6 +1,8 @@
 ﻿# Shared native helpers. Dot-source this file; it does not start a service or UI.
 $script:WidgetStrings = @{
     en = @{
+        recoveryCount = '{0} records'; recoveryNone = 'No records'; relatedBanked = 'Banked reset news'; relatedRegular = 'Global reset news'; phaseUnconfirmed = 'Tracker has no completion time'; sourceScope = 'Tracker scope: {0}'; postedOn = 'Posted: {0}'
+        recoveryTitle = 'My quota recoveries'; recoveryDetected = 'Recovery noticed: {0}'; recoveryObserved = 'Previous reading: {0}'; recoveryExplanation = 'Changes to your own quota.'; recoveryTracking = 'Recording since {0}.'; recoveryEmpty = 'No new quota recovery recorded yet.'; recoveryUnavailable = 'Tracking unavailable. Refresh after signing in to Codex.'; recoveryUnsaved = 'Local saving failed; new records may be lost when the app closes.'
         newGrant = 'New banked reset grant announcement · Click for details'; newGlobalReset = 'New global reset announcement · Click for details'; newAnnouncements = 'New banked reset grant and global reset announcements · Click for details'
         app = 'Codex Quota'; loading = 'Loading'; reading = 'Reading quota'; updated = 'Updated'; unavailable = 'Unavailable'; refreshing = 'Refreshing'
         compact = 'Mini'; refresh = 'Refresh'; weekly = 'Weekly remaining'; untilReset = 'Until reset'; reset = 'Resets {0}'; resetUnknown = 'Reset time —'
@@ -43,6 +45,8 @@ $script:WidgetStrings = @{
         expandHistory = 'Show announcement and delivery history'; collapseHistory = 'Hide announcement and delivery history'
     }
     'zh-CN' = @{
+        recoveryCount = '{0} 条记录'; recoveryNone = '暂无记录'; relatedBanked = '重置次数赠送消息'; relatedRegular = '全局重置消息'; phaseUnconfirmed = '网站未提供完成时间'; sourceScope = '网站标注：{0}'; postedOn = '消息发布 {0}'
+        recoveryTitle = '我的额度恢复'; recoveryDetected = '发现额度恢复：{0}'; recoveryObserved = '上次读取：{0}'; recoveryExplanation = '这里只记录你自己的额度变化。'; recoveryTracking = '从 {0} 开始记录。'; recoveryEmpty = '还没有新的额度恢复记录。'; recoveryUnavailable = '记录暂不可用，登录 Codex 后刷新。'; recoveryUnsaved = '本地保存失败，本次新记录可能在关闭应用后丢失。'
         newGrant = '有新的重置次数赠送公告，点击查看详情'; newGlobalReset = '有新的全局额度重置公告，点击查看详情'; newAnnouncements = '有新的重置次数赠送和全局额度重置公告，点击查看详情'
         app = 'Codex 周额度'; loading = '读取中'; reading = '正在读取额度'; updated = '数据已更新'; unavailable = '暂不可用'; refreshing = '正在刷新'
         compact = '极简'; refresh = '刷新'; weekly = '本周剩余'; untilReset = '距离重置'; reset = '重置 {0}'; resetUnknown = '重置时间 —'
@@ -166,10 +170,31 @@ function Get-WidgetDetailFittedFrame([Drawing.Rectangle]$frame, [int]$contentHei
     $y=[Math]::Max($screen.Top,[Math]::Min($frame.Top,$screen.Bottom-$height))
     return [Drawing.Rectangle]::new($x,$y,$width,$height)
 }
+function Get-WidgetRecoveryView($data, [string]$language, [DateTimeOffset]$now = [DateTimeOffset]::UtcNow) {
+    $history=if ($data -and $data.status -eq 'ok') {$data.recoveryHistory} else {$null}
+    $ready=$history -and $history.status -in @('ok','unsaved')
+    $rows=@()
+    if ($ready) {
+        foreach ($row in @($history.records | Sort-Object detectedAt -Descending | Select-Object -First 50)) {
+            try {
+                $detected=[DateTimeOffset]::FromUnixTimeMilliseconds([long]$row.detectedAt)
+                $observed=[DateTimeOffset]::FromUnixTimeMilliseconds([long]$row.observedFrom)
+                if ($detected -gt $now -or $detected -le $observed -or $row.beforePercent -lt 0 -or $row.afterPercent -gt 100 -or $row.afterPercent -le $row.beforePercent) {continue}
+                $rows+=,[pscustomobject]@{title=([string]$row.beforePercent+'% → '+[string]$row.afterPercent+'%'); details=(Get-WidgetText 'recoveryDetected' $language @((Format-WidgetAnnouncementDate $detected $language))); summary=(Get-WidgetText 'recoveryObserved' $language @((Format-WidgetAnnouncementDate $observed $language))); sourceUrl=$null; deliverySourceUrl=$null; retention=$null}
+            }catch{}
+        }
+    }
+    $note=Get-WidgetText 'recoveryExplanation' $language
+    if ($ready -and $history.trackingSince) {
+        try {$note+=' '+(Get-WidgetText 'recoveryTracking' $language @((Format-WidgetAnnouncementDate ([DateTimeOffset]::FromUnixTimeMilliseconds([long]$history.trackingSince)) $language)))}catch{}
+    }
+    if ($history -and $history.status -eq 'unsaved') {$note+=' '+(Get-WidgetText 'recoveryUnsaved' $language)}
+    [pscustomobject]@{rows=$rows;note=$note;empty=(Get-WidgetText $(if ($ready) {'recoveryEmpty'} else {'recoveryUnavailable'}) $language)}
+}
 function Get-WidgetDetailSectionOrder([bool]$plus) {
     'hero'
     if ($plus) { 'fiveHour' }
-    'credits'; 'announcements'; 'history'; 'sources'
+    'credits'; 'recovery'; 'announcements'; 'history'; 'sources'
 }
 function ConvertTo-WidgetTimestamp($value) {
     if ([string]::IsNullOrWhiteSpace([string]$value)) { return $null }
@@ -184,6 +209,7 @@ function Get-WidgetAnnouncementPhase($row, [DateTimeOffset]$now = [DateTimeOffse
         if (($now-$delivered).TotalHours -ge 24) { return 'archived' }
         return 'delivered'
     }
+    if ($row.certainty -ne 'announced') { return 'unconfirmed' }
     $scheduled=ConvertTo-WidgetTimestamp $row.scheduledAt
     if ($scheduled) {
         if ($scheduled -le $now) { return 'waiting' }
@@ -257,6 +283,7 @@ function Get-WidgetNoticeBounds([double]$width, [double]$height) {
 function ConvertTo-WidgetAnnouncementRow($row, [string]$language, [DateTimeOffset]$now, [bool]$historical = $false, [TimeZoneInfo]$timeZone = [TimeZoneInfo]::Local) {
     $phase=Get-WidgetAnnouncementPhase $row $now
     $completed=$phase -in @('delivered','archived')
+    $explicit=$completed -or $row.certainty -eq 'announced'
     if ($historical -and -not $completed) { $phase='unknown' }
     $scheduleKey=$(if ($completed) {'original'} else {'scheduled'})+$(if ($row.kind -eq 'banked') {'Grant'} else {'Reset'})
     $scheduledText=$null; $completedText=$null; $announcedText=$null
@@ -272,11 +299,13 @@ function ConvertTo-WidgetAnnouncementRow($row, [string]$language, [DateTimeOffse
             $scheduledText=Get-WidgetText $scheduleKey $language @($dateText)
         }
     }
-    if (-not $scheduledText -and -not $completed -and -not $historical) { $scheduledText=Get-WidgetText 'scheduleUnknown' $language }
+    if (-not $explicit) { $scheduledText=$null }
+    if ($explicit -and -not $scheduledText -and -not $completed -and -not $historical) { $scheduledText=Get-WidgetText 'scheduleUnknown' $language }
     if ($completed) { $completedText=Get-WidgetText 'deliveredOn' $language @((Format-WidgetAnnouncementDate $delivered $language $timeZone $now)) }
     $announced=ConvertTo-WidgetTimestamp $row.announcedAt
-    if ($announced) { $announcedText=Get-WidgetText 'announcedOn' $language @((Format-WidgetAnnouncementDate $announced $language $timeZone $now)) }
+    if ($announced) { $announcedText=Get-WidgetText $(if ($explicit) {'announcedOn'} else {'postedOn'}) $language @((Format-WidgetAnnouncementDate $announced $language $timeZone $now)) }
     $scope=if ($row.scope -eq 'paid') {Get-WidgetText 'paid' $language} elseif ($row.scope -eq 'all') {Get-WidgetText 'all' $language} elseif ($row.scopeLabel) {[string]$row.scopeLabel} else {Get-WidgetText 'unknownScope' $language}
+    if (-not $explicit) {$scope=Get-WidgetText 'sourceScope' $language @($scope)}
     $phaseKey=if ($row.sourceWithdrawn) {'sourceWithdrawn'} else {'phase'+(Get-Culture).TextInfo.ToTitleCase($phase)}
     $scheduleNote=if ($scheduled -and $row.scheduledTimeZone) {Get-WidgetText 'sourceTimeZoneNote' $language @([string]$row.scheduledTimeZone)} else {''}
     $summary=if ((Resolve-WidgetLanguage $language) -eq 'zh-CN' -and $row.summaryZh) {[string]$row.summaryZh} elseif ($row.summary) {[string]$row.summary} else {''}
@@ -288,7 +317,7 @@ function ConvertTo-WidgetAnnouncementRow($row, [string]$language, [DateTimeOffse
     $details+=,$scope
     [pscustomobject]@{
         key=Get-WidgetAnnouncementKey $row; phase=$phase
-        title=Get-WidgetText $(if ($row.sourceWithdrawn) {'withdrawnRecord'} elseif ($row.kind -eq 'banked') {'confirmedBanked'} else {'confirmedRegular'}) $language
+        title=Get-WidgetText $(if ($row.sourceWithdrawn) {'withdrawnRecord'} elseif ($row.kind -eq 'banked') {if ($explicit) {'confirmedBanked'} else {'relatedBanked'}} else {if ($explicit) {'confirmedRegular'} else {'relatedRegular'}}) $language
         details=$details -join ' · '; scheduledText=$scheduledText; completedText=$completedText; announcedText=$announcedText; scheduleNote=$scheduleNote; scopeText=$scope
         summary=$summary
         retentionText=$(if ($phase -eq 'delivered') {Get-WidgetText 'retention' $language} else {''})

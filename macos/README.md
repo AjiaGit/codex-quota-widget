@@ -20,6 +20,7 @@ Only run one copy. The service uses `127.0.0.1:39224`.
 - Click the compact ring to expand; click outside the detailed window to return to its saved compact position and size. Drag the window to move it, or its edges/corners to resize. The default detail window fits its content when screen space permits; long history or a manually reduced window can scroll.
 - Open **Banked resets / Details** for the available reset count and any provided grant/expiry dates. The widget only reads this information.
 - The Dock icon shows remaining weekly quota, or `—` when data is unavailable. Clicking it reopens the widget.
+- Expand **My quota recoveries** for locally observed before/after percentages and detection times. It starts tracking when enabled and persists across restarts; it does not confirm a global reset. Its collapsed row keeps the default detail view compact.
 
 Quota and cache checks run every 60 seconds. Refresh, reopening, and wake trigger a prompt update. Temporary failures retry at 15/30/60 seconds; public data refreshes separately every 10 minutes.
 

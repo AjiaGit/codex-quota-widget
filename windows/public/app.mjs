@@ -27,6 +27,19 @@ export function deriveResetDetails(state,language='en',timeZone=Intl.DateTimeFor
   const rows=Array.isArray(state.resetDetails)?state.resetDetails:null;
   return {note:t(language,rows===null?'detailsUnknown':rows.length?'detailsPartial':'detailsEmpty'),rows:(rows||[]).map(row=>({title:row.title||t(language,'genericReset'),description:row.description||'',granted:t(language,'granted')+': '+(row.grantedAt?formatDate(row.grantedAt*1000,timeZone,language):t(language,'dateUnknown')),expires:t(language,'expires')+': '+(row.expiresAt?formatDate(row.expiresAt*1000,timeZone,language):t(language,'dateUnknown'))}))};
 }
+export function deriveRecoveryView(state,language='en',timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone,now=Date.now()) {
+  const history=state?.status==='ok'?state.recoveryHistory:null;
+  const ready=['ok','unsaved'].includes(history?.status);
+  const rows=ready?(history.records||[]).filter(row=>Number.isFinite(row.detectedAt)&&row.detectedAt<=now&&
+    Number.isFinite(row.observedFrom)&&row.observedFrom<row.detectedAt&&Number.isInteger(row.beforePercent)&&
+    Number.isInteger(row.afterPercent)&&row.beforePercent>=0&&row.afterPercent<=100&&row.afterPercent>row.beforePercent)
+    .sort((a,b)=>b.detectedAt-a.detectedAt).slice(0,50).map(row=>({change:`${row.beforePercent}% → ${row.afterPercent}%`,
+      detected:t(language,'recoveryDetected',{time:formatLocalAnnouncementDate(row.detectedAt,timeZone,language,now)}),
+      observed:t(language,'recoveryObserved',{time:formatLocalAnnouncementDate(row.observedFrom,timeZone,language,now)})})):[];
+  const started=ready&&Number.isFinite(history.trackingSince)?t(language,'recoveryTracking',{time:formatLocalAnnouncementDate(history.trackingSince,timeZone,language,now)}):'';
+  return {rows,note:[t(language,'recoveryExplanation'),started,history?.status==='unsaved'?t(language,'recoveryUnsaved'):''].filter(Boolean).join(' '),
+    empty:t(language,ready?'recoveryEmpty':'recoveryUnavailable')};
+}
 function safeSource(value) { try { const url=new URL(value);return url.protocol==='https:' && !url.username && !url.password ? url.href : null; } catch { return null; } }
 export function deriveAnnouncementsView(state,now=Date.now(),timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone,language='en') {
   const rows=[],history=[],seen=new Set();
@@ -153,6 +166,14 @@ if(typeof document!=='undefined') {
     });
     const details=deriveResetDetails(state,lang);byId('reset-details-note').textContent=details.note;
     replaceList('reset-details-list',JSON.stringify([lang,details.rows]),()=>details.rows.map(row=>{const item=document.createElement('li'),title=document.createElement('strong');title.textContent=row.title;item.append(title);for(const text of[row.description,row.granted,row.expires].filter(Boolean)){const line=document.createElement('p');line.textContent=text;item.append(line);}return item;}));
+    const recovery=deriveRecoveryView(state,lang);
+    byId('recovery-count').textContent=t(lang,recovery.rows.length?'recoveryCount':'recoveryNone',{count:recovery.rows.length});
+    byId('recovery-note').textContent=recovery.note;
+    replaceList('recovery-list',JSON.stringify([lang,recovery]),()=>{
+      if(!recovery.rows.length){const item=document.createElement('li');item.textContent=recovery.empty;return [item];}
+      return recovery.rows.map(row=>{const item=document.createElement('li'),title=document.createElement('strong');title.textContent=row.change;item.append(title);
+        for(const text of [row.detected,row.observed]){const line=document.createElement('p');line.textContent=text;item.append(line);}return item;});
+    });
     byId('ring').setAttribute('aria-label',t(lang,'weekly'));byId('ring').setAttribute('aria-valuenow',String(view.ringPercent));byId('ring').setAttribute('aria-valuetext',view.percentText==='—'?view.statusText:t(lang,'percentRemaining',{percent:view.ringPercent}));
     byId('language').value=setting;refreshButton.disabled=loading;byId('setup-link').hidden=state.errorCode!=='cli_missing';
     reportDetailLayout();

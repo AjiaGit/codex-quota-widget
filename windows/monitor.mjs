@@ -7,6 +7,7 @@ import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { normalizeQuota } from './quota.mjs';
 import { queryExternal, createAnnouncementStore } from './external.mjs';
+import { createRecoveryStore } from './recovery.mjs';
 import { resolveCodex } from './cli.mjs';
 const ROOT=dirname(fileURLToPath(import.meta.url));
 const HOST='127.0.0.1', PORT=39224, REFRESH_MS=60000;
@@ -23,7 +24,7 @@ export function classifyError(error) {
 }
 export function queryAppServer(options={}) {
   return new Promise((resolveResult,rejectResult)=>{
-    let child,output,timeout,limits,accountSeen=false,accountPlanType=null,settled=false;
+    let child,output,timeout,limits,accountSeen=false,accountPlanType=null,accountIdentity=null,settled=false;
     const finish=(error,result)=>{if(settled)return;settled=true;clearTimeout(timeout);output?.close();child?.kill();if(error)rejectResult(failure(classifyError(error)));else resolveResult(result);};
     try{
       const invocation=options.command?{command:options.command,args:options.args||['app-server']}:resolveCodex();
@@ -34,8 +35,10 @@ export function queryAppServer(options={}) {
       let message;try{message=JSON.parse(line);}catch{return;}
       if(message.id===0){if(message.error)return finish(message.error);child.stdin.write(JSON.stringify({method:'initialized',params:{}})+'\n');child.stdin.write(JSON.stringify({method:'account/rateLimits/read',id:1})+'\n');child.stdin.write(JSON.stringify({method:'account/read',id:2,params:{refreshToken:false}})+'\n');}
       else if(message.id===1){if(message.error)return finish(message.error);limits=message.result;}
-      else if(message.id===2){if(message.error)return finish(message.error);accountSeen=true;const account=message.result?.account;if(!account&&message.result?.requiresOpenaiAuth)return finish(failure('signed_out'));accountPlanType=account?.planType||null;}
-      if(limits&&accountSeen)finish(null,{...limits,accountPlanType});
+      else if(message.id===2){if(message.error)return finish(message.error);accountSeen=true;const account=message.result?.account;if(!account&&message.result?.requiresOpenaiAuth)return finish(failure('signed_out'));accountPlanType=account?.planType||null;
+        const identity=account?.id||account?.email;
+        if(account?.type==='chatgpt'&&typeof identity==='string'&&identity.trim())accountIdentity='chatgpt:'+identity.trim().toLowerCase();}
+      if(limits&&accountSeen)finish(null,{...limits,accountPlanType,accountIdentity});
     });
     timeout=setTimeout(()=>finish(failure('timeout')),options.timeoutMs??20000);
     child.stdin.write(JSON.stringify({method:'initialize',id:0,params:{clientInfo:{name:'codex_quota_widget',title:'Codex Quota Widget',version:'0.1.0'}}})+'\n');
@@ -54,20 +57,23 @@ export function saveSettings(input,path=settingsPath()) {
     await writeFile(temp,JSON.stringify({...previous,language:input.language}),{mode:0o600});await rename(temp,path);return {language:input.language};
   });settingsWrite=task;return task;
 }
-export function createQuotaCache({query=()=>queryAppServer(),now=Date.now}={}) {
+export function createQuotaCache({query=()=>queryAppServer(),now=Date.now,recoveryStore}={}) {
   let state={status:'loading'},pending=null,nextDue=0,failures=0;
   const refresh=()=>{
     if(pending)return pending;
     pending=Promise.resolve().then(async()=>{
-      try{const result=await query();const quota=normalizeQuota(result,result.accountPlanType);state=quota?{status:'ok',...quota,updatedAt:now()}:{status:'unavailable',errorCode:'unsupported'};failures=0;nextDue=now()+REFRESH_MS;}
+      try{const result=await query();const quota=normalizeQuota(result,result.accountPlanType);state=quota?{status:'ok',...quota,updatedAt:now()}:{status:'unavailable',errorCode:'unsupported'};
+        if(quota&&recoveryStore)state.recoveryHistory=await recoveryStore.observe(result.accountIdentity,{...quota,plan:result.accountPlanType||quota.plan});
+        failures=0;nextDue=now()+REFRESH_MS;}
       catch(error){failures++;nextDue=now()+Math.min(60000,15000*2**Math.min(failures-1,2));state={status:'unavailable',errorCode:classifyError(error),nextRetryAt:nextDue};}
       finally{pending=null;}return state;
     });return pending;
   };
-  return {get state(){return state;},refresh,refreshIfDue:()=>now()>=nextDue?refresh():Promise.resolve(state)};
+  return {get state(){return state;},refresh,settle:()=>pending?.catch(()=>{}),refreshIfDue:()=>now()>=nextDue?refresh():Promise.resolve(state)};
 }
 export async function startMonitor({port=PORT,settingsFile=settingsPath(),query,externalQuery=queryExternal}={}) {
-  const cache=createQuotaCache({query});
+  const recoveryStore=await createRecoveryStore({file:join(dirname(settingsFile),'quota-recovery.json')});
+  const cache=createQuotaCache({query,recoveryStore});
   const announcements=await createAnnouncementStore({file:join(dirname(settingsFile),'announcements.json')});
   let externalState={status:'loading',lastGlobal:null},externalPending=null,lastExternalFetch=0;
   const refreshExternal=(force=false)=>{
@@ -121,6 +127,7 @@ export async function startMonitor({port=PORT,settingsFile=settingsPath(),query,
     await new Promise(resolveStop=>{server.close(resolveStop);server.closeIdleConnections();});
     // A final snapshot write must finish before restart or cleanup reuses its directory.
     await finishingExternal?.catch(()=>{});
+    await cache.settle();await recoveryStore.flush();
   };
   return {server,cache,stop};
 }

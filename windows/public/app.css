@@ -35,6 +35,12 @@ h2 { margin:0; color:var(--text); font-size:16px; line-height:1.4; font-weight:6
 details { padding:14px 0; border-bottom:1px solid var(--line); }
 summary { display:flex; align-items:center; gap:12px; list-style:none; cursor:pointer; color:var(--text); font-size:14px; line-height:1.5; font-weight:600; }
 summary::-webkit-details-marker { display:none; }
+.recovery-history[open] .chevron { transform:rotate(180deg); }
+.recovery-history #recovery-list { list-style:none; margin:0; padding:0; }
+.recovery-history li { border-top:1px solid var(--line); padding:10px 0; font-size:14px; }
+.recovery-history li p { margin:2px 0; }
+.recovery-history strong { font-variant-numeric:tabular-nums; }
+.recovery-history summary .chevron { margin-left:0; }
 summary .chevron { margin-left:auto; width:14px; height:14px; flex-shrink:0; }
 .reset-details summary { gap:8px; }
 .reset-details summary .section-icon { margin-right:4px; }
@@ -89,6 +95,7 @@ body[data-embedded="true"] .ring strong { font-size:30px; }
 body[data-embedded="true"] .hero-copy { padding-left:clamp(14px,4vw,24px); }
 body[data-embedded="true"] .countdown { font-size:clamp(24px,5vw,30px); }
 body[data-embedded="true"] details,body[data-embedded="true"] .five-hour { padding:10px 0; }
+body[data-embedded="true"] .recovery-history { padding:8px 0; }
 body[data-embedded="true"] .announcements { padding:10px 0; }
 body[data-embedded="true"] .announcement { padding:10px 12px; }
 body[data-embedded="true"] .announcement + .announcement { margin-top:8px; }

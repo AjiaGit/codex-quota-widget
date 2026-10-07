@@ -29,6 +29,27 @@ test('missing CLI and hung CLI have distinct safe error categories',async()=>{
   await assert.rejects(queryAppServer({command:process.execPath,args:['-e','setInterval(()=>{},1000)'],timeoutMs:50}),{code:'timeout'});
 });
 
+test('usage API persists recovery snapshots and isolates accounts without exposing their identities',async()=>{
+  const directory=await mkdtemp(join(tmpdir(),'quota-recovery-http-'));
+  const settingsFile=join(directory,'settings.json');
+  let remaining=45,identity='test-private@example.org',running;
+  const query=async()=>({accountIdentity:identity,accountPlanType:'pro',rateLimits:{primary:{usedPercent:100-remaining,windowDurationMins:10080,resetsAt:1900000000}}});
+  const open=()=>startMonitor({port:0,settingsFile,query,externalQuery:async()=>({status:'unavailable'})});
+  try {
+    running=await open();let base=`http://127.0.0.1:${running.server.address().port}`;
+    assert.deepEqual((await(await fetch(base+'/api/usage')).json()).recoveryHistory.records,[]);
+    await running.stop();running=null;
+    remaining=99;running=await open();base=`http://127.0.0.1:${running.server.address().port}`;
+    const result=await(await fetch(base+'/api/usage')).json();
+    assert.equal(result.recoveryHistory.records.length,1);
+    assert.equal(result.recoveryHistory.records[0].beforePercent,45);
+    assert.ok(!JSON.stringify(result).includes(identity));
+    identity='other-private@example.org';remaining=100;
+    const other=await(await fetch(base+'/api/refresh',{method:'POST'})).json();
+    assert.deepEqual(other.recoveryHistory.records,[]);
+  }finally {if(running)await running.stop();await rm(directory,{recursive:true,force:true});}
+});
+
 test('external API restores confirmed announcements after a service restart and source failure',async()=>{
   const directory=await mkdtemp(join(tmpdir(),'quota-announcement-http-'));
   const settingsFile=join(directory,'settings.json');

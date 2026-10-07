@@ -31,12 +31,15 @@ To run from source, install Node.js 24+ and follow the platform guide. macOS sou
 - A small amber dot in compact mode marks a new confirmed banked reset grant or global reset announcement. Hover for its type; open details to clear the notices shown there. Existing records on first use do not trigger the dot, and read notices stay read after a restart. There is no sound or flashing. The macOS Dock ring uses a number without a percent sign.
 - Choose **Language → System / English / 简体中文**. System selects Chinese for a Chinese system language and English otherwise. The browser detail page and native UI share the saved choice.
 - Open the **Banked resets / Details** row to see the authoritative available count and any grant or expiry dates Codex provides. Missing dates are shown as unavailable. The widget never spends a banked reset or predicts future grants. Banked resets are separate from paid usage credits and the normal reset countdown.
+- **My quota recoveries** records increases between successful local quota observations, independently of public announcements. Expand the row for before/after percentages, detection time and the previous observation time in your local timezone. Tracking begins with the first observation; earlier changes cannot be reconstructed. Records survive restarts, are separated by account, and keep the latest 50 increases. Detection does not establish the exact reset time, its cause, or delivery to all users. Plan changes establish a new baseline.
 
 Quota queries and cache checks run every **60 seconds**. Manual refresh, reopening, and waking the computer refresh promptly; simultaneous requests are combined. Temporary query failures retry after **15, 30, then 60 seconds**. Unavailable, expired, or stale quota is shown as `—`, rather than continuing to present an old percentage as current.
 
 Confirmed banked reset grants and global reset announcements stay visible until delivery is confirmed, then remain for 24 hours before moving into history. Known pending announcements survive source outages and app restarts. Five-hour usage is shown only for a confirmed Plus plan; Pro and unknown plans hide that row.
 
 Announcement cards and history show the newest publication first. A tracker category such as `regular` or `banked` does not confirm a promised reset. Only an explicit `certainty: announced` source record or a valid completion timestamp receives a confirmed label; other records appear as related updates and do not trigger the compact notice dot. Summaries and account scope are attributed to the source. These are tracker confirmations, not independent verification of X posts.
+
+Unconfirmed news moves into history 24 hours after publication. Confirmed pending announcements remain visible until delivery is recorded. A missing completion timestamp is labelled **Tracker has no completion time**, including when the source summary says a reset happened.
 
 Precise public schedules and publication times are displayed separately in your local timezone, with the UTC offset. Date-only schedules keep their original calendar date. Timezone interpretations supplied by a tracker are labelled as source conversions. If both fresh, complete tracker feeds no longer list an unconfirmed record, it moves into history with a source-withdrawal label; withdrawal is not proof of delivery.
 
@@ -51,6 +54,8 @@ The footer states **Auto-refresh: quota every 1 min · public data every 10 min*
 ## Privacy and troubleshooting
 
 The local service uses the read-only `account/read` and `account/rateLimits/read` methods of [Codex App Server](https://learn.chatgpt.com/docs/app-server). It listens only on loopback. No OpenAI API key is required. Account quota and login information are not sent to the public reset sites; settings and logs stay on your computer.
+
+Local recovery history stores quota percentages, observation times and a salted account fingerprint in `quota-recovery.json` in the widget's settings directory. It does not store the account email or login credentials. The latest five account histories are retained; tracking is unavailable if Codex provides no stable account identifier.
 
 If quota is unavailable, follow the displayed instruction, check `codex login status`, and choose **Refresh**. The platform guides list log locations and restart/uninstall steps. Do not share credentials, raw account responses, unredacted logs, or personal account screenshots in bug reports.
 
