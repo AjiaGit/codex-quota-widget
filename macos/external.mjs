@@ -44,7 +44,7 @@ function normalizedAnnouncement(raw, now, scheduled = false, persisted = false) 
   const scheduledMs = preciseTimestamp(schedule);
   return {
     id: sourceUrl + '#' + kind,
-    kind, announcedAt,
+    kind, announcedAt, certainty: raw.certainty === 'announced' ? 'announced' : 'unconfirmed',
     scheduledAt: Number.isFinite(scheduledMs) ? new Date(scheduledMs).toISOString() : null,
     scheduledDate: dateOnly(persisted ? raw.scheduledDate : scheduled ? raw.day ?? raw.date : null),
     scheduledTimeZone: text(persisted ? raw.scheduledTimeZone : scheduled ? raw.tz_label : null),
@@ -61,12 +61,14 @@ function deduplicate(items) {
     map.set(item.id, previous ? { ...previous, ...item,
       scheduledAt: item.scheduledAt || previous.scheduledAt,
       scheduledDate: item.scheduledDate || previous.scheduledDate,
+      certainty: item.certainty === 'announced' || previous.certainty === 'announced' ? 'announced' : 'unconfirmed',
       deliveredAt: item.deliveredAt || previous.deliveredAt,
       deliverySourceUrl: item.deliverySourceUrl || previous.deliverySourceUrl } : item);
   }
   return [...map.values()];
 }
 const active = (item, now) => !item.sourceWithdrawn && (!item.deliveredAt || now - Date.parse(item.deliveredAt) < MAX_AGE_MS);
+const confirmedAnnouncement = item => item.certainty === 'announced' || Boolean(item.deliveredAt);
 
 export function normalizeAnnouncements(data, now = Date.now()) {
   const product = data?.products?.codex;
@@ -111,7 +113,8 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
       for(const id of (Array.isArray(tracking.observed) ? tracking.observed : []).slice(-500))if(alertIdentity(id))observed.add(id);
       for(const entry of (Array.isArray(tracking.unread) ? tracking.unread : []).slice(0,100)) {
         const identity = alertIdentity(entry?.id);
-        if(identity && identity.kind === entry.kind && observed.has(identity.id))unread.set(identity.id,identity);
+        if(identity && identity.kind === entry.kind && observed.has(identity.id) &&
+          [...snapshot.items,...snapshot.history].some(item=>item.id===identity.id && confirmedAnnouncement(item)))unread.set(identity.id,identity);
       }
     }
   } catch {}
@@ -141,16 +144,19 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
       return alerts();
     },
     async update(input) {
-      const freshItems = clean(input?.items), freshHistory = clean(input?.history);
+      const known=new Map([...snapshot.history,...snapshot.items].map(item=>[item.id,item]));
+      const mergeKnown=item=>known.has(item.id)?deduplicate([known.get(item.id),item])[0]:item;
+      const freshItems = clean(input?.items).map(mergeKnown), freshHistory = clean(input?.history).map(mergeKnown);
       const fresh=input?.status === 'ok' && !input.stale && recentTimestamp(input.sourceUpdatedAt,now());
       if(fresh) {
         if(baselineAt !== null)for(const item of freshItems) {
-          if(!observed.has(item.id) && item.announcedAt && Date.parse(item.announcedAt) >= baselineAt)
+          if(confirmedAnnouncement(item) && (!observed.has(item.id) || known.has(item.id) && !confirmedAnnouncement(known.get(item.id))) && item.announcedAt && Date.parse(item.announcedAt) >= baselineAt)
             unread.set(item.id,{id:item.id,kind:item.kind});
         }
         else baselineAt = now();
         for(const item of [...freshHistory,...freshItems])observed.add(item.id);
       }
+      for(const item of [...freshHistory,...freshItems])if(!confirmedAnnouncement(item))unread.delete(item.id);
       const previous = project(), previousItems = previous.items;
       const evidence = new Map([...freshHistory, ...freshItems].map(item => [item.id, item]));
       // Absence only changes status when both complete, fresh feeds agree. Failure

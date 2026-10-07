@@ -1,6 +1,7 @@
 const en = {
   updatedNow:'Updated just now', updatedAgo:'Updated {minutes} min ago',
-  confirmedAnnouncements:'Confirmed announcements', confirmedGrant:'Confirmed banked reset grant', confirmedReset:'Confirmed global reset',
+  confirmedAnnouncements:'Public reset information', confirmedGrant:'Confirmed banked reset grant', confirmedReset:'Confirmed global reset',
+  relatedGrant:'Banked reset grant update', relatedReset:'Global reset update', sourceUnconfirmed:'Listed by source; no explicit reset announcement provided', sourceScope:'Source classification: {scope}', sourceSummary:'Source summary: {summary}', posted:'Posted: {time}', viewSource:'View original post',
   noAnnouncements:'Monitored sources report no confirmed banked reset grant or global reset announcements', announcementsUnavailable:'Announcement information unavailable', informationPending:'Information pending update',
   upcoming:'Upcoming', waitingDelivery:'Scheduled time passed; monitoring sources have no completion record', announcedWaiting:'Announced; awaiting delivery', historyDeliveryUnknown:'Source did not provide a delivery record', grantDone:'Granted', resetDone:'Reset confirmed',
   scheduledGrant:'Scheduled grant: {time}', scheduledReset:'Scheduled reset: {time}', originalGrant:'Originally scheduled grant: {time}', originalReset:'Originally scheduled reset: {time}',
@@ -28,7 +29,8 @@ const en = {
 };
 const zh = {
   updatedNow:'刚刚更新', updatedAgo:'{minutes} 分钟前更新',
-  confirmedAnnouncements:'已确认预告', confirmedGrant:'已确认重置次数赠送', confirmedReset:'已确认全局额度重置',
+  confirmedAnnouncements:'公开重置信息', confirmedGrant:'已确认重置次数赠送', confirmedReset:'已确认全局额度重置',
+  relatedGrant:'重置次数赠送相关动态', relatedReset:'全局额度重置相关动态', sourceUnconfirmed:'来源收录，尚未明确确认重置', sourceScope:'来源标注：{scope}', sourceSummary:'来源摘要：{summary}', posted:'动态发布 {time}', viewSource:'查看原文',
   noAnnouncements:'监控来源暂无已确认的赠送或全局额度重置公告', announcementsUnavailable:'预告信息暂不可用', informationPending:'信息待更新',
   upcoming:'即将到来', waitingDelivery:'预定时间已过，监控来源未提供完成记录', announcedWaiting:'已公告，等待送达确认', historyDeliveryUnknown:'来源未提供送达记录', grantDone:'已赠送', resetDone:'已重置',
   scheduledGrant:'预定送达 {time}', scheduledReset:'预定重置 {time}', originalGrant:'原定送达 {time}', originalReset:'原定重置 {time}',

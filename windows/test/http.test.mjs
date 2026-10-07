@@ -33,7 +33,7 @@ test('external API restores confirmed announcements after a service restart and 
   const directory=await mkdtemp(join(tmpdir(),'quota-announcement-http-'));
   const settingsFile=join(directory,'settings.json');
   const at=new Date(Date.now()-60000).toISOString();
-  const item={id:'fixture',kind:'banked',sourceUrl:'https://x.com/thsottiaux/status/fixture',announcedAt:at,scheduledDate:'2026-10-01'};
+  const item={id:'fixture',kind:'banked',certainty:'announced',sourceUrl:'https://x.com/thsottiaux/status/fixture',announcedAt:at,scheduledDate:'2026-10-01'};
   let running;
   try {
     running=await startMonitor({port:0,settingsFile,query:async()=>({}),externalQuery:async()=>({status:'ok',announcements:{status:'ok',items:[item],history:[],sourceUpdatedAt:at}})});
@@ -72,7 +72,7 @@ test('announcement alert cache and scoped read API preserve unread notices and r
   const baseline=Date.now()-120000;
   const store=await createAnnouncementStore({file:join(directory,'announcements.json'),now:()=>baseline});
   await store.update({status:'ok',items:[],history:[],sourceUpdatedAt:new Date(baseline).toISOString()});
-  const item={kind:'banked',sourceUrl:'https://example.org/new-grant',announcedAt:new Date(Date.now()-60000).toISOString()};
+  const item={kind:'banked',certainty:'announced',sourceUrl:'https://example.org/new-grant',announcedAt:new Date(Date.now()-60000).toISOString()};
   let queries=0;
   const {server,stop}=await startMonitor({port:0,settingsFile:join(directory,'settings.json'),query:async()=>({}),externalQuery:async()=>{
     queries++;return {status:'ok',announcements:{status:'ok',items:[item],history:[],sourceUpdatedAt:new Date().toISOString()}};

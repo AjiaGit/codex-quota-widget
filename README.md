@@ -36,6 +36,8 @@ Quota queries and cache checks run every **60 seconds**. Manual refresh, reopeni
 
 Confirmed banked reset grants and global reset announcements stay visible until delivery is confirmed, then remain for 24 hours before moving into history. Known pending announcements survive source outages and app restarts. Five-hour usage is shown only for a confirmed Plus plan; Pro and unknown plans hide that row.
 
+Announcement cards and history show the newest publication first. A tracker category such as `regular` or `banked` does not confirm a promised reset. Only an explicit `certainty: announced` source record or a valid completion timestamp receives a confirmed label; other records appear as related updates and do not trigger the compact notice dot. Summaries and account scope are attributed to the source. These are tracker confirmations, not independent verification of X posts.
+
 Precise public schedules and publication times are displayed separately in your local timezone, with the UTC offset. Date-only schedules keep their original calendar date. Timezone interpretations supplied by a tracker are labelled as source conversions. If both fresh, complete tracker feeds no longer list an unconfirmed record, it moves into history with a source-withdrawal label; withdrawal is not proof of delivery.
 
 Historical announcements without delivery evidence say **Source did not provide a delivery record**. An account's personal grant date does not confirm delivery of a public announcement to every account.

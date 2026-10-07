@@ -44,25 +44,29 @@ export function deriveAnnouncementsView(state,now=Date.now(),timeZone=Intl.DateT
     if(!['banked','regular'].includes(item?.kind)||!safeSource(item.sourceUrl))return null;
     const delivered=Date.parse(item.deliveredAt),announced=Date.parse(item.announcedAt),scheduled=Date.parse(item.scheduledAt);
     const confirmed=Number.isFinite(delivered)&&delivered<=now&&(!Number.isFinite(announced)||delivered>=announced);
+    const explicit=confirmed||item.certainty==='announced';
     const day=typeof item.scheduledDate==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(item.scheduledDate)?Date.parse(item.scheduledDate+'T00:00:00Z'):NaN;
-    const phase=confirmed?(now-delivered>=86400000?'archived':'delivered'):historical?'unknown':Number.isFinite(scheduled)?(scheduled<=now?'waiting':'upcoming'):Number.isFinite(day)?(now>=day+86400000?'waiting':'upcoming'):'announced';
+    const phase=confirmed?(now-delivered>=86400000?'archived':'delivered'):historical?'unknown':!explicit?'unconfirmed':Number.isFinite(scheduled)?(scheduled<=now?'waiting':'upcoming'):Number.isFinite(day)?(now>=day+86400000?'waiting':'upcoming'):'announced';
     const planDate=Number.isFinite(scheduled)?scheduled:day;
     const plannedDate=Number.isFinite(scheduled)?formatLocalAnnouncementDate(scheduled,timeZone,language,now):Number.isFinite(planDate)?t(language,'dateOnlySchedule',{date:formatShortDate(planDate,'UTC',language,now,true)}):'';
-    const scopeText=item.scope==='paid'?t(language,'paid'):item.scope==='all'?t(language,'all'):(language==='zh-CN'?item.scopeLabel:item.scope)||t(language,'unknownScope');
+    const scope=item.scope==='paid'?t(language,'paid'):item.scope==='all'?t(language,'all'):(language==='zh-CN'?item.scopeLabel:item.scope)||t(language,'unknownScope');
+    const scopeText=explicit?scope:t(language,'sourceScope',{scope});
     const scheduleKey=(confirmed?'original':'scheduled')+(item.kind==='banked'?'Grant':'Reset');
-    const plannedText=plannedDate?t(language,scheduleKey,{time:plannedDate}):!confirmed&&!historical?t(language,'scheduleUnknown'):'';
+    const plannedText=!explicit?'':plannedDate?t(language,scheduleKey,{time:plannedDate}):!confirmed&&!historical?t(language,'scheduleUnknown'):'';
     const completedText=confirmed?`${t(language,'completed')} ${formatLocalAnnouncementDate(delivered,timeZone,language,now)}`:'';
-    const announcedText=Number.isFinite(announced)?t(language,'published',{time:formatLocalAnnouncementDate(announced,timeZone,language,now)}):'';
-    const status=confirmed?t(language,item.kind==='banked'?'grantDone':'resetDone'):t(language,item.sourceWithdrawn?'sourceWithdrawn':phase==='unknown'?'historyDeliveryUnknown':phase==='waiting'?'waitingDelivery':phase==='upcoming'?'upcoming':'announcedWaiting');
-    return {id:item.id||item.sourceUrl+'#'+item.kind,kind:item.kind,phase,title:t(language,item.sourceWithdrawn?'withdrawnRecord':item.kind==='banked'?'confirmedGrant':'confirmedReset'),status,
-      scheduleNote:Number.isFinite(scheduled)&&item.scheduledTimeZone?t(language,'sourceTimeZoneNote',{zone:item.scheduledTimeZone}):'',scheduleNoteDetail:language==='zh-CN'?(item.summaryZh||''):(item.summary||item.summaryZh||''),
+    const announcedText=Number.isFinite(announced)?t(language,explicit?'published':'posted',{time:formatLocalAnnouncementDate(announced,timeZone,language,now)}):'';
+    const status=confirmed?t(language,item.kind==='banked'?'grantDone':'resetDone'):t(language,item.sourceWithdrawn?'sourceWithdrawn':phase==='unknown'?'historyDeliveryUnknown':phase==='unconfirmed'?'sourceUnconfirmed':phase==='waiting'?'waitingDelivery':phase==='upcoming'?'upcoming':'announcedWaiting');
+    return {id:item.id||item.sourceUrl+'#'+item.kind,kind:item.kind,phase,announcedAt:Number.isFinite(announced)?announced:null,title:t(language,item.sourceWithdrawn?'withdrawnRecord':item.kind==='banked'?(explicit?'confirmedGrant':'relatedGrant'):(explicit?'confirmedReset':'relatedReset')),status,
+      scheduleNote:explicit&&Number.isFinite(scheduled)&&item.scheduledTimeZone?t(language,'sourceTimeZoneNote',{zone:item.scheduledTimeZone}):'',scheduleNoteDetail:language==='zh-CN'?(item.summaryZh||''):(item.summary||item.summaryZh||''),
       plannedText,completedText,announcedText,scopeText,retentionText:phase==='delivered'?t(language,'retention'):'',
       timeText:[completedText||plannedText||announcedText,scopeText].filter(Boolean).join(' · '),
-      sourceUrl:safeSource(item.sourceUrl),deliverySourceUrl:confirmed?safeSource(item.deliverySourceUrl):null,
+      sourceUrl:safeSource(item.sourceUrl),sourceLabel:t(language,explicit?'viewAnnouncement':'viewSource'),deliverySourceUrl:confirmed?safeSource(item.deliverySourceUrl):null,
       summary:language==='zh-CN'?(item.summaryZh||item.summary||''):(item.summary||'')};
   };
   for(const item of state?.items||[]){const row=renderItem(item);if(!row)continue;if(row.phase==='archived')history.push(row);else rows.push(row);seen.add(row.id);}
   for(const item of state?.history||[]){const row=renderItem(item,true);if(row&&!seen.has(row.id)){history.push(row);seen.add(row.id);}}
+  const newestFirst=(a,b)=>a.announcedAt===b.announcedAt?0:(b.announcedAt??-Infinity)-(a.announcedAt??-Infinity);
+  rows.sort(newestFirst);history.sort(newestFirst);
   return {rows,history,notice:state?.stale||state?.status!=='ok'||!publicSourceFresh(state,now)?t(language,rows.length?'informationPending':'announcementsUnavailable'):rows.length?'':t(language,'noAnnouncements')};
 }
 export function derivePublicStatus(state,now=Date.now(),timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone,language='en') {
@@ -142,9 +146,9 @@ if(typeof document!=='undefined') {
       if(row.scheduleNote){const note=document.createElement('p');note.className='announcement-fact retention-note';note.textContent=row.scheduleNote;note.title=row.scheduleNoteDetail;content.append(note);}
       if(!factLine){factLine=document.createElement('p');content.append(factLine);}
       const scope=document.createElement('span');scope.className='announcement-scope';scope.textContent=row.scopeText;factLine.append(scope);
-      if(history&&row.summary){const p=document.createElement('p');p.textContent=row.summary;content.append(p);}
+      if((history||row.phase==='unconfirmed')&&row.summary){const p=document.createElement('p');p.textContent=t(lang,'sourceSummary',{summary:row.summary});content.append(p);}
       const line=document.createElement('p');line.className='announcement-source';
-      for(const[url,key]of[[row.sourceUrl,'viewAnnouncement'],[row.deliverySourceUrl,'delivery']])if(url){if(line.childNodes.length)line.append(document.createTextNode(' · '));const link=document.createElement('a');link.href=url;link.target='_blank';link.rel='noopener noreferrer';link.textContent=t(lang,key);line.append(link);}
+      for(const[url,label]of[[row.sourceUrl,row.sourceLabel],[row.deliverySourceUrl,t(lang,'delivery')]])if(url){if(line.childNodes.length)line.append(document.createTextNode(' · '));const link=document.createElement('a');link.href=url;link.target='_blank';link.rel='noopener noreferrer';link.textContent=label;line.append(link);}
       content.append(line);
       if(row.retentionText&&!history){const p=document.createElement('p');p.className='retention-note';p.textContent=row.retentionText;content.append(p);}
       item.append(content);return item;

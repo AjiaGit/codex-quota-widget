@@ -13,6 +13,89 @@ const hour = 3600000;
 const feed = (scheduled = null, events = []) => ({ schema: 'whenreset/v1', generated_at: at(0), products: { codex: { scheduled, events } } });
 const scheduled = (kind = 'banked') => ({ id: kind, kind, certainty: 'announced', date: '2026-10-01', ts: at(-hour), scope: 'paid', url: `https://x.com/thsottiaux/status/${kind}`, summary: 'Public announcement' });
 
+test('a source reset category alone never confirms a conditional post or triggers a compact alert', async () => {
+  let time=now;
+  const store=await source.createAnnouncementStore({now:()=>time});
+  await store.update(source.normalizeAnnouncements(feed(),time));
+  time+=hour;
+  const event={...scheduled('regular'),certainty:undefined,ts:at(hour),summary:'An improvement or a reset',scope:'all'};
+  const normalized=source.normalizeAnnouncements({...feed(null,[event]),generated_at:at(hour)},time);
+  await store.update(normalized);
+  const row=view.deriveAnnouncementsView(store.state,time,'UTC','zh-CN').rows[0];
+  assert.equal(row.phase,'unconfirmed');
+  assert.equal(row.title,'全局额度重置相关动态');
+  assert.equal(row.status,'来源收录，尚未明确确认重置');
+  assert.equal(row.plannedText,'');
+  assert.match(row.scopeText,/来源标注/);
+  assert.deepEqual(store.alerts.unread,[]);
+});
+
+test('explicit source confirmation and valid completion records are distinct from unconfirmed categories', () => {
+  for(const kind of ['regular','banked']) {
+    const event={...scheduled(kind),certainty:undefined};
+    const unconfirmed=source.normalizeAnnouncements(feed(null,[event]),now);
+    assert.equal(view.deriveAnnouncementsView(unconfirmed,now,'UTC','en').rows[0].phase,'unconfirmed');
+    const announced=source.normalizeAnnouncements(feed(null,[{...event,certainty:'announced'}]),now);
+    assert.equal(view.deriveAnnouncementsView(announced,now,'UTC','en').rows[0].phase,'announced');
+    const done=source.normalizeAnnouncements(feed(null,[{...event,delivered_at:at(0)}]),now);
+    assert.equal(view.deriveAnnouncementsView(done,now,'UTC','en').rows[0].phase,'delivered');
+  }
+});
+
+test('an already seen related post triggers a notice only when the source explicitly confirms it', async () => {
+  let time=now;
+  const store=await source.createAnnouncementStore({now:()=>time});
+  await store.update(source.normalizeAnnouncements(feed(),time));
+  time+=hour;
+  const event={...scheduled('regular'),certainty:undefined,ts:at(hour)};
+  await store.update(source.normalizeAnnouncements({...feed(null,[event]),generated_at:at(hour)},time));
+  assert.deepEqual(store.alerts.unread,[]);
+  time+=hour;
+  await store.update(source.normalizeAnnouncements({...feed(null,[{...event,certainty:'announced'}]),generated_at:at(2*hour)},time));
+  assert.equal(store.alerts.unread.length,1);
+  time+=hour;
+  await store.update(source.normalizeAnnouncements({...feed(null,[event]),generated_at:at(3*hour)},time));
+  assert.equal(store.state.items[0].certainty,'announced','Missing repeated metadata does not revoke an explicit announcement');
+  assert.equal(store.alerts.unread.length,1);
+});
+
+test('old cached records without explicit certainty do not regain confirmation or old unread dots', async () => {
+  const dir=await mkdtemp(join(tmpdir(),'quota-certainty-migration-'));
+  try {
+    const {writeFile}=await import('node:fs/promises');
+    const file=join(dir,'announcements.json'),url='https://example.org/conditional';
+    const id=url+'#regular';
+    await writeFile(file,JSON.stringify({version:1,sourceUpdatedAt:at(0),items:[{id,kind:'regular',sourceUrl:url,announcedAt:at(-hour)}],history:[],alertTracking:{version:1,baselineAt:now-2*hour,observed:[id],unread:[{id,kind:'regular'}]}}));
+    const store=await source.createAnnouncementStore({file,now:()=>now});
+    assert.equal(view.deriveAnnouncementsView(store.state,now,'UTC','en').rows[0].phase,'unconfirmed');
+    assert.deepEqual(store.alerts.unread,[]);
+  } finally {await rm(dir,{recursive:true,force:true});}
+});
+
+test('active announcements show the newest publication first without changing the cached order', () => {
+  const time=Date.parse('2026-10-07T02:00:00Z');
+  const item=(id,announcedAt)=>({id,kind:'regular',sourceUrl:`https://example.org/${id}`,announcedAt});
+  const state={status:'ok',stale:false,sourceUpdatedAt:new Date(time).toISOString(),items:[
+    item('oct5','2026-10-04T20:33:43Z'),item('unknown',null),item('oct7','2026-10-06T21:07:55Z'),
+  ],history:[]};
+  const original=JSON.stringify(state);
+  for(const language of ['zh-CN','en']) {
+    const result=view.deriveAnnouncementsView(state,time,'Asia/Shanghai',language);
+    assert.deepEqual(result.rows.map(row=>row.id),['oct7','oct5','unknown']);
+  }
+  assert.equal(JSON.stringify(state),original);
+});
+
+test('history sorts by publication across archived active rows and saved history, not delivery time', () => {
+  const time=Date.parse('2026-10-07T02:00:00Z');
+  const item=(id,announcedAt,deliveredAt=null)=>({id,kind:'regular',sourceUrl:`https://example.org/${id}`,announcedAt,deliveredAt});
+  const state={status:'ok',sourceUpdatedAt:new Date(time).toISOString(),items:[
+    item('older-completed','2026-10-01T00:00:00Z','2026-10-05T00:00:00Z'),
+  ],history:[item('oldest','2026-09-26T00:00:00Z'),item('newer','2026-10-04T20:33:43Z')]};
+  const result=view.deriveAnnouncementsView(state,time,'Asia/Shanghai','zh-CN');
+  assert.deepEqual(result.history.map(row=>row.id),['newer','older-completed','oldest']);
+});
+
 test('the published WhenReset schedule shape preserves its real UTC time, publication, day and timezone label', () => {
   const time = Date.parse('2026-10-02T06:00:00Z');
   const signal = {day:'2026-10-02',tz_label:'PT',scheduled_for:'2026-10-02T17:00:00Z',announced_at:'2026-10-02T02:14:51Z',certainty:'announced',url:'https://x.com/thsottiaux/status/2105843926221660585',note_zh:'来源预告及其时区换算说明'};
@@ -186,7 +269,7 @@ test('completed scheduled-only records stay archived after an empty or failed lo
 
 test('announcement presentation distinguishes upcoming, awaiting completion, completed and archived stages', () => {
   assert.equal(typeof view.deriveAnnouncementsView, 'function');
-  const item = { id: 'b', kind: 'banked', announcedAt: at(-hour), scheduledAt: at(hour), scheduledDate: null, deliveredAt: null, sourceUrl: 'https://x.com/thsottiaux/status/b' };
+  const item = { id: 'b', kind: 'banked', certainty: 'announced', announcedAt: at(-hour), scheduledAt: at(hour), scheduledDate: null, deliveredAt: null, sourceUrl: 'https://x.com/thsottiaux/status/b' };
   const state = { status: 'ok', items: [item], history: [], stale: false };
   assert.equal(view.deriveAnnouncementsView(state, now, 'UTC', 'en').rows[0].phase, 'upcoming');
   assert.equal(view.deriveAnnouncementsView(state, now + hour, 'UTC', 'en').rows[0].phase, 'waiting');
@@ -197,7 +280,7 @@ test('announcement presentation distinguishes upcoming, awaiting completion, com
 });
 
 test('historical announcements without delivery evidence never imply they are still awaiting delivery', () => {
-  const item = { id: 'old-grant', kind: 'banked', announcedAt: at(-7 * 24 * hour), deliveredAt: null, sourceUrl: 'https://x.com/thsottiaux/status/old-grant' };
+  const item = { id: 'old-grant', kind: 'banked', certainty: 'announced', announcedAt: at(-7 * 24 * hour), deliveredAt: null, sourceUrl: 'https://x.com/thsottiaux/status/old-grant' };
   for (const [language, status] of [['en', 'Source did not provide a delivery record'], ['zh-CN', '来源未提供送达记录']]) {
     const historical = view.deriveAnnouncementsView({ status: 'ok', items: [], history: [item] }, now, 'UTC', language);
     assert.equal(historical.history[0].phase, 'unknown');
@@ -313,7 +396,7 @@ test('relative update ages advance locally, future and invalid values are bounde
 });
 
 test('completion keeps the original plan, completion evidence and account scope in both languages', () => {
-  const item = { id: 'b', kind: 'banked', announcedAt: at(-hour), scheduledAt: at(hour), deliveredAt: at(2 * hour), scope: 'paid', sourceUrl: 'https://x.com/thsottiaux/status/b', deliverySourceUrl: 'https://x.com/thsottiaux/status/done' };
+  const item = { id: 'b', kind: 'banked', certainty: 'announced', announcedAt: at(-hour), scheduledAt: at(hour), deliveredAt: at(2 * hour), scope: 'paid', sourceUrl: 'https://x.com/thsottiaux/status/b', deliverySourceUrl: 'https://x.com/thsottiaux/status/done' };
   const state = { status: 'ok', items: [item], history: [] };
   for (const language of ['en', 'zh-CN']) {
     const row = view.deriveAnnouncementsView(state, now + 3 * hour, 'UTC', language).rows[0];
@@ -337,7 +420,7 @@ test('public lookup failures show source freshness separately from quota freshne
 });
 
 test('precise pending schedules show local time and offset independently from announcement publication', () => {
-  const item = { id: 'timed-grant', kind: 'banked', announcedAt: '2026-09-30T10:00:00Z', scheduledAt: '2026-10-01T20:30:00Z', scope: 'paid', sourceUrl: 'https://example.org/announcement' };
+  const item = { id: 'timed-grant', kind: 'banked', certainty: 'announced', announcedAt: '2026-09-30T10:00:00Z', scheduledAt: '2026-10-01T20:30:00Z', scope: 'paid', sourceUrl: 'https://example.org/announcement' };
   const state = { status: 'ok', items: [item], history: [] };
   const shanghai = view.deriveAnnouncementsView(state, now, 'Asia/Shanghai', 'zh-CN').rows[0];
   assert.match(shanghai.plannedText, /预定送达.*10\/02.*04:30.*本地 UTC\+08:00/);
@@ -358,7 +441,7 @@ test('local offsets belong to the event instant across DST and include fractiona
 });
 
 test('date-only and unspecified schedules never masquerade as precise local delivery times', () => {
-  const item = { id: 'date-only', kind: 'banked', announcedAt: at(-hour), scheduledDate: '2026-10-01', sourceUrl: 'https://example.org/announcement' };
+  const item = { id: 'date-only', kind: 'banked', certainty: 'announced', announcedAt: at(-hour), scheduledDate: '2026-10-01', sourceUrl: 'https://example.org/announcement' };
   const state = { status: 'ok', items: [item], history: [] };
   const dateOnly = view.deriveAnnouncementsView(state, now, 'America/Los_Angeles', 'zh-CN').rows[0];
   assert.match(dateOnly.plannedText, /10\/01.*具体时间未公布/);
