@@ -1,4 +1,5 @@
 ﻿$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Drawing
 . (Join-Path (Split-Path $PSScriptRoot -Parent) 'Native.ps1')
 $script:failures = 0
 function Assert-Equal($actual, $expected, [string]$reason) {
@@ -83,7 +84,12 @@ Test-Case 'date-only schedules never invent midnight and summaries follow langua
     $row = New-Event 'private-key'; $row.scheduledDate='2026-10-02'
     $view = Get-WidgetAnnouncementView (New-External @($row)) 'zh-CN' $now
     Assert-Equal $view.active.Count 1 'One event'
-    if (-not $view.active[0].details.Contains('10月2日') -or $view.active[0].details -match '00:00|private-key') { throw 'Date-only display invented a time or exposed an ID' }
+    if (-not $view.active[0].scheduledText.Contains('10月2日') -or $view.active[0].scheduledText -match '\d{1,2}:\d{2}' -or $view.active[0].details -match 'private-key') { throw 'Date-only display invented a time or exposed an ID' }
+    foreach ($zone in @([TimeZoneInfo]::Utc, [TimeZoneInfo]::FindSystemTimeZoneById('China Standard Time'))) {
+        $zoned = ConvertTo-WidgetAnnouncementRow $row 'zh-CN' $now $false $zone
+        if (-not $zoned.scheduledText.Contains('10月2日') -or $zoned.scheduledText -match '\d{1,2}:\d{2}' -or $zoned.details -match 'private-key') { throw 'Date-only display invented a time or exposed an ID' }
+        if (-not $zoned.announcedText.Contains('UTC')) { throw 'Publication lost its independently reported time zone' }
+    }
     Assert-Equal $view.active[0].summary '已确认公告' 'Chinese summary'
     Assert-Equal (Get-WidgetAnnouncementView (New-External @($row)) 'en' $now).active[0].summary 'Confirmed announcement' 'English summary'
 }
