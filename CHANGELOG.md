@@ -2,6 +2,8 @@
 
 ## 0.1.0
 
+- Windows outside-click detection uses physical screen coordinates on scaled monitors, so the reset-details link and owned dialogs stay interactive. Native regressions exercise the production hook and floating handler in multiple DPI contexts.
+
 - Local account quota recovery history with before/after percentages, observation and detection times, persistent account isolation, and a combined newest-first list with public reset news. Older recoveries share the history section. Public delivery status remains independent.
 - Clicking outside the detail widget returns to its saved compact geometry. Tighter detail spacing and automatic default sizing reduce scrolling while keeping long records accessible.
 - Windows compact and detailed views remember separate positions across switches and restarts, preserving legacy placement and keeping restored windows within the available screen.

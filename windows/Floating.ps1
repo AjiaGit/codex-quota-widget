@@ -37,6 +37,7 @@ public static class WidgetPower {
 // Observe button presses without consuming input. The callback only queues UI work.
 public static class WidgetOutsideClick {
     [StructLayout(LayoutKind.Sequential)] private struct Point { public int x, y; }
+    [StructLayout(LayoutKind.Sequential)] private struct Rect { public int left, top, right, bottom; }
     [StructLayout(LayoutKind.Sequential)] private struct MouseData {
         public Point point; public uint mouseData, flags, time; public UIntPtr extraInfo;
     }
@@ -50,8 +51,21 @@ public static class WidgetOutsideClick {
     [DllImport("user32.dll")] private static extern bool UnhookWindowsHookEx(IntPtr hook);
     [DllImport("user32.dll")] private static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr message, IntPtr data);
     [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(Point point);
+    [DllImport("user32.dll")] private static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
+    [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr window, out Rect bounds);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
     [DllImport("kernel32.dll", CharSet = CharSet.Auto)] private static extern IntPtr GetModuleHandle(string name);
+    // Hook points and this rectangle are physical pixels, including on scaled monitors.
+    public static System.Drawing.Rectangle GetPhysicalBounds(System.Windows.Forms.Control control) {
+        if (control == null || !control.IsHandleCreated || control.IsDisposed) return System.Drawing.Rectangle.Empty;
+        var previous = SetThreadDpiAwarenessContext(new IntPtr(-3));
+        if (previous == IntPtr.Zero) return System.Drawing.Rectangle.Empty;
+        try {
+            Rect bounds;
+            if (!GetWindowRect(control.Handle, out bounds)) return System.Drawing.Rectangle.Empty;
+            return System.Drawing.Rectangle.FromLTRB(bounds.left, bounds.top, bounds.right, bounds.bottom);
+        } finally { SetThreadDpiAwarenessContext(previous); }
+    }
     public static void Enable(System.Windows.Forms.Control control, Action<System.Drawing.Point> action) {
         if (hook != IntPtr.Zero) return;
         receiver = control; clicked = action;
@@ -67,13 +81,19 @@ public static class WidgetOutsideClick {
         if (code >= 0 && (kind == 0x0201 || kind == 0x0204 || kind == 0x0207 || kind == 0x020B)
             && control != null && action != null && control.IsHandleCreated && !control.IsDisposed) {
             var input = (MouseData)Marshal.PtrToStructure(data, typeof(MouseData));
-            uint targetProcess;
-            GetWindowThreadProcessId(WindowFromPoint(input.point), out targetProcess);
-            // Our menus and owned dialogs remain interactive, even outside the main form.
-            if (targetProcess != processId) {
-                var point = new System.Drawing.Point(input.point.x, input.point.y);
-                try { control.BeginInvoke(action, new object[] { point }); }
-                catch (InvalidOperationException) { }
+            // WH_MOUSE_LL supplies physical coordinates. Do not let USER32 virtualize them.
+            var previous = SetThreadDpiAwarenessContext(new IntPtr(-3));
+            if (previous != IntPtr.Zero) {
+                try {
+                    uint targetProcess;
+                    GetWindowThreadProcessId(WindowFromPoint(input.point), out targetProcess);
+                    // Our menus and owned dialogs remain interactive, even outside the main form.
+                    if (targetProcess != processId) {
+                        var point = new System.Drawing.Point(input.point.x, input.point.y);
+                        try { control.BeginInvoke(action, new object[] { point }); }
+                        catch (InvalidOperationException) { }
+                    }
+                } finally { SetThreadDpiAwarenessContext(previous); }
             }
         }
         return CallNextHookEx(hook, code, message, data);
@@ -836,7 +856,8 @@ function Save-PublicSnapshot {
 }
 $script:outsideClickAction = [Action[Drawing.Point]]{
     param($point)
-    if (Test-WidgetOutsideClick $script:mode $form.Visible $script:animating $form.Bounds $point) {
+    $physicalBounds = [WidgetOutsideClick]::GetPhysicalBounds($form)
+    if (-not $physicalBounds.IsEmpty -and (Test-WidgetOutsideClick $script:mode $form.Visible $script:animating $physicalBounds $point)) {
         if ($script:resizing -or ($script:detailsForm -and $script:detailsForm.Visible)) { return }
         Start-ModeTransition 'Compact'
     }
