@@ -2,6 +2,12 @@
 
 Use English for default documentation and contributions; Simplified Chinese user guides live in `README.zh-CN.md` files. Describe the user-visible behavior and the checks you actually ran.
 
+## Primary platform and UI baseline
+
+macOS is the primary product version. Its current accepted interface is the baseline for shared layout and interaction; design shared user-facing changes on macOS first, then align Windows. Match information order, wording, typography hierarchy, spacing, icons, and expand/collapse behavior while keeping appropriate native system entry points.
+
+Reset-credit details belong inline in the main detail view, following macOS. The current separate Windows details window remains a known parity gap. Windows implementation constraints must not silently change the accepted macOS design. Include a comparison against the macOS baseline when reviewing Windows UI changes, and distinguish functional checks from visual parity and real desktop validation. See [project rules](AGENTS.md).
+
 ## Develop and test
 
 Use Node.js 24; packaged builds pin **24.19.0**. The service has no npm dependencies. From the repository root:
