@@ -2,6 +2,8 @@
 
 ## 0.1.0
 
+- Windows CLI discovery rejects desktop GUI hosts and prefers an extracted console CLI only when its SHA-256 matches the installed Store package, restoring quota reads from the Start menu or taskbar without Codex-injected environment variables.
+
 - Windows outside-click detection uses physical screen coordinates on scaled monitors, so the reset-details link and owned dialogs stay interactive. Native regressions exercise the production hook and floating handler in multiple DPI contexts.
 
 - Local account quota recovery history with before/after percentages, observation and detection times, persistent account isolation, and a combined newest-first list with public reset news. Older recoveries share the history section. Public delivery status remains independent.

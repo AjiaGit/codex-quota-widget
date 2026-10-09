@@ -4,6 +4,10 @@ import { mkdtemp, mkdir, writeFile, chmod, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { resolveCodex } from '../cli.mjs';
+function consolePE() {
+  const bytes=Buffer.alloc(256);bytes.writeUInt16LE(0x5a4d,0);bytes.writeInt32LE(64,60);
+  bytes.writeUInt32LE(0x4550,64);bytes.writeUInt16LE(0x20b,88);bytes.writeUInt16LE(3,156);return bytes;
+}
 test('a vanished discovered override falls back to the updated CLI on PATH',async()=>{
   const directory=await mkdtemp(join(tmpdir(),'quota-cli-'));
   try{
@@ -16,7 +20,7 @@ test('Windows npm shims launch the platform executable directly without a wrappe
   try{
     const shim=join(directory,'codex.cmd');
     const binary=join(directory,'node_modules','@openai','codex-win32-x64','vendor','x86_64-pc-windows-msvc','bin','codex.exe');
-    await mkdir(join(binary,'..'),{recursive:true});await writeFile(shim,'@echo off\r\n');await writeFile(binary,'');
+    await mkdir(join(binary,'..'),{recursive:true});await writeFile(shim,'@echo off\r\n');await writeFile(binary,consolePE());
     assert.deepEqual(resolveCodex({platform:'win32',arch:'x64',env:{CODEX_CLI_PATH:shim},home:directory}),{command:binary,args:['app-server']});
   }finally{await rm(directory,{recursive:true,force:true});}
 });
@@ -25,7 +29,7 @@ test('Windows npm discovery supports the legacy vendor directory and ARM64 packa
     const directory=await mkdtemp(join(tmpdir(),'quota-cli-'));
     try{
       const shim=join(directory,'codex.cmd'),binary=join(directory,'node_modules','@openai',packageName,'vendor',triple,folder,'codex.exe');
-      await mkdir(join(binary,'..'),{recursive:true});await writeFile(shim,'');await writeFile(binary,'');
+      await mkdir(join(binary,'..'),{recursive:true});await writeFile(shim,'');await writeFile(binary,consolePE());
       assert.equal(resolveCodex({platform:'win32',arch,env:{CODEX_CLI_PATH:shim},home:directory}).command,binary);
     }finally{await rm(directory,{recursive:true,force:true});}
   }
@@ -36,5 +40,17 @@ test('an incomplete npm installation cannot fall back to a wrapper that leaves a
     const shim=join(directory,'codex.cmd'),script=join(directory,'node_modules','@openai','codex','bin','codex.js');
     await mkdir(join(script,'..'),{recursive:true});await writeFile(shim,'');await writeFile(script,'');
     assert.throws(()=>resolveCodex({platform:'win32',arch:'x64',env:{CODEX_CLI_PATH:shim,PATH:''},home:directory}),{code:'cli_missing'});
+  }finally{await rm(directory,{recursive:true,force:true});}
+});
+
+test('Windows rejects desktop GUI hosts on PATH and explicit overrides',async()=>{
+  const directory=await mkdtemp(join(tmpdir(),'quota-cli-gui-'));
+  try{
+    const binary=join(directory,'codex.exe'),bytes=Buffer.alloc(256);
+    bytes.writeUInt16LE(0x5a4d,0);bytes.writeInt32LE(64,60);bytes.writeUInt32LE(0x4550,64);bytes.writeUInt16LE(0x20b,88);bytes.writeUInt16LE(2,156);
+    await writeFile(binary,bytes);
+    for(const env of [{CODEX_CLI_PATH:binary,PATH:''},{PATH:directory}]){
+      assert.throws(()=>resolveCodex({platform:'win32',arch:'x64',env,home:directory}),{code:'cli_missing'});
+    }
   }finally{await rm(directory,{recursive:true,force:true});}
 });

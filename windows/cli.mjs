@@ -1,8 +1,19 @@
-import { existsSync, accessSync, constants } from 'node:fs';
+import { existsSync, accessSync, constants, openSync, closeSync, readSync, fstatSync } from 'node:fs';
 import { dirname, join, delimiter } from 'node:path';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 
+// Windows desktop GUI hosts also use Codex.exe; only console PE files can run app-server.
+function windowsConsoleBinary(path) {
+  let file;
+  try {
+    file=openSync(path,'r');const size=fstatSync(file).size,head=Buffer.alloc(64);
+    if(size<64||readSync(file,head,0,64,0)!==64||head.readUInt16LE(0)!==0x5a4d)return false;
+    const offset=head.readInt32LE(60),pe=Buffer.alloc(94);
+    if(offset<64||offset>size-94||readSync(file,pe,0,94,offset)!==94)return false;
+    return pe.readUInt32LE(0)===0x4550&&[0x10b,0x20b].includes(pe.readUInt16LE(24))&&pe.readUInt16LE(92)===3;
+  } catch {return false;} finally {if(file!==undefined)closeSync(file);}
+}
 // Launch npm's native binary directly: terminating a JavaScript launcher on Windows
 // would not reliably terminate the App Server child it creates.
 function npmBinary(shim,arch) {
@@ -14,7 +25,7 @@ function npmBinary(shim,arch) {
   try{roots.unshift(dirname(createRequire(join(core,'bin','codex.js')).resolve(`${packageName}/package.json`)));}catch{}
   for(const root of roots)for(const folder of ['bin','codex']){
     const binary=join(root,'vendor',triple,folder,'codex.exe');
-    if(existsSync(binary))return binary;
+    if(existsSync(binary)&&windowsConsoleBinary(binary))return binary;
   }
   return null;
 }
@@ -41,6 +52,7 @@ export function resolveCodex({ platform=process.platform, arch=process.arch, env
       if(binary)return {command:binary,args:['app-server']};
       continue;
     }
+    if(platform==='win32'&&!windowsConsoleBinary(path))continue;
     try{accessSync(path,platform==='win32'?constants.F_OK:constants.X_OK);return {command:path,args:['app-server']};}catch{}
   }
   throw Object.assign(new Error('Codex CLI is not installed'),{code:'cli_missing'});

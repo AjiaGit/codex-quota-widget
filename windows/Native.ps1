@@ -571,11 +571,48 @@ function Find-WidgetNode([string]$repositoryPath) {
     }
     return $null
 }
+# Store packages contain a GUI Codex.exe as well as the app-server console CLI.
+# Inspect PE metadata without launching either program or changing authentication.
+function Test-WidgetCodexCandidate([string]$path) {
+    if (-not $path -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { return $false }
+    if ([IO.Path]::GetExtension($path) -eq '.cmd') { return $true }
+    $stream = $null; $reader = $null
+    try {
+        $stream = [IO.File]::Open($path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+        $reader = New-Object IO.BinaryReader($stream)
+        if ($stream.Length -lt 64 -or $reader.ReadUInt16() -ne 0x5a4d) { return $false }
+        $stream.Position = 60; $offset = $reader.ReadInt32()
+        if ($offset -lt 64 -or $offset -gt $stream.Length - 94) { return $false }
+        $stream.Position = $offset
+        if ($reader.ReadUInt32() -ne 0x4550) { return $false }
+        $stream.Position = $offset + 24; $magic = $reader.ReadUInt16()
+        if ($magic -notin @(0x10b,0x20b)) { return $false }
+        $stream.Position = $offset + 24 + 68
+        return $reader.ReadUInt16() -eq 3
+    } catch { return $false }
+    finally { if ($reader) { $reader.Dispose() } elseif ($stream) { $stream.Dispose() } }
+}
+# Codex materializes its CLI outside the protected MSIX package. Use only a copy
+# whose bytes match the installed package, avoiding guesses among saved versions.
+function Find-WidgetExtractedCodex([string]$packageBinary) {
+    if (-not $env:LOCALAPPDATA) { return $null }
+    $root = Join-Path $env:LOCALAPPDATA 'OpenAI/Codex/bin'
+    if (-not (Test-Path -LiteralPath $root -PathType Container)) { return $null }
+    $candidates = @(Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue | ForEach-Object { Join-Path $_.FullName 'codex.exe' } | Where-Object { Test-WidgetCodexCandidate $_ })
+    if (-not $candidates.Count) { return $null }
+    try {
+        $expected = (Get-FileHash -LiteralPath $packageBinary -Algorithm SHA256 -ErrorAction Stop).Hash
+        foreach ($candidate in $candidates) {
+            if ((Get-FileHash -LiteralPath $candidate -Algorithm SHA256 -ErrorAction Stop).Hash -eq $expected) { return $candidate }
+        }
+    } catch { }
+    return $null
+}
 function Find-WidgetCodex {
-    if ($env:CODEX_CLI_PATH -and (Test-Path -LiteralPath $env:CODEX_CLI_PATH -PathType Leaf)) { return $env:CODEX_CLI_PATH }
+    if (Test-WidgetCodexCandidate $env:CODEX_CLI_PATH) { return $env:CODEX_CLI_PATH }
     foreach ($name in @('codex.exe','codex.cmd')) {
         $command = Get-Command $name -ErrorAction SilentlyContinue
-        if ($command) { return $command.Source }
+        if ($command -and (Test-WidgetCodexCandidate $command.Source)) { return $command.Source }
     }
     $candidates = @()
     if ($env:APPDATA) { $candidates += Join-Path $env:APPDATA 'npm/codex.cmd' }
@@ -583,12 +620,18 @@ function Find-WidgetCodex {
         $candidates += Join-Path $env:LOCALAPPDATA 'Programs/Codex/resources/codex.exe'
         $candidates += Join-Path $env:LOCALAPPDATA 'Programs/Codex/resources/app.asar.unpacked/node_modules/@openai/codex/vendor/x86_64-pc-windows-msvc/codex/codex.exe'
     }
-    foreach ($candidate in $candidates) { if (Test-Path -LiteralPath $candidate -PathType Leaf) { return [IO.Path]::GetFullPath($candidate) } }
+    foreach ($candidate in $candidates) { if (Test-WidgetCodexCandidate $candidate) { return [IO.Path]::GetFullPath($candidate) } }
     if (Get-Command Get-AppxPackage -ErrorAction SilentlyContinue) {
         foreach ($package in @(Get-AppxPackage '*Codex*' -ErrorAction SilentlyContinue)) {
             if (-not $package.InstallLocation) { continue }
-            $candidate = Get-ChildItem -LiteralPath $package.InstallLocation -Filter codex.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($candidate) { return $candidate.FullName }
+            $candidates = Get-ChildItem -LiteralPath $package.InstallLocation -Filter codex.exe -File -Recurse -ErrorAction SilentlyContinue
+            foreach ($candidate in $candidates) {
+                if (Test-WidgetCodexCandidate $candidate.FullName) {
+                    $extracted = Find-WidgetExtractedCodex $candidate.FullName
+                    if ($extracted) { return $extracted }
+                    return $candidate.FullName
+                }
+            }
         }
     }
     return $null
