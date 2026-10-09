@@ -25,6 +25,15 @@ Add-Type -AssemblyName System.Net.Http
 Add-Type -ReferencedAssemblies @('System.dll','System.Core.dll','System.Windows.Forms.dll','System.Drawing.dll') -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
+// Keep the saved 96-DPI coordinate model, but let Windows rasterize GDI text at
+// each monitor's scale instead of stretching the original text bitmap.
+public static class WidgetDisplay {
+    [DllImport("user32.dll")] private static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
+    public static bool EnableGdiScaling() {
+        try { return SetThreadDpiAwarenessContext(new IntPtr(-5)) != IntPtr.Zero; }
+        catch (EntryPointNotFoundException) { return false; }
+    }
+}
 public static class WidgetPower {
     private static int resumed;
     public static void Enable() { Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged; }
@@ -106,6 +115,7 @@ public static class WidgetDrag {
 }
 '@
 
+[void][WidgetDisplay]::EnableGdiScaling()
 [System.Windows.Forms.Application]::EnableVisualStyles()
 $script:baseUrl = $BaseUrl
 $script:showRequest = Join-Path $script:dataDirectory 'show.request'
@@ -312,12 +322,11 @@ $ring.Add_Paint({
         $text = if ($null -eq $script:remaining) { '—' } elseif ($compactVisual) { [string]$script:remaining } else { "$($script:remaining)%" }
         $fontSize = if ($compactVisual) { [Math]::Max(10, [Math]::Min(30, 11 * $sender.Width / 42.0)) } else { [Math]::Max(20, [Math]::Min(27, 20 * $sender.Width / 110.0)) }
         $font = New-Object System.Drawing.Font('Segoe UI', $fontSize, [System.Drawing.FontStyle]::Bold)
-        $brush = New-Object System.Drawing.SolidBrush($script:colors.text)
-        $format = New-Object System.Drawing.StringFormat
-        $format.Alignment = [System.Drawing.StringAlignment]::Center
-        $format.LineAlignment = [System.Drawing.StringAlignment]::Center
-        $e.Graphics.DrawString($text, $font, $brush, [System.Drawing.RectangleF]::new(0, 0, $sender.Width, $sender.Height), $format)
-        $font.Dispose(); $brush.Dispose(); $format.Dispose()
+        # GDI+ DrawString is bitmap-scaled; use the same GDI path as labels.
+        $flags = [Windows.Forms.TextFormatFlags]::HorizontalCenter -bor [Windows.Forms.TextFormatFlags]::VerticalCenter -bor [Windows.Forms.TextFormatFlags]::SingleLine -bor [Windows.Forms.TextFormatFlags]::NoPadding -bor [Windows.Forms.TextFormatFlags]::NoPrefix -bor [Windows.Forms.TextFormatFlags]::PreserveGraphicsClipping -bor [Windows.Forms.TextFormatFlags]::PreserveGraphicsTranslateTransform
+        try {
+            [Windows.Forms.TextRenderer]::DrawText($e.Graphics, $text, $font, [Drawing.Rectangle]::new(0, 0, $sender.Width, $sender.Height), $script:colors.text, $flags)
+        } finally { $font.Dispose() }
     }
     if ($compactVisual -and $script:noticeView.hasUnread) {
         $notice=Get-WidgetNoticeBounds $sender.Width $sender.Height

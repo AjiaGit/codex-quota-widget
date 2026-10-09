@@ -44,7 +44,7 @@ public static class OutsideClickFixture {
         if(previous == IntPtr.Zero) throw new Exception("Cannot establish DPI-unaware fixture thread");
         var flags = BindingFlags.NonPublic | BindingFlags.Static;
         try {
-            foreach(var awareness in new[]{-1,-2,-3}) {
+            foreach(var awareness in new[]{-1,-2,-3,-5}) {
               if(SetThreadDpiAwarenessContext(new IntPtr(awareness)) == IntPtr.Zero) throw new Exception("Fixture DPI context unavailable");
               foreach(var screen in Screen.AllScreens) {
                 using(var form = new Form()) {
