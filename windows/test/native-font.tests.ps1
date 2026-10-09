@@ -102,6 +102,38 @@ try {
    } finally {$label.Dispose();$font.Dispose()}
   }
  }
+ $sourceFactoryStart=$source.IndexOf('$attribution=')
+ $sourceFactoryEnd=$source.IndexOf('$cadence=',$sourceFactoryStart)
+ $sourceFactory=$source.Substring($sourceFactoryStart,$sourceFactoryEnd-$sourceFactoryStart)
+ $setSources=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Set-AttributionLinks'},$true)
+ Invoke-Expression $setSources.Extent.Text
+ foreach($index in 0..([Windows.Forms.Screen]::AllScreens.Count-1)) {
+  Test-Case "monitor website links use complete GDI links and direct paint on screen $index" {
+   $sourcesPanel=[Windows.Forms.Panel]::new();$fonts=@()
+   try {
+    Invoke-Expression $sourceFactory
+    Set-AttributionLinks 'codexreset.ai / whenreset.app'
+    $links=@($attribution.Controls | Where-Object {$_ -is [Windows.Forms.LinkLabel]})
+    if($links.Count -ne 2){throw 'Website links share a GDI+ multi-link label'}
+    $fonts=@($attribution.Controls | ForEach-Object {$_.Font})
+    foreach($width in @(346,620)) {
+     $attribution.Size=[Drawing.Size]::new($width,22)
+     $attribution.Height=[Math]::Max(22,$attribution.GetPreferredSize([Drawing.Size]::new($width,0)).Height)
+     $attribution.PerformLayout();$right=0
+     foreach($child in $attribution.Controls) {
+      if($child.Left -lt $right -or $child.Right -gt $width -or $child.Bottom -gt $attribution.Height){throw 'Website links overlap or clip the source row'}
+      $right=$child.Right
+     }
+    }
+    foreach($link in $links) {
+     if($link.UseCompatibleTextRendering -or $link.Links.Count -ne 1 -or $link.Links[0].Start -ne 0 -or $link.Links[0].Length -ne $link.Text.Length){throw 'Website text does not use a complete GDI link'}
+     if($link.Links[0].LinkData -ne ('https://'+$link.Text+'/')){throw 'Website link target changed'}
+     $context=[FontDpiFixture]::PaintContext($link,$index)
+     if($context[0] -ne 3 -or $context[1] -ne 0){throw 'Website text is still painted into a DIB buffer'}
+    }
+   } finally {$sourcesPanel.Dispose();foreach($font in $fonts){$font.Dispose()}}
+  }
+ }
  Test-Case 'Chinese and English wrapping retain the same logical measurements' {
   $font=[Drawing.Font]::new('Segoe UI',10.5)
   try {

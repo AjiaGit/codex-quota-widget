@@ -44,6 +44,13 @@ public class WidgetLabel : System.Windows.Forms.Label {
                  System.Windows.Forms.ControlStyles.DoubleBuffer, false);
     }
 }
+public class WidgetLinkLabel : System.Windows.Forms.LinkLabel {
+    public WidgetLinkLabel() {
+        UseCompatibleTextRendering = false;
+        SetStyle(System.Windows.Forms.ControlStyles.OptimizedDoubleBuffer |
+                 System.Windows.Forms.ControlStyles.DoubleBuffer, false);
+    }
+}
 public static class WidgetPower {
     private static int resumed;
     public static void Enable() { Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged; }
@@ -371,9 +378,24 @@ $historyButton.TextAlign=[Drawing.ContentAlignment]::MiddleLeft; $historyButton.
 $historyButton.Cursor=[Windows.Forms.Cursors]::Hand; $historyButton.TabStop=$true; $historyButton.UseMnemonic=$false
 [void]$historyPanel.Controls.Add($historyButton)
 $historyRowsPanel=New-Object Windows.Forms.Panel; [void]$historyPanel.Controls.Add($historyRowsPanel)
-$attribution=New-Object Windows.Forms.LinkLabel
-$attribution.Font=[Drawing.Font]::new('Segoe UI',9); $attribution.LinkBehavior=[Windows.Forms.LinkBehavior]::HoverUnderline
-$attribution.TabStop=$true; [void]$sourcesPanel.Controls.Add($attribution)
+$attribution=New-Object Windows.Forms.FlowLayoutPanel
+$attribution.WrapContents=$true; $attribution.Margin=[Windows.Forms.Padding]::Empty; $attribution.Padding=[Windows.Forms.Padding]::Empty
+$script:attributionSiteLinks=@()
+foreach ($site in @('codexreset.ai','whenreset.app')) {
+    if ($script:attributionSiteLinks.Count) {
+        $separator=New-Label ' / ' 0 0 20 22 9
+        $separator.AutoSize=$true; $separator.Margin=[Windows.Forms.Padding]::Empty
+        [void]$attribution.Controls.Add($separator)
+    }
+    # A complete single link uses GDI; partial/multiple links force GDI+.
+    $siteLink=New-Object WidgetLinkLabel
+    $siteLink.Text=$site; $siteLink.Font=[Drawing.Font]::new('Segoe UI',9)
+    $siteLink.AutoSize=$true; $siteLink.Margin=[Windows.Forms.Padding]::Empty
+    $siteLink.LinkBehavior=[Windows.Forms.LinkBehavior]::HoverUnderline; $siteLink.UseMnemonic=$false
+    $siteLink.TabStop=$true; [void]$siteLink.Links.Add(0,$site.Length,('https://'+$site+'/'))
+    $script:attributionSiteLinks+=,$siteLink; [void]$attribution.Controls.Add($siteLink)
+}
+[void]$sourcesPanel.Controls.Add($attribution)
 $cadence=New-Label (T 'refreshCadence') 0 28 346 24 9; [void]$sourcesPanel.Controls.Add($cadence)
 foreach ($control in @($title,$status,$refresh,$compactButton,$close,$body)) { [void]$form.Controls.Add($control) }
 $script:resizeEdges = @{}
@@ -491,7 +513,9 @@ function Update-ResponsiveLayout {
                 $historyRowsPanel.Height=[Math]::Max(1,$rowsHeight); $historyHeight+=$rowsHeight+6
             }
             $historyPanel.Height=$historyHeight
-            $sourceHeight=Set-WrappedBox $attribution 0 0 $cw 22
+            Set-ControlBox $attribution 0 0 $cw 22
+            $sourceHeight=[Math]::Max(22,$attribution.GetPreferredSize([Drawing.Size]::new($cw,0)).Height)
+            $attribution.Height=$sourceHeight
             $sourcesPanel.Height=$sourceHeight+4+(Set-WrappedBox $cadence 0 ($sourceHeight+4) $cw 22)
             $order=@(Get-WidgetDetailSectionOrder ([bool]$script:layoutPlus))
             foreach ($name in $script:sectionPanels.Keys) { $script:sectionPanels[$name].Visible=$name -in $order }
@@ -707,14 +731,9 @@ function Show-External {
 }
 
 function Set-AttributionLinks([string]$text) {
-    $attribution.Text = $text
-    $attribution.Links.Clear()
-    foreach ($entry in @(@('codexreset.ai', 'https://codexreset.ai/'), @('whenreset.app', 'https://whenreset.app/'))) {
-        $index = $text.IndexOf($entry[0], [System.StringComparison]::Ordinal)
-        if ($index -ge 0) { [void]$attribution.Links.Add($index, $entry[0].Length, $entry[1]) }
-    }
+    # Site names/targets are stable in both languages; reuse controls and fonts.
+    $attribution.AccessibleName=$text
 }
-
 
 function Start-SettingsRequest {
     if ($script:settingsTask -and -not $script:settingsTask.IsCompleted) { return }
@@ -965,13 +984,15 @@ $refresh.Add_Click({ Start-Request $true })
 $compactButton.Add_Click({ Start-ModeTransition 'Compact' })
 $close.Add_Click({ $form.Hide() })
 $historyButton.Add_Click({ $script:historyExpanded=-not $script:historyExpanded; Show-External })
-$attribution.Add_LinkClicked({
+foreach ($sourceLink in $script:attributionSiteLinks) {
+$sourceLink.Add_LinkClicked({
     param($sender, $e)
     $url = [string]$e.Link.LinkData
     if ($url -in @('https://codexreset.ai/', 'https://whenreset.app/')) {
         try { Start-Process -FilePath $url | Out-Null } catch { }
     }
 })
+}
 $drag = {
     param($sender, $e)
     if ($script:mode -eq 'Detail' -and -not $script:animating -and $e.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
