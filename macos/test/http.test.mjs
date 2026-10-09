@@ -6,6 +6,29 @@ import { join } from 'node:path';
 import { get } from 'node:http';
 import { startMonitor, queryAppServer } from '../monitor.mjs';
 import { createAnnouncementStore } from '../external.mjs';
+test('public retry immediately re-fetches failed sources without refreshing account quota',async()=>{
+  const directory=await mkdtemp(join(tmpdir(),'quota-public-retry-'));
+  let publicQueries=0,quotaQueries=0;
+  const {server,stop}=await startMonitor({port:0,settingsFile:join(directory,'settings.json'),query:async()=>{quotaQueries++;return {};},externalQuery:async()=>{
+    publicQueries++;
+    if(publicQueries===1)throw Error('offline');
+    return {status:'ok',announcements:{status:'ok',stale:false,sourceUpdatedAt:new Date().toISOString(),items:[],history:[]}};
+  }});
+  const base=`http://127.0.0.1:${server.address().port}`;
+  try{
+    assert.equal((await(await fetch(base+'/api/external')).json()).status,'unavailable');
+    await fetch(base+'/api/usage');const beforeQuota=quotaQueries;
+    assert.equal((await fetch(base+'/api/external/refresh',{method:'POST',headers:{Origin:'https://attacker.example'}})).status,403);
+    assert.equal(publicQueries,1);
+    const response=await fetch(base+'/api/external/refresh',{method:'POST',headers:{Origin:base}});
+    assert.equal(response.status,200,'A public-only retry endpoint is available');
+    const next=await response.json();
+    assert.equal(next.status,'ok');assert.equal(next.announcements.stale,false);
+    assert.ok(Number.isFinite(next.announcements.lastFetchedAt));
+    assert.equal(publicQueries,2,'Retry must not silently reuse the one-minute cache');
+    assert.equal(quotaQueries,beforeQuota,'Public retry leaves account fetching independent');
+  }finally{await stop();await rm(directory,{recursive:true,force:true});}
+});
 test('settings API persists language and rejects cross-origin and invalid writes',async()=>{
   const directory=await mkdtemp(join(tmpdir(),'quota-http-'));
   const {server,stop}=await startMonitor({port:0,settingsFile:join(directory,'settings.json'),query:async()=>({}),externalQuery:async()=>({status:'unavailable'})});

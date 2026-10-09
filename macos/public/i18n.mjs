@@ -1,4 +1,15 @@
 const en = {
+  activityHeading:'Reset updates', accountType:'Your account', publicType:'Public update', recoveryRestored:'Your quota recovered',
+  recoveryHelp:'Observed from local quota readings. The detection time is not the exact reset time and does not confirm a global cause.',
+  earlierUpdates:'Earlier updates ({count})', activityEmpty:'No recent updates', activityEmptyHelp:'Earlier records are available in History.',
+  localTimeNote:'All times are local (currently {zone})', publicRefreshFailed:"Couldn't refresh public updates", publicStale:'Public information needs updating',
+  publicCache:'Showing saved public updates', publicNoCache:'No saved public updates are available.', publicRetry:'Retry',
+  lastFetched:'Last successful refresh {time}', publicChecked:'Public information checked {time}', publicLoading:'Reading public updates',
+  dataSources:'Data sources', moreMessage:'Message details', completionNotProvided:'Completion time: not provided by source',
+  confirmedPreview:'Confirmed announcement', upcomingGrantTitle:'Banked reset grant announced', upcomingResetTitle:'Global reset announced',
+  deliveredGrantTitle:'Source recorded a reset grant', deliveredResetTitle:'Source recorded a global reset',
+  unconfirmedGrantTitle:'Reset grant update', unconfirmedResetTitle:'Quota reset update',
+  recoveryMore:'About this record', publicRetrying:'Refreshing public updates',
   recoveryTitle:'My quota recoveries', recoveryDetected:'Noticed locally: {time}', recoveryObserved:'Previous reading: {time}', recoveryCount:'{count} records', recoveryNone:'No records',
   recoveryExplanation:'Changes to your own quota.',
   recoveryTracking:'Recording since {time}.', recoveryEmpty:'No new quota recovery recorded yet.',
@@ -32,6 +43,17 @@ const en = {
   installCodex:'Codex setup instructions',
 };
 const zh = {
+  activityHeading:'重置动态', accountType:'我的账号', publicType:'公开消息', recoveryRestored:'本账号额度已恢复',
+  recoveryHelp:'依据本机额度变化记录。发现时间不是准确重置时刻，也不能确认全局重置原因。',
+  earlierUpdates:'较早消息（{count}）', activityEmpty:'最近没有新动态', activityEmptyHelp:'历史消息仍可在下方查看。',
+  localTimeNote:'所有时间均为本地时间（当前 {zone}）', publicRefreshFailed:'公共信息刷新失败', publicStale:'公开信息待更新',
+  publicCache:'正在显示已保存的公共信息', publicNoCache:'暂无已保存的公共信息。', publicRetry:'重试',
+  lastFetched:'上次成功获取 {time}', publicChecked:'公共信息获取于 {time}', publicLoading:'正在读取公共信息',
+  dataSources:'数据来源', moreMessage:'消息详情', completionNotProvided:'完成时间：来源未提供',
+  confirmedPreview:'已确认预告', upcomingGrantTitle:'重置次数赠送预告', upcomingResetTitle:'全局额度重置预告',
+  deliveredGrantTitle:'来源已记录重置次数赠送', deliveredResetTitle:'来源已记录全局额度重置',
+  unconfirmedGrantTitle:'重置次数赠送消息', unconfirmedResetTitle:'额度重置消息',
+  recoveryMore:'记录说明', publicRetrying:'正在刷新公共信息',
   resetActivity:'额度恢复与重置消息',
   recoveryTitle:'我的额度恢复', recoveryDetected:'本机发现：{time}', recoveryObserved:'上次读取：{time}', recoveryCount:'{count} 条记录', recoveryNone:'暂无记录',
   recoveryExplanation:'这里只记录你自己的额度变化。',
@@ -94,4 +116,14 @@ export function formatLocalAnnouncementDate(milliseconds,timeZone,language,now=D
   const offset=new Intl.DateTimeFormat('en',{timeZone,timeZoneName:'longOffset'}).formatToParts(milliseconds).find(part=>part.type==='timeZoneName').value;
   const zone=offset==='GMT'?'UTC+00:00':offset.replace('GMT','UTC');
   return t(language,'localAnnouncementTime',{date:formatShortDate(milliseconds,timeZone,language,now),zone});
+}
+export function localTimeZone(timeZone,now=Date.now()) {
+  const name=new Intl.DateTimeFormat('en',{timeZone,timeZoneName:'shortOffset'}).formatToParts(now).find(part=>part.type==='timeZoneName').value;
+  if(name==='GMT')return 'UTC+00:00';
+  return name.replace(/^GMT([+-])(\d{1,2})(?::(\d{2}))?$/,(_,sign,hours,minutes)=>`UTC${sign}${hours.padStart(2,'0')}:${minutes||'00'}`);
+}
+export function formatCompactLocalDate(milliseconds,timeZone,language,now=Date.now()) {
+  return localTimeZone(timeZone,milliseconds)===localTimeZone(timeZone,now)
+    ? formatShortDate(milliseconds,timeZone,language,now)
+    : formatLocalAnnouncementDate(milliseconds,timeZone,language,now);
 }

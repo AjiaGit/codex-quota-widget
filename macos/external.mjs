@@ -16,7 +16,7 @@ function safeHttpsUrl(value) {
   } catch { return null; }
 }
 
-const emptyAnnouncements = () => ({ status: 'unavailable', items: [], history: [], sourceUpdatedAt: null, stale: true });
+const emptyAnnouncements = () => ({ status: 'unavailable', items: [], history: [], sourceUpdatedAt: null, lastFetchedAt: null, stale: true });
 function preciseTimestamp(value) {
   // A calendar date or an unzoned clock time cannot be converted reliably.
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/i.test(value) || !dateOnly(value.slice(0,10))) return NaN;
@@ -108,7 +108,8 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
   try {
     const saved = JSON.parse(await readFile(file, 'utf8'));
     if (saved.version === 1) snapshot = { ...snapshot, items: clean(saved.items), history: clean(saved.history),
-      sourceUpdatedAt: timestamp(saved.sourceUpdatedAt, now()), stale: true };
+      sourceUpdatedAt: timestamp(saved.sourceUpdatedAt, now()),
+      lastFetchedAt: Number.isFinite(saved.lastFetchedAt) && saved.lastFetchedAt >= 0 && saved.lastFetchedAt <= now() ? saved.lastFetchedAt : null, stale: true };
     const tracking = saved.version === 1 && saved.alertTracking;
     if(tracking?.version === 1 && Number.isFinite(tracking.baselineAt) && tracking.baselineAt <= now()) {
       baselineAt = tracking.baselineAt;
@@ -168,6 +169,7 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
         reconciled && !reconciled.has(item.id) && !item.deliveredAt ? {...item,sourceWithdrawn:true} : item);
       for(const item of retained)if(item.sourceWithdrawn)unread.delete(item.id);
       snapshot = { status: input?.status === 'ok' ? 'ok' : 'unavailable',
+        lastFetchedAt: fresh ? now() : snapshot.lastFetchedAt,
         items: deduplicate([...retained, ...freshItems]),
         history: deduplicate([...previous.history, ...freshHistory, ...retained.filter(item=>item.sourceWithdrawn)]),
         sourceUpdatedAt: timestamp(input?.sourceUpdatedAt, now()) || snapshot.sourceUpdatedAt,

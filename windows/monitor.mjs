@@ -76,9 +76,9 @@ export async function startMonitor({port=PORT,settingsFile=settingsPath(),query,
   const cache=createQuotaCache({query,recoveryStore});
   const announcements=await createAnnouncementStore({file:join(dirname(settingsFile),'announcements.json')});
   let externalState={status:'loading',lastGlobal:null},externalPending=null,lastExternalFetch=0;
-  const refreshExternal=(force=false)=>{
+  const refreshExternal=(force=false,retry=false)=>{
     if(externalPending)return externalPending;
-    if(force&&Date.now()-lastExternalFetch<60000)return Promise.resolve(externalState);
+    if(force&&!retry&&Date.now()-lastExternalFetch<60000)return Promise.resolve(externalState);
     lastExternalFetch=Date.now();externalPending=Promise.resolve().then(async()=>{
       try{const next=await externalQuery();await announcements.update(next.announcements);externalState=next;}
       catch{externalState={...externalState,status:'unavailable'};await announcements.update({status:'unavailable'});}
@@ -113,6 +113,7 @@ export async function startMonitor({port=PORT,settingsFile=settingsPath(),query,
           try{let body='';for await(const chunk of request){body+=chunk;if(body.length>4096)throw Error();}json(await saveSettings(JSON.parse(body),settingsFile));}catch{response.writeHead(400).end();}return;
         }
         if(url.pathname==='/api/refresh'){await Promise.allSettled([cache.refresh(),refreshExternal(true)]);json(cache.state);return;}
+        if(url.pathname==='/api/external/refresh'){await refreshExternal(true,true);json({...externalState,announcements:announcements.state,announcementAlerts:announcements.alerts});return;}
       }
       if(request.method==='GET'&&files.has(url.pathname)){const[name,type]=files.get(url.pathname);try{response.writeHead(200,{'Content-Type':type+'; charset=utf-8'});response.end(await readFile(join(ROOT,'public',name)));}catch{response.end();}return;}
       response.writeHead(404).end();

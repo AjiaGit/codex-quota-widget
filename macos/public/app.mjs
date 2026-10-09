@@ -1,4 +1,4 @@
-import { t, resolveLanguage, formatDate, formatRelativeUpdate, formatShortDate, formatLocalAnnouncementDate } from './i18n.mjs';
+import { t, resolveLanguage, formatDate, formatRelativeUpdate, formatShortDate, formatLocalAnnouncementDate, formatCompactLocalDate, localTimeZone } from './i18n.mjs';
 const TEN_MINUTES = 10 * 60 * 1000;
 const PUBLIC_MAX_AGE = 24 * 60 * 60 * 1000;
 function publicSourceFresh(state,now) {
@@ -25,7 +25,7 @@ export function deriveView(state,now=Date.now(),timeZone=Intl.DateTimeFormat().r
 export function deriveResetDetails(state,language='en',timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone,now=Date.now()) {
   if(deriveView(state,now,timeZone,language).percentText==='—')return {note:t(language,'detailsPending'),rows:[]};
   const rows=Array.isArray(state.resetDetails)?state.resetDetails:null;
-  return {note:t(language,rows===null?'detailsUnknown':rows.length?'detailsPartial':'detailsEmpty'),rows:(rows||[]).map(row=>({title:row.title||t(language,'genericReset'),description:row.description||'',granted:t(language,'granted')+': '+(row.grantedAt?formatDate(row.grantedAt*1000,timeZone,language):t(language,'dateUnknown')),expires:t(language,'expires')+': '+(row.expiresAt?formatDate(row.expiresAt*1000,timeZone,language):t(language,'dateUnknown'))}))};
+  return {note:t(language,rows===null?'detailsUnknown':rows.length?'detailsPartial':'detailsEmpty'),rows:(rows||[]).map(row=>({title:row.title||t(language,'genericReset'),description:row.description||'',granted:t(language,'granted')+': '+(row.grantedAt?formatCompactLocalDate(row.grantedAt*1000,timeZone,language,now):t(language,'dateUnknown')),expires:t(language,'expires')+': '+(row.expiresAt?formatCompactLocalDate(row.expiresAt*1000,timeZone,language,now):t(language,'dateUnknown'))}))};
 }
 export function deriveRecoveryView(state,language='en',timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone,now=Date.now()) {
   const history=state?.status==='ok'?state.recoveryHistory:null;
@@ -35,7 +35,10 @@ export function deriveRecoveryView(state,language='en',timeZone=Intl.DateTimeFor
     Number.isInteger(row.afterPercent)&&row.beforePercent>=0&&row.afterPercent<=100&&row.afterPercent>row.beforePercent)
     .sort((a,b)=>b.detectedAt-a.detectedAt).slice(0,50).map(row=>({detectedAt:row.detectedAt,change:`${row.beforePercent}% → ${row.afterPercent}%`,
       detected:t(language,'recoveryDetected',{time:formatLocalAnnouncementDate(row.detectedAt,timeZone,language,now)}),
-      observed:t(language,'recoveryObserved',{time:formatLocalAnnouncementDate(row.observedFrom,timeZone,language,now)})})):[];
+      observed:t(language,'recoveryObserved',{time:formatLocalAnnouncementDate(row.observedFrom,timeZone,language,now)}),
+      display:{title:t(language,'recoveryRestored'),label:t(language,'accountType'),
+        facts:[t(language,'recoveryDetected',{time:formatCompactLocalDate(row.detectedAt,timeZone,language,now)})],
+        detailFacts:[t(language,'recoveryObserved',{time:formatCompactLocalDate(row.observedFrom,timeZone,language,now)})],help:t(language,'recoveryHelp')}})):[];
   const started=ready&&Number.isFinite(history.trackingSince)?t(language,'recoveryTracking',{time:formatLocalAnnouncementDate(history.trackingSince,timeZone,language,now)}):'';
   return {rows,note:[t(language,'recoveryExplanation'),started,history?.status==='unsaved'?t(language,'recoveryUnsaved'):''].filter(Boolean).join(' '),
     empty:t(language,ready?'recoveryEmpty':'recoveryUnavailable')};
@@ -59,12 +62,22 @@ export function deriveAnnouncementsView(state,now=Date.now(),timeZone=Intl.DateT
     const completedText=confirmed?`${t(language,'completed')} ${formatLocalAnnouncementDate(delivered,timeZone,language,now)}`:'';
     const announcedText=Number.isFinite(announced)?t(language,explicit?'published':'posted',{time:formatLocalAnnouncementDate(announced,timeZone,language,now)}):'';
     const status=confirmed?t(language,item.kind==='banked'?'grantDone':'resetDone'):t(language,item.sourceWithdrawn?'sourceWithdrawn':phase==='unknown'?'historyDeliveryUnknown':phase==='unconfirmed'?'sourceUnconfirmed':phase==='waiting'?'waitingDelivery':phase==='upcoming'?'upcoming':'announcedWaiting');
+    const summary=language==='zh-CN'?(item.summaryZh||item.summary||''):(item.summary||'');
+    const titleKey=item.sourceWithdrawn?'withdrawnRecord':(confirmed?'delivered':explicit?'upcoming':'unconfirmed')+(item.kind==='banked'?'GrantTitle':'ResetTitle');
+    const compactPlanned=!explicit?'':plannedDate?t(language,scheduleKey,{time:Number.isFinite(scheduled)?formatCompactLocalDate(scheduled,timeZone,language,now):plannedDate}):!confirmed&&!historical?t(language,'scheduleUnknown'):'';
+    const compactCompleted=confirmed?`${t(language,'completed')} ${formatCompactLocalDate(delivered,timeZone,language,now)}`:'';
+    const compactAnnounced=Number.isFinite(announced)?t(language,explicit?'published':'posted',{time:formatCompactLocalDate(announced,timeZone,language,now)}):'';
     return {id:item.id||item.sourceUrl+'#'+item.kind,kind:item.kind,phase,announcedAt:Number.isFinite(announced)?announced:null,title:t(language,item.sourceWithdrawn?'withdrawnRecord':item.kind==='banked'?(explicit?'confirmedGrant':'relatedGrant'):(explicit?'confirmedReset':'relatedReset')),status,
       scheduleNote:explicit&&Number.isFinite(scheduled)&&item.scheduledTimeZone?t(language,'sourceTimeZoneNote',{zone:item.scheduledTimeZone}):'',scheduleNoteDetail:language==='zh-CN'?(item.summaryZh||''):(item.summary||item.summaryZh||''),
       plannedText,completedText,announcedText,scopeText,retentionText:phase==='delivered'?t(language,'retention'):'',
       timeText:[completedText||plannedText||announcedText,scopeText].filter(Boolean).join(' · '),
       sourceUrl:safeSource(item.sourceUrl),sourceLabel:t(language,explicit?'viewAnnouncement':'viewSource'),deliverySourceUrl:confirmed?safeSource(item.deliverySourceUrl):null,
-      summary:language==='zh-CN'?(item.summaryZh||item.summary||''):(item.summary||'')};
+      summary,
+      display:{title:t(language,titleKey),label:t(language,'publicType'),scope:scopeText,
+        facts:[compactCompleted||compactPlanned||compactAnnounced].filter(Boolean),
+        detailFacts:[compactPlanned,compactAnnounced].filter(text=>text&&text!==(compactCompleted||compactPlanned||compactAnnounced)),
+        completionMissing:!confirmed&&(!explicit||historical),
+        status:['waiting','announced'].includes(phase)?status:'',summary}};
   };
   for(const item of state?.items||[]){const row=renderItem(item);if(!row)continue;if(row.phase==='archived')history.push(row);else rows.push(row);seen.add(row.id);}
   for(const item of state?.history||[]){const row=renderItem(item,true);if(row&&!seen.has(row.id)){history.push(row);seen.add(row.id);}}
@@ -82,7 +95,18 @@ export function deriveResetActivityView(quotaState,publicState,now=Date.now(),ti
   }
   const newestFirst=(a,b)=>(b.detectedAt??b.announcedAt??-Infinity)-(a.detectedAt??a.announcedAt??-Infinity);
   rows.sort(newestFirst);history.sort(newestFirst);
-  return {rows,history,publicView,recoveryWarning:quotaState?.status==='ok'&&quotaState.recoveryHistory?.status==='unsaved'?t(language,'recoveryUnsaved'):''};
+  const latestPersonal=rows.find(row=>row.kind==='recovery'),latestPublic=rows.find(row=>row.kind!=='recovery');
+  const featuredRows=rows.filter(row=>row===latestPersonal||row===latestPublic||['upcoming','waiting','announced'].includes(row.phase));
+  const featured=new Set(featuredRows);
+  return {rows,featuredRows,earlierRows:rows.filter(row=>!featured.has(row)),history,publicView,recoveryWarning:quotaState?.status==='ok'&&quotaState.recoveryHistory?.status==='unsaved'?t(language,'recoveryUnsaved'):''};
+}
+export function derivePublicNotice(state,now=Date.now(),timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone,language='en') {
+  const feed=state?.announcements;
+  const visible=state?.status!=='loading'&&!(state?.status==='ok'&&feed?.status==='ok'&&!feed.stale&&publicSourceFresh(feed,now));
+  const hasCache=Boolean(feed?.items?.length||feed?.history?.length);
+  const stamp=feed?.lastFetchedAt;
+  return {visible,hasCache,failed:state?.status==='unavailable'||feed?.status==='unavailable',
+    lastFetchedText:Number.isFinite(stamp)&&stamp<=now?t(language,'lastFetched',{time:formatCompactLocalDate(stamp,timeZone,language,now)}):''};
 }
 export function derivePublicStatus(state,now=Date.now(),timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone,language='en') {
   if(state?.announcements?.status==='ok'&&!state.announcements.stale&&publicSourceFresh(state.announcements,now))return '';
@@ -96,10 +120,13 @@ export function announcementIdsForReading(alerts,view,visible) {
   const rendered=new Set([...(view?.rows||[]),...(view?.history||[])].map(row=>row.id));
   return alerts.unread.filter(row=>['banked','regular'].includes(row?.kind)&&rendered.has(row.id)).map(row=>row.id);
 }
+export function visibleAnnouncementView(activity,{earlierOpen=false,historyOpen=false}={}) {
+  return {rows:[...activity.featuredRows,...(earlierOpen?activity.earlierRows:[])],history:historyOpen?activity.history:[]};
+}
 if(typeof document!=='undefined') {
   document.body.dataset.embedded=String(new URLSearchParams(location.search).get('embedded')==='1');
   const byId=id=>document.getElementById(id),root=byId('card'),refreshButton=byId('refresh');
-  let state={status:'loading'},externalState={status:'loading'},loading=false,setting='auto';
+  let state={status:'loading'},externalState={status:'loading'},loading=false,retryingPublic=false,setting='auto';
   let detailVisible=document.body.dataset.embedded!=='true',acknowledging=false;
   async function acknowledgeRenderedAnnouncements(view) {
     const ids=announcementIdsForReading(externalState.announcementAlerts,view,detailVisible&&!document.hidden);
@@ -130,7 +157,7 @@ if(typeof document!=='undefined') {
     });
   }
   const layoutObserver=new ResizeObserver(reportDetailLayout);layoutObserver.observe(root);
-  document.addEventListener('toggle',reportDetailLayout,true);
+  document.addEventListener('toggle',()=>{render();reportDetailLayout();},true);
   function render() {
     const lang=language(),view=deriveView(state,Date.now(),undefined,lang);
     document.documentElement.lang=lang;document.title=t(lang,'brand');
@@ -138,16 +165,21 @@ if(typeof document!=='undefined') {
     root.dataset.tone=view.tone;root.style.setProperty('--ring-value',`${view.ringPercent}%`);
     for(const[id,key]of Object.entries({percent:'percentText',caption:'message',countdown:'countdownText',cards:'cardsCountText','five-hour-value':'fiveHourPercentText'}))byId(id).textContent=view[key]??'—';
     byId('status').textContent=view.percentText==='—'?view.statusText:formatRelativeUpdate(state.updatedAt,Date.now(),lang);
-    byId('reset').textContent=view.percentText==='—'?'—':formatShortDate(state.resetsAt*1000,undefined,lang);
-    byId('five-hour-reset').textContent=view.fiveHourResetText==='—'?'—':formatShortDate(state.fiveHour.resetsAt*1000,undefined,lang);
+    const now=Date.now(),zone=Intl.DateTimeFormat().resolvedOptions().timeZone;
+    byId('reset').textContent=view.percentText==='—'?'—':formatCompactLocalDate(state.resetsAt*1000,zone,lang,now);
+    byId('five-hour-reset').textContent=view.fiveHourResetText==='—'?'—':formatCompactLocalDate(state.fiveHour.resetsAt*1000,zone,lang,now);
     refreshButton.setAttribute('aria-label',t(lang,'refresh'));refreshButton.title=t(lang,'refresh');
     byId('caption').hidden=view.percentText!=='—';
     byId('five-hour').hidden=!view.showFiveHour;
-    const publicStatus=derivePublicStatus(externalState,Date.now(),undefined,lang);
-    document.querySelector('.announcements').setAttribute('aria-label',t(lang,'resetActivity'));
-    byId('public-status').textContent=publicStatus;byId('public-status').hidden=!publicStatus;
-    const activity=deriveResetActivityView(state,externalState.announcements,Date.now(),undefined,lang);
-    const announcements=activity.publicView;
+    byId('local-time-note').textContent=t(lang,'localTimeNote',{zone:localTimeZone(zone,now)});
+    const publicNotice=derivePublicNotice(externalState,now,zone,lang);
+    byId('public-status').hidden=!publicNotice.visible;
+    byId('public-status-title').textContent=t(lang,publicNotice.failed?'publicRefreshFailed':'publicStale');
+    byId('public-cache-note').textContent=t(lang,publicNotice.hasCache?'publicCache':'publicNoCache');
+    byId('public-fetch-time').textContent=publicNotice.lastFetchedText;byId('public-fetch-time').hidden=!publicNotice.lastFetchedText;
+    byId('public-retry').disabled=loading||retryingPublic;byId('public-retry').textContent=t(lang,loading||retryingPublic?'publicRetrying':'publicRetry');
+    byId('public-checked-time').textContent=publicNotice.lastFetchedText;byId('public-checked-time').hidden=!publicNotice.lastFetchedText;
+    const activity=deriveResetActivityView(state,externalState.announcements,now,zone,lang);
     const icon=(kind)=>{
       const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('aria-hidden','true');svg.classList.add('section-icon');
       if(kind==='recovery'){const path=document.createElementNS(svg.namespaceURI,'path');path.setAttribute('d','M3 11a9 9 0 1 1 3 8M3 5v6h6M12 7v5l3 2');svg.append(path);return svg;}
@@ -155,30 +187,38 @@ if(typeof document!=='undefined') {
     };
     const announcementNode=(row,history=false)=>{
       const item=document.createElement(history?'li':'article');item.className='announcement';item.dataset.phase=row.phase;
-      if(!history)item.append(icon(row.kind));
+      item.append(icon(row.kind));
       const content=document.createElement('div');content.className='announcement-content';
-      const heading=document.createElement(history?'strong':'h2');heading.textContent=row.title;content.append(heading);
-      if(row.kind==='recovery') {
-        const change=document.createElement('p');change.className='recovery-change';change.textContent=row.change;content.append(change);
-        for(const text of [row.detected,history?row.observed:''].filter(Boolean)){const line=document.createElement('p');line.textContent=text;content.append(line);}
-        item.append(content);return item;
+      const display=row.display,headingLine=document.createElement('div');headingLine.className='announcement-heading';
+      const label=document.createElement('span');label.className='record-type';label.textContent=display.label;
+      const heading=document.createElement('h3');heading.textContent=display.title;headingLine.append(label,heading);
+      const sourceLink=(url,text)=>{const link=document.createElement('a');link.href=url;link.target='_blank';link.rel='noopener noreferrer';link.textContent=text;return link;};
+      if(row.sourceUrl){const link=sourceLink(row.sourceUrl,row.sourceLabel);link.className='announcement-source';headingLine.append(link);}
+      content.append(headingLine);
+      for(const text of display.facts){const line=document.createElement('p');line.className='announcement-fact';line.textContent=text;
+        if(display.scope){const scope=document.createElement('span');scope.className='announcement-scope';scope.textContent=display.scope;line.append(scope);}
+        content.append(line);
       }
-      if(row.phase!=='upcoming'){const phase=document.createElement('p');phase.className='phase';phase.textContent=row.status;content.append(phase);}
-      let factLine;
-      for(const text of[row.plannedText,row.completedText,row.announcedText].filter(Boolean)){factLine=document.createElement('p');factLine.className='announcement-fact';factLine.textContent=text;content.append(factLine);}
-      if(row.scheduleNote){const note=document.createElement('p');note.className='announcement-fact retention-note';note.textContent=row.scheduleNote;note.title=row.scheduleNoteDetail;content.append(note);}
-      if(!factLine){factLine=document.createElement('p');content.append(factLine);}
-      const scope=document.createElement('span');scope.className='announcement-scope';scope.textContent=row.scopeText;factLine.append(scope);
-      if((history||row.phase==='unconfirmed')&&row.summary){const p=document.createElement('p');p.textContent=t(lang,'sourceSummary',{summary:row.summary});content.append(p);}
-      const line=document.createElement('p');line.className='announcement-source';
-      for(const[url,label]of[[row.sourceUrl,row.sourceLabel],[row.deliverySourceUrl,t(lang,'delivery')]])if(url){if(line.childNodes.length)line.append(document.createTextNode(' · '));const link=document.createElement('a');link.href=url;link.target='_blank';link.rel='noopener noreferrer';link.textContent=label;line.append(link);}
-      content.append(line);
-      if(row.retentionText&&!history){const p=document.createElement('p');p.className='retention-note';p.textContent=row.retentionText;content.append(p);}
+      if(display.scope&&!display.facts.length){const line=document.createElement('p');line.textContent=display.scope;content.append(line);}
+      if(display.completionMissing){const line=document.createElement('p');line.textContent=t(lang,'completionNotProvided');content.append(line);}
+      if(display.status){const line=document.createElement('p');line.className='phase';line.textContent=display.status;content.append(line);}
+      if(display.help||display.detailFacts.length||display.summary||row.scheduleNote||row.deliverySourceUrl){
+        const detail=document.createElement('details');detail.className='record-details';
+        const summary=document.createElement('summary');summary.textContent=t(lang,row.kind==='recovery'?'recoveryMore':'moreMessage');detail.append(summary);
+        for(const text of[display.help,...display.detailFacts,row.scheduleNote,display.summary?t(lang,'sourceSummary',{summary:display.summary}):''].filter(Boolean)){const line=document.createElement('p');line.textContent=text;detail.append(line);}
+        if(row.deliverySourceUrl){const line=document.createElement('p');line.append(sourceLink(row.deliverySourceUrl,t(lang,'delivery')));detail.append(line);}
+        content.append(detail);
+      }
       item.append(content);return item;
     };
-    replaceList('announcement-list',JSON.stringify([lang,activity.rows]),()=>activity.rows.map(row=>announcementNode(row)));
-    const notice=announcements.rows.length&&publicStatus?'':announcements.notice;
+    replaceList('announcement-list',JSON.stringify([lang,activity.featuredRows]),()=>activity.featuredRows.map(row=>announcementNode(row)));
+    const earlier=byId('earlier-updates');earlier.hidden=!activity.earlierRows.length;
+    byId('earlier-updates-label').textContent=t(lang,'earlierUpdates',{count:activity.earlierRows.length});
+    replaceList('earlier-updates-list',JSON.stringify([lang,activity.earlierRows]),()=>activity.earlierRows.map(row=>announcementNode(row)));
+    const empty=!activity.rows.length;
+    const notice=!empty?'':externalState.status==='loading'?t(lang,'publicLoading'):publicNotice.visible?'':t(lang,'activityEmpty');
     byId('announcement-notice').textContent=notice;byId('announcement-notice').hidden=!notice;
+    byId('activity-empty-help').hidden=!empty||publicNotice.visible||externalState.status==='loading';
     byId('recovery-warning').textContent=activity.recoveryWarning;byId('recovery-warning').hidden=!activity.recoveryWarning;
     replaceList('announcement-history-list',JSON.stringify([lang,activity.history]),()=>{
       if(activity.history.length)return activity.history.map(row=>announcementNode(row,true));
@@ -189,11 +229,18 @@ if(typeof document!=='undefined') {
     byId('ring').setAttribute('aria-label',t(lang,'weekly'));byId('ring').setAttribute('aria-valuenow',String(view.ringPercent));byId('ring').setAttribute('aria-valuetext',view.percentText==='—'?view.statusText:t(lang,'percentRemaining',{percent:view.ringPercent}));
     byId('language').value=setting;refreshButton.disabled=loading;byId('setup-link').hidden=state.errorCode!=='cli_missing';
     reportDetailLayout();
-    acknowledgeRenderedAnnouncements(announcements);
+    acknowledgeRenderedAnnouncements(visibleAnnouncementView(activity,{earlierOpen:!earlier.hidden&&earlier.open,historyOpen:byId('announcement-history').open}));
   }
   async function loadExternal(){try{const response=await fetch('/api/external',{cache:'no-store'});if(!response.ok)throw Error();externalState=await response.json();}catch{externalState={...externalState,status:'unavailable',announcements:{...externalState.announcements,status:'unavailable',stale:true}};}render();}
+  async function retryPublic(){
+    if(retryingPublic||loading)return;
+    retryingPublic=true;render();
+    try{const response=await fetch('/api/external/refresh',{method:'POST',cache:'no-store'});if(!response.ok)throw Error();externalState=await response.json();}
+    catch{externalState={...externalState,status:'unavailable',announcements:{...externalState.announcements,status:'unavailable',stale:true}};}
+    finally{retryingPublic=false;render();}
+  }
   async function loadSettings(){try{const response=await fetch('/api/settings',{cache:'no-store'});if(response.ok)setting=(await response.json()).language;}catch{}render();}
   async function load(force=false){if(loading)return;loading=true;render();try{const response=await fetch(force?'/api/refresh':'/api/usage',{method:force?'POST':'GET',cache:'no-store'});if(!response.ok)throw Error();state=await response.json();}catch{state={status:'unavailable',errorCode:'service_unavailable'};}finally{loading=false;render();loadExternal();loadSettings();}}
   byId('language').addEventListener('change',async event=>{try{const response=await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({language:event.target.value})});if(response.ok)setting=(await response.json()).language;}catch{}render();});
-  refreshButton.addEventListener('click',()=>load(true));document.addEventListener('visibilitychange',()=>{if(!document.hidden)load();});setInterval(()=>load(),60000);setInterval(render,30000);render();load();
+  refreshButton.addEventListener('click',()=>load(true));byId('public-retry').addEventListener('click',retryPublic);document.addEventListener('visibilitychange',()=>{if(!document.hidden)load();});setInterval(()=>load(),60000);setInterval(render,30000);render();load();
 }
