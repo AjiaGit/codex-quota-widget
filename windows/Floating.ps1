@@ -34,6 +34,16 @@ public static class WidgetDisplay {
         catch (EntryPointNotFoundException) { return false; }
     }
 }
+public class WidgetLabel : System.Windows.Forms.Label {
+    public WidgetLabel() {
+        // Match the GDI TextRenderer used to measure wrapped label layout.
+        UseCompatibleTextRendering = false;
+        // WinForms' DIB text buffer stays at 96 DPI and bypasses GDI scaling.
+        // Paint to the window DC while preserving label layout and mouse events.
+        SetStyle(System.Windows.Forms.ControlStyles.OptimizedDoubleBuffer |
+                 System.Windows.Forms.ControlStyles.DoubleBuffer, false);
+    }
+}
 public static class WidgetPower {
     private static int resumed;
     public static void Enable() { Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged; }
@@ -164,7 +174,7 @@ function New-Color([string]$html) {
 }
 
 function New-Label([string]$text, [int]$x, [int]$y, [int]$width, [int]$height, [float]$size, [bool]$bold = $false) {
-    $label = New-Object System.Windows.Forms.Label
+    $label = New-Object WidgetLabel
     $label.Text = $text
     $label.Location = New-Object System.Drawing.Point($x, $y)
     $label.Size = New-Object System.Drawing.Size($width, $height)

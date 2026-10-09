@@ -23,6 +23,31 @@ public static class FontDpiFixture {
  [DllImport("user32.dll")] public static extern bool AreDpiAwarenessContextsEqual(IntPtr a,IntPtr b);
  [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr window,out Rect rect);
  [DllImport("user32.dll")] static extern IntPtr GetWindowDpiAwarenessContext(IntPtr window);
+ [DllImport("gdi32.dll")] static extern uint GetObjectType(IntPtr obj);
+ [DllImport("gdi32.dll")] static extern IntPtr GetCurrentObject(IntPtr dc,uint kind);
+ [DllImport("gdi32.dll")] static extern int GetObject(IntPtr obj,int count,IntPtr buffer);
+ public static int[] PaintContext(Label label,int screenIndex) {
+  int type=0,dib=0;
+  var previous=SetThreadDpiAwarenessContext(new IntPtr(-5));
+  if(previous==IntPtr.Zero) throw new Exception("Fixture GDI scaling unavailable");
+  try {
+   using(var form=new Form()) {
+    var screen=Screen.AllScreens[screenIndex]; form.Text="FABRICATED TEST DATA - direct text paint";
+    form.StartPosition=FormStartPosition.Manual;form.AutoScaleMode=AutoScaleMode.None;
+    form.Location=new Point(screen.WorkingArea.Left+80,screen.WorkingArea.Top+80);form.ClientSize=new Size(340,100);
+    label.Paint+=delegate(object sender,PaintEventArgs e) {
+     IntPtr dc=e.Graphics.GetHdc();IntPtr buffer=Marshal.AllocHGlobal(128);
+     try {
+      type=(int)GetObjectType(dc);
+      int bytes=GetObject(GetCurrentObject(dc,7),128,buffer);
+      dib=bytes>(IntPtr.Size==8?32:24)?1:0;
+     } finally {Marshal.FreeHGlobal(buffer);e.Graphics.ReleaseHdc(dc);}
+    };
+    form.Controls.Add(label);form.Show();label.Refresh();Application.DoEvents();form.Close();
+   }
+   return new[]{type,dib};
+  } finally {SetThreadDpiAwarenessContext(previous);}
+ }
  public static Rectangle[] Measure(int context,int screenIndex) {
   var previous=SetThreadDpiAwarenessContext(new IntPtr(context));
   if(previous==IntPtr.Zero) throw new Exception("Fixture DPI mode unavailable");
@@ -61,6 +86,20 @@ try {
   Test-Case "GDI scaling preserves logical and physical window geometry on screen $index" {
    $before=[FontDpiFixture]::Measure(-1,$index);$after=[FontDpiFixture]::Measure(-5,$index)
    if($before[0] -ne $after[0] -or $before[1] -ne $after[1]){throw 'Saved window geometry changed with text scaling'}
+  }
+ }
+ $labelFactory=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'New-Label'},$true)
+ Invoke-Expression $labelFactory.Extent.Text
+ foreach($index in 0..([Windows.Forms.Screen]::AllScreens.Count-1)) {
+  Test-Case "actual label paints to a window DC without a stretched DIB buffer on screen $index" {
+   $label=New-Label 'FABRICATED TEST DATA' 10 10 300 40 10.5
+   $font=$label.Font
+   try {
+    if($label.UseCompatibleTextRendering){throw 'Actual label uses GDI+ instead of the GDI layout/rendering path'}
+    $label.BackColor=[Drawing.Color]::FromArgb(31,36,43);$label.ForeColor=[Drawing.Color]::White
+    $paintContext=[FontDpiFixture]::PaintContext($label,$index)
+    if($paintContext[0] -ne 3 -or $paintContext[1] -ne 0){throw "Text paint uses HDC type $($paintContext[0]), DIB buffer $($paintContext[1]); enhanced scaling is bypassed"}
+   } finally {$label.Dispose();$font.Dispose()}
   }
  }
  Test-Case 'Chinese and English wrapping retain the same logical measurements' {
