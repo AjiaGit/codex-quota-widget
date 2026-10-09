@@ -2,6 +2,9 @@
 
 ## 0.1.0
 
+- Windows follows the primary macOS interface with inline reset-credit details, responsive activity cards and section icons, earlier-update/history/source disclosures, and a separate refresh-cadence footer. Direct GDI text and website links remain intact.
+- Native Windows announcement acknowledgements use the service record ID and include only displayed records; pending public responses are consumed before another request starts.
+
 - Windows CLI discovery rejects desktop GUI hosts and prefers an extracted console CLI only when its SHA-256 matches the installed Store package, restoring quota reads from the Start menu or taskbar without Codex-injected environment variables.
 
 - Windows outside-click detection uses physical screen coordinates on scaled monitors, so the reset-details link and owned dialogs stay interactive. Native regressions exercise the production hook and floating handler in multiple DPI contexts.

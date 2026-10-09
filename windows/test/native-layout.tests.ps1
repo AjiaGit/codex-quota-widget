@@ -48,7 +48,7 @@ Test-Case 'narrow header keeps relative age below title and ordered equal toolba
     Assert-Equal (Get-WidgetHeaderLayout 620 132 145).statusSecondRow $false 'Wider inline status'
 }
 Test-Case 'Plus quota precedes credits and announcements lead directly to history' {
-    Assert-Equal ((Get-WidgetDetailSectionOrder $true) -join ',') 'hero,fiveHour,credits,announcements,history,sources' 'Plus section order'
+    Assert-Equal ((Get-WidgetDetailSectionOrder $true) -join ',') 'hero,fiveHour,credits,announcements,history,sources,footer' 'Plus section order'
     Assert-Equal ((Get-WidgetDetailSectionOrder $false) -contains 'fiveHour') $false 'Non-Plus quota'
 }
 Test-Case 'personal recoveries share reset news and move into the same history after 24 hours' {

@@ -18,8 +18,10 @@ The widget installer is unsigned, so Windows may display an unknown-publisher or
 - Click the **minus icon** or outside the detailed window to collapse; click the ring to expand. Each mode remembers its position and size. Drag the window to move it or its edges/corners to resize. The default detail window fits current content within the screen; expanded history or a manually reduced window can scroll.
 - Click `×` to hide to the tray. Double-click the tray icon to show it again. The tray menu includes mode, refresh, always-on-top, language, and quit controls.
 - Choose **Language → System / English / 简体中文**. Native UI and browser detail page share the saved choice.
-- Open **Banked resets / Details** to view the available count and any provided grant/expiry dates. The widget never uses a banked reset.
-- **My quota recoveries** appears alongside public reset news, with before/after percentages and the local detection time. After 24 hours it moves into **History**. Tracking starts with the first observation and survives restarts, separately for each account. It does not confirm delivery of a global reset.
+- Open **Banked resets / Details** to expand the available grant/expiry information inside the main window. Click again to collapse it. The widget never uses a banked reset.
+- **Your quota recovered** appears alongside public reset news with the local detection time. Expand **About this record** for before/after percentages, the previous reading time, and the explanation. After 24 hours it moves into **History**. Tracking starts with the first observation and survives restarts, separately for each account. It does not confirm delivery of a global reset.
+
+The Windows interface follows the accepted macOS layout: ring and countdown, the Plus-only five-hour row, inline banked-reset details, activity cards, history, data sources, and refresh cadence. Expand **Message details**, **Earlier updates**, **History**, or **Data sources** in place. Announcement time and scheduled/delivered time remain separate; the local UTC offset is shown above the activity list.
 
 Quota and cache checks run every 60 seconds. Manual refresh, reopening, and wake trigger a prompt update. Temporary failures retry at 15/30/60 seconds. Public reset data refreshes every 10 minutes.
 
