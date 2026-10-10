@@ -32,6 +32,14 @@ Test-Case 'automatic detail height fits content while respecting the working scr
     Assert-Equal (Get-WidgetDetailFittedFrame $frame 600 54 $screen) ([Drawing.Rectangle]::new(800,200,606,664)) 'Fits content and keeps the top'
     Assert-Equal (Get-WidgetDetailFittedFrame $frame 1800 54 $screen) ([Drawing.Rectangle]::new(800,0,606,900)) 'Long history stays on screen'
 }
+
+Test-Case 'legacy fixed detail height migrates to fitting without changing future manual preference' {
+ Assert-Equal (Get-WidgetDetailAutoHeightSetting $null) $true 'New install fits'
+ Assert-Equal (Get-WidgetDetailAutoHeightSetting ([pscustomobject]@{detailLayoutVersion=4;detailAutoHeight=$false})) $true 'Legacy short window must fit'
+ Assert-Equal (Get-WidgetDetailAutoHeightSetting ([pscustomobject]@{detailLayoutVersion=5;detailAutoHeight=$false})) $false 'New manual resize remains saved'
+ Assert-Equal (Get-WidgetDetailAutoHeightSetting ([pscustomobject]@{detailLayoutVersion=5;detailAutoHeight=$true})) $true 'New auto preference persists'
+}
+
 Test-Case 'relative quota age uses source updatedAt in both languages' {
     Assert-Equal (Format-WidgetRelativeUpdate ($now.AddSeconds(-10).ToUnixTimeMilliseconds()) 'en' $now) 'Updated just now' 'Fresh quota'
     Assert-Equal (Format-WidgetRelativeUpdate ($now.AddSeconds(-59).ToUnixTimeMilliseconds()) 'zh-CN' $now) '刚刚更新' 'Sub-minute age'

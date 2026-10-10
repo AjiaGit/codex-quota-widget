@@ -306,6 +306,17 @@ function Test-WidgetOutsideClick([string]$mode, [bool]$visible, [bool]$animating
                                  [Drawing.Rectangle]$frame, [Drawing.Point]$point) {
     return $mode -eq 'Detail' -and $visible -and -not $animating -and -not $frame.Contains($point)
 }
+
+function Get-WidgetDetailAutoHeightSetting($saved) {
+    # Restore the Mac baseline once for legacy fixed-height Windows layouts.
+    # A resize saved by this layout version remains a deliberate preference.
+    try {
+        if ($saved -and [int]$saved.detailLayoutVersion -ge 5 -and $null -ne $saved.detailAutoHeight) {
+            return [bool]$saved.detailAutoHeight
+        }
+    } catch { }
+    return $true
+}
 function Get-WidgetDetailFittedFrame([Drawing.Rectangle]$frame, [int]$contentHeight,
                                     [int]$headerHeight, [Drawing.Rectangle]$screen) {
     $width=[Math]::Min($frame.Width,$screen.Width)

@@ -83,11 +83,76 @@ $start=$source.IndexOf('$script:data = $null');$end=$source.IndexOf('function Ne
 Invoke-Expression $source.Substring($start,$end-$start)
 $script:creditsExpanded=$false;$script:sourcesExpanded=$false;$script:earlierExpanded=$false;$script:creditRenderKey='';$script:creditRows=@();$script:recordExpanded=@{};$script:language='zh-CN';$script:languageSetting='auto';$script:externalData=[pscustomobject]@{status='ok';announcements=[pscustomobject]@{status='ok';stale=$false;sourceUpdatedAt=$now.ToString('o');items=@();history=@()}}
 $script:data=$quota;$script:noticeView=[pscustomobject]@{hasUnread=$false;ids=@()};$script:automaticDetailHeight=$false
-$script:form=[Windows.Forms.Form]::new();$form.Text='FABRICATED TEST DATA - macOS parity regressions';$form.ClientSize=[Drawing.Size]::new(606,700);$form.AutoScaleMode=[Windows.Forms.AutoScaleMode]::None
+$script:form=[Windows.Forms.Form]::new();$form.Text='FABRICATED TEST DATA - macOS parity regressions';$form.ClientSize=[Drawing.Size]::new(606,700);$form.AutoScaleMode=[Windows.Forms.AutoScaleMode]::None;$form.FormBorderStyle=[Windows.Forms.FormBorderStyle]::None
 $uiStart=$source.IndexOf('$title = New-Label');$uiEnd=$source.IndexOf('function Set-ControlBox',$uiStart)
 Invoke-Expression $source.Substring($uiStart,$uiEnd-$uiStart)
 try {
  Set-Theme;Show-Quota;$form.Show();[Windows.Forms.Application]::DoEvents();Show-Quota
+
+ Test-Case 'unchanged detail and compact geometry does not replace the rounded window region' {
+  foreach($mode in @('Detail','Compact')) {
+   $script:mode=$mode;Update-ResponsiveLayout;Set-RoundedRegion;$region=$form.Region
+   for($i=0;$i -lt 5;$i++){Update-ResponsiveLayout}
+   if(-not [object]::ReferenceEquals($region,$form.Region)){throw 'A quota refresh recreates the native region despite identical dimensions'}
+  }
+  $script:mode='Detail';Update-ResponsiveLayout
+ }
+ Test-Case 'auto-height displays the default content and expanded sources when the screen fits' {
+  $oldSize=$form.ClientSize;$oldAuto=$script:automaticDetailHeight
+  try {
+   $script:automaticDetailHeight=$true;$script:creditsExpanded=$false;$script:historyExpanded=$false;$script:earlierExpanded=$false;$script:sourcesExpanded=$false
+   foreach($expanded in @($false,$true)) {
+    $script:sourcesExpanded=$expanded;$form.ClientSize=[Drawing.Size]::new(606,390);Show-Quota;Update-ResponsiveLayout
+    $screen=[Windows.Forms.Screen]::FromControl($form).WorkingArea
+    $header=Get-WidgetHeaderLayout $form.Width ([Windows.Forms.TextRenderer]::MeasureText($title.Text,$title.Font).Width+6) ([Windows.Forms.TextRenderer]::MeasureText($status.Text,$status.Font).Width+6)
+    $wanted=Get-WidgetDetailFittedFrame $form.Bounds ($content.Height+8) $header.height $screen
+    Assert-Equal $form.Bounds $wanted 'Default and inline content must fit'
+    if($content.Height+8 -le $body.ClientSize.Height -and $body.VerticalScroll.Visible){throw 'Scrollbar remains although all content fits'}
+    if(-not $screen.Contains($form.Bounds)){throw 'Fitted window leaves the working screen'}
+   }
+  }finally{$script:automaticDetailHeight=$oldAuto;$script:sourcesExpanded=$false;$form.ClientSize=$oldSize;Show-Quota}
+ }
+ Test-Case 'reopening details starts at the complete hero rather than a saved partial scroll' {
+  $oldSize=$form.ClientSize;$oldAuto=$script:automaticDetailHeight;$oldCredits=$script:creditsExpanded
+  try {
+   $script:automaticDetailHeight=$false;$script:creditsExpanded=$true;$form.ClientSize=[Drawing.Size]::new(404,390);Show-Quota
+   $body.AutoScrollPosition=[Drawing.Point]::new(0,70)
+   if($body.AutoScrollPosition.Y -ge 0){throw 'Fabricated content did not require scrolling'}
+   $node=$ast.Find({param($n) $n -is [Management.Automation.Language.InvokeMemberExpressionAst] -and $n.Expression.Extent.Text -eq '$form' -and $n.Member.Value -eq 'Add_VisibleChanged'},$true)
+   function Update-OutsideClickMonitor {}
+   function Start-AnnouncementRead {}
+   & $node.Arguments[0].ScriptBlock.GetScriptBlock()
+   Assert-Equal $body.AutoScrollPosition.Y 0 'Reopened hero starts at the top'
+   Assert-Equal $content.Top 0 'No clipped hero after reopen'
+  }finally{$script:automaticDetailHeight=$oldAuto;$script:creditsExpanded=$oldCredits;$form.ClientSize=$oldSize;Show-Quota}
+ }
+
+
+ Test-Case 'long inline details scroll without drifting during refresh and shrink back to complete content' {
+  $oldData=$script:data;$oldSize=$form.ClientSize;$oldAuto=$script:automaticDetailHeight;$oldCredits=$script:creditsExpanded
+  try {
+   $rows=@(1..30 | ForEach-Object {[pscustomobject]@{title=('FABRICATED TEST DATA '+$_);description=('Virtual explanation '*8);grantedAt=$null;expiresAt=$null}})
+   $script:data=[pscustomobject]@{status='ok';plan='pro';updatedAt=$now.ToUnixTimeMilliseconds();remainingPercent=74;resetsAt=$now.AddDays(4).ToUnixTimeSeconds();resetCards=32;resetDetails=$rows}
+   $script:automaticDetailHeight=$true;$script:creditsExpanded=$true;$form.ClientSize=[Drawing.Size]::new(606,390);Show-Quota
+   $screen=[Windows.Forms.Screen]::FromControl($form).WorkingArea
+   if(-not $screen.Contains($form.Bounds) -or -not $body.VerticalScroll.Visible){throw 'Long disclosures must remain accessible within the screen'}
+   $body.AutoScrollPosition=[Drawing.Point]::new(0,140);$offset=$body.AutoScrollPosition.Y
+   for($i=0;$i -lt 5;$i++) {
+    Update-ResponsiveLayout
+    Assert-Equal $body.AutoScrollPosition.Y $offset 'Refresh must preserve the current reading position'
+    Assert-Equal $content.Top $offset 'Content uses the same scroll coordinate space'
+    Assert-Equal $content.Left ((Get-WidgetDetailMetrics $form.Width).inset-7+$body.AutoScrollPosition.X) 'No horizontal origin drift'
+    Assert-Equal $body.HorizontalScroll.Visible $false 'No horizontal scrollbar'
+   }
+   $script:creditsExpanded=$false;Show-Quota;Update-ResponsiveLayout
+   Assert-Equal $body.AutoScrollPosition.Y 0 'Collapsed short content returns to the complete hero'
+   Assert-Equal $content.Top 0 'Shrinking content leaves no clipped hero'
+   Assert-Equal $body.VerticalScroll.Visible $false 'Short content has no scrollbar'
+   $script:automaticDetailHeight=$false;$form.ClientSize=[Drawing.Size]::new(606,390);Update-ResponsiveLayout
+   Assert-Equal $form.ClientSize.Height 390 'A deliberate new manual height remains unchanged'
+  }finally{$script:data=$oldData;$script:automaticDetailHeight=$oldAuto;$script:creditsExpanded=$oldCredits;$form.ClientSize=$oldSize;Show-Quota}
+ }
+
 Test-Case 'completed public request is retained until the UI timer consumes it' {
  $script:externalTask=[Threading.Tasks.Task]::FromResult([int]42);$pending=$script:externalTask
  try {

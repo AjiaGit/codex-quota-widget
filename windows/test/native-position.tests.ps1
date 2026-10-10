@@ -32,6 +32,7 @@ try {
     if ($null -ne (Get-WidgetModePosition $legacy 'Detail')) { throw 'Unseen legacy mode fabricated a saved position.' }
     $bad = [pscustomobject]@{compactX='NaN';compactY=20;mode='Detail';x=10;y=20}
     if ($null -ne (Get-WidgetModePosition $bad 'Compact')) { throw 'Malformed position accepted.' }
+    if ($saved.detailLayoutVersion -ne 5) { throw 'New layout migration version was not saved.' }
     Write-Output 'PASS independent detail and compact positions survive saving, restart and legacy migration'
     $screen = [pscustomobject]@{Left=0;Top=0;Right=1000;Bottom=800;Width=1000;Height=800}
     $current = [pscustomobject]@{Left=10;Top=10;Width=64;Height=80;Right=74;Bottom=90}

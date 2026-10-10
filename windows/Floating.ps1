@@ -280,9 +280,8 @@ if ($saved) {
     } catch { }
 }
 if ($saved -and $null -ne $saved.topMost) { $form.TopMost = [bool]$saved.topMost }
-if ($saved -and [int]$saved.detailLayoutVersion -ge 4) {
-    if ($null -ne $saved.detailAutoHeight) { $script:automaticDetailHeight = [bool]$saved.detailAutoHeight }
-} else {
+$script:automaticDetailHeight = Get-WidgetDetailAutoHeightSetting $saved
+if (-not $saved -or [int]$saved.detailLayoutVersion -lt 4) {
     $script:detailSize = [Drawing.Size]::new([Math]::Max(560,$script:detailSize.Width),$script:detailSize.Height)
 }
 if ($saved -and $saved.mode -eq 'Compact') { $script:mode = 'Compact' }
@@ -307,6 +306,8 @@ if ($saved) {
 }
 
 function Set-RoundedRegion {
+    $size = $form.ClientSize
+    if ($form.Region -and $script:roundedRegionSize -eq $size) { return }
     $path = New-Object System.Drawing.Drawing2D.GraphicsPath
     $right = $form.Width - 19
     $bottom = $form.Height - 19
@@ -319,6 +320,8 @@ function Set-RoundedRegion {
     $form.Region = New-Object System.Drawing.Region($path)
     if ($previous) { $previous.Dispose() }
     $path.Dispose()
+    $script:roundedRegionSize = $size
+    $form.Invalidate($true)
 }
 Set-RoundedRegion
 
@@ -590,7 +593,7 @@ function Update-ResponsiveLayout {
             $header=Get-WidgetHeaderLayout $width $titleWidth $statusWidth
             Set-ControlBox $title $header.titleX $header.titleY $header.titleWidth 28;Set-ControlBox $status $header.statusX $header.statusY $header.statusWidth 22
             foreach ($button in $header.buttons) {$control=switch($button.kind){'refresh' {$refresh} 'compact' {$compactButton} 'hide' {$close}};Set-ControlBox $control $button.x $button.y $button.width $button.height}
-            $scrollY=[Math]::Max(0,-$body.AutoScrollPosition.Y);Set-ControlBox $body 7 $header.height ($width-14) ($height-$header.height-10)
+            Set-ControlBox $body 7 $header.height ($width-14) ($height-$header.height-10)
             $metrics=Get-WidgetDetailMetrics $width;$contentInset=$metrics.inset-7
             $cw=[Math]::Max(1,$body.Width-2*$contentInset-[Windows.Forms.SystemInformation]::VerticalScrollBarWidth)
             if ($ring.Parent -ne $heroPanel) {$ring.Parent=$heroPanel}
@@ -653,12 +656,14 @@ function Update-ResponsiveLayout {
             $order=@(Get-WidgetDetailSectionOrder ([bool]$script:layoutPlus));$y=0
             foreach ($name in $script:sectionPanels.Keys){$script:sectionPanels[$name].Visible=$name -in $order}
             foreach ($name in $order){$panel=$script:sectionPanels[$name];Set-ControlBox $panel 0 $y $cw $panel.Height;$y+=$panel.Height}
-            $body.AutoScrollPosition=[Drawing.Point]::Empty;Set-ControlBox $content $contentInset 0 $cw $y
-            if ($script:automaticDetailHeight -and -not $script:historyExpanded -and -not $script:creditsExpanded -and -not $script:earlierExpanded -and -not $script:sourcesExpanded -and -not $script:resizing) {
+            # Position in the current scroll coordinate space; avoid moving the
+            # displayed pixels to zero and back on every quota update.
+            Set-ControlBox $content ($contentInset+$body.AutoScrollPosition.X) $body.AutoScrollPosition.Y $cw $y
+            if ($script:automaticDetailHeight -and -not $script:resizing) {
                 $screen=[Windows.Forms.Screen]::FromControl($form).WorkingArea;$fitted=Get-WidgetDetailFittedFrame $form.Bounds ($y+8) $header.height $screen
                 if ($form.Bounds -ne $fitted) {$form.Bounds=$fitted;$height=$form.ClientSize.Height;$offset=if ($script:layoutPlus){62}else{0};$script:detailSize=[Drawing.Size]::new($width,($height-$offset));Set-ControlBox $body 7 $header.height ($width-14) ($height-$header.height-10);$script:positionDirty=$true}
             }
-            $body.AutoScrollMinSize=[Drawing.Size]::new(0,$y+8);$body.AutoScrollPosition=[Drawing.Point]::new(0,[int]$scrollY);Update-ResizeEdges $width $height $false
+            $body.AutoScrollMinSize=[Drawing.Size]::new(0,$y+8);Update-ResizeEdges $width $height $false
         }
         Set-RoundedRegion;$ring.Invalidate()
     } finally {$script:layoutBusy=$false}
@@ -1018,6 +1023,7 @@ function Set-ModeVisual([bool]$compact) {
     foreach ($zone in $script:resizeEdges.Values) { $zone.Visible=$true }
     $tooltip.SetToolTip($ring,$(if ($compact) {T 'tipExpand'} else {T 'tipDrag'}))
     Update-ResponsiveLayout
+    $form.Invalidate($true)
     Update-AnnouncementIndicator
     Start-AnnouncementRead
     Update-OutsideClickMonitor
@@ -1272,7 +1278,7 @@ function Save-WindowPosition {
         compactWidth = $script:compactSize.Width; compactHeight = $script:compactSize.Height
         detailWidth = $script:detailSize.Width; detailHeight = $script:detailSize.Height
         topMost = $form.TopMost
-        detailAutoHeight = $script:automaticDetailHeight; detailLayoutVersion = 4
+        detailAutoHeight = $script:automaticDetailHeight; detailLayoutVersion = 5
     }
     $script:positionDirty = $false
     $script:lastPositionSave = [DateTime]::UtcNow
@@ -1375,7 +1381,13 @@ $timer.Add_Tick({
     if (($now - $script:lastThemeCheck).TotalMinutes -ge 1) { Set-Theme; $script:lastThemeCheck = $now }
 })
 
-$form.Add_VisibleChanged({if ($form.Visible) {Update-ResponsiveLayout;Start-AnnouncementRead}; Update-OutsideClickMonitor})
+$form.Add_VisibleChanged({
+    if ($form.Visible) {
+        if ($script:mode -eq 'Detail' -and -not $script:animating) { $body.AutoScrollPosition=[Drawing.Point]::Empty }
+        Update-ResponsiveLayout; $form.Invalidate($true); Start-AnnouncementRead
+    }
+    Update-OutsideClickMonitor
+})
 $form.Add_Shown({
     if ($script:mode -eq 'Compact') {
         $form.Bounds = [System.Drawing.Rectangle]::new($form.Left, $form.Top, $script:compactSize.Width, $script:compactSize.Height)
