@@ -254,6 +254,9 @@ private final class ResizeGrip: NSView {
 }
 
 private final class CompactView: NSView {
+    // Let a click open details even when another app currently owns the focus.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     var percent: Int? { didSet { needsDisplay = true } }
     var hasNotice = false { didSet { needsDisplay = true } }
     var onClick: (() -> Void)?
