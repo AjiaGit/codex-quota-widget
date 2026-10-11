@@ -75,14 +75,16 @@ export async function startMonitor({port=PORT,settingsFile=settingsPath(),query,
   const recoveryStore=await createRecoveryStore({file:join(dirname(settingsFile),'quota-recovery.json')});
   const cache=createQuotaCache({query,recoveryStore});
   const announcements=await createAnnouncementStore({file:join(dirname(settingsFile),'announcements.json')});
-  let externalState={status:'loading',lastGlobal:null},externalPending=null,lastExternalFetch=0;
+  let externalState={status:'loading',lastGlobal:null},externalPending=null,externalPublishing=false,lastExternalFetch=0;
   const refreshExternal=(force=false,retry=false)=>{
     if(externalPending)return externalPending;
     if(force&&!retry&&Date.now()-lastExternalFetch<60000)return Promise.resolve(externalState);
     lastExternalFetch=Date.now();externalPending=Promise.resolve().then(async()=>{
-      try{const next=await externalQuery();await announcements.update(next.announcements);externalState=next;}
-      catch{externalState={...externalState,status:'unavailable'};await announcements.update({status:'unavailable'});}
-      finally{externalPending=null;}return {...externalState,announcements:announcements.state};
+      try{const next=await externalQuery();externalPublishing=true;await announcements.update(next.announcements);externalState=next;}
+      // Publish the failure only after the snapshot write has settled. Otherwise
+      // an immediate visible retry can coalesce with that unfinished old fetch.
+      catch{externalPublishing=true;await announcements.update({status:'unavailable'});externalState={...externalState,status:'unavailable'};}
+      finally{externalPublishing=false;externalPending=null;}return {...externalState,announcements:announcements.state};
     });return externalPending;
   };
   const files=new Map([['/',['index.html','text/html']],['/app.css',['app.css','text/css']],['/app.mjs',['app.mjs','text/javascript']],['/i18n.mjs',['i18n.mjs','text/javascript']]]);
@@ -94,7 +96,9 @@ export async function startMonitor({port=PORT,settingsFile=settingsPath(),query,
       const json=value=>{response.writeHead(200,{'Content-Type':'application/json; charset=utf-8'});response.end(JSON.stringify(value));};
       if(request.method==='GET'&&url.pathname==='/health'){json({app:'codex-weekly-monitor',version:'0.1.0'});return;}
       if(request.method==='GET'&&url.pathname==='/api/usage'){json(await cache.refreshIfDue());return;}
-      if(request.method==='GET'&&url.pathname==='/api/external'){if(externalState.status==='loading')await refreshExternal();json({...externalState,announcements:announcements.state,announcementAlerts:announcements.alerts});return;}
+      // Keep cached reads during network fetching, but do not expose a partially
+      // published snapshot while its write and current refresh are unfinished.
+      if(request.method==='GET'&&url.pathname==='/api/external'){if(externalState.status==='loading'||externalPublishing)await refreshExternal();json({...externalState,announcements:announcements.state,announcementAlerts:announcements.alerts});return;}
       if(request.method==='GET'&&url.pathname==='/api/announcement-alerts'){json(announcements.alerts);return;}
       if(request.method==='GET'&&url.pathname==='/api/settings'){json(await readSettings(settingsFile));return;}
       if(request.method==='POST'){

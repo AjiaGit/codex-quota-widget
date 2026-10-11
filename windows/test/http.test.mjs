@@ -1,11 +1,72 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import fs, { mkdtemp, rm } from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { get } from 'node:http';
 import { startMonitor, queryAppServer } from '../monitor.mjs';
 import { createAnnouncementStore } from '../external.mjs';
+for(const afterSuccess of [false,true])test(`a failed public response waits for its persisted snapshot before allowing retry (${afterSuccess?'cached success':'startup'})`,async(context)=>{
+  const directory=await mkdtemp(join(tmpdir(),'quota-public-failure-order-'));
+  const events=[];
+  let releaseWrite,writeEntered,releaseQuery,queryEntered,publicQueries=0,running;
+  const failedQuery=afterSuccess?2:1;
+  const blockedWrite=new Promise(resolve=>{releaseWrite=resolve;});
+  const enteredWrite=new Promise(resolve=>{writeEntered=resolve;});
+  const blockedQuery=new Promise(resolve=>{releaseQuery=resolve;});
+  const enteredQuery=new Promise(resolve=>{queryEntered=resolve;});
+  const originalRename=fs.rename;
+  const mockedRename=context.mock.method(fs,'rename',async(source,destination)=>{
+    const firstFailure=destination===join(directory,'announcements.json')&&publicQueries===failedQuery;
+    if(firstFailure){writeEntered();await blockedWrite;}
+    const result=await originalRename(source,destination);
+    if(firstFailure)events.push('snapshot persisted');
+    return result;
+  });
+  // Synchronize the builtin's imported binding so the actual store still does
+  // its real file write, with only the first atomic rename held at a barrier.
+  syncBuiltinESMExports();
+  try{
+    running=await startMonitor({port:0,settingsFile:join(directory,'settings.json'),query:async()=>({}),externalQuery:async()=>{
+      publicQueries++;
+      if(publicQueries===failedQuery)throw Error('offline');
+      if(publicQueries===failedQuery+1){queryEntered();await blockedQuery;}
+      return {status:'ok',announcements:{status:'ok',stale:false,sourceUpdatedAt:new Date().toISOString(),items:[],history:[]}};
+    }});
+    const base=`http://127.0.0.1:${running.server.address().port}`;
+    let failedRefresh;
+    if(afterSuccess){
+      assert.equal((await(await fetch(base+'/api/external')).json()).status,'ok');
+      failedRefresh=fetch(base+'/api/external/refresh',{method:'POST',headers:{Origin:base}});
+    }
+    await enteredWrite;
+    const requestEntered=new Promise(resolve=>running.server.prependOnceListener('request',(_request,response)=>{
+      response.once('finish',()=>events.push('public response finished'));
+      resolve();
+    }));
+    const initial=fetch(base+'/api/external');
+    await requestEntered;
+    releaseWrite();
+    assert.equal((await(await initial).json()).status,'unavailable');
+    if(failedRefresh)assert.equal((await(await failedRefresh).json()).status,'unavailable');
+    assert.deepEqual([...events],['snapshot persisted','public response finished'],'The published failure and persisted snapshot must finish together');
+    const retryResponse=fetch(base+'/api/external/refresh',{method:'POST',headers:{Origin:base}});
+    await enteredQuery;
+    const cached=await(await fetch(base+'/api/external',{signal:AbortSignal.timeout(5000)})).json();
+    assert.equal(cached.status,'unavailable','Ordinary reads keep the settled cache while the provider is fetching');
+    releaseQuery();
+    const retried=await(await retryResponse).json();
+    assert.equal(retried.status,'ok');
+    assert.equal(retried.announcements.stale,false);
+    assert.equal(publicQueries,failedQuery+1,'Retry performs a new query after the visible failure');
+  }finally{
+    releaseWrite();releaseQuery();
+    if(running)await running.stop();
+    mockedRename.mock.restore();syncBuiltinESMExports();
+    await rm(directory,{recursive:true,force:true});
+  }
+});
 test('public retry immediately re-fetches failed sources without refreshing account quota',async()=>{
   const directory=await mkdtemp(join(tmpdir(),'quota-public-retry-'));
   let publicQueries=0,quotaQueries=0;
