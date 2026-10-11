@@ -9,6 +9,15 @@
 - Keep equivalent service, browser, localization, and public-data logic synchronized across `macos` and `windows`. Compare Windows UI changes against the macOS baseline and report remaining visual or interaction differences.
 - Distinguish source review, automated checks, and physical desktop validation. Windows tests do not establish macOS desktop acceptance, and successful functional checks do not establish UI parity.
 
+## Cross-platform maintenance workflow
+
+- Apply the macOS-primary rule by default on both computers; the user does not need to repeat it. Before working, check the branch, commit, and local changes and make sure the checkout contains the latest approved baseline. Preserve unrelated local work.
+- Implement shared product changes on macOS, then synchronize the Windows copy in the same change. Shared files are the platform-root `.mjs` modules, every file under `public/`, and `.mjs` files under `test/` except `native*` tests. New files in these locations are included automatically. The checker excludes `.DS_Store` and `Thumbs.db` system metadata and rejects symbolic links in shared files or directories.
+- Run `node scripts/core-test.mjs` before calling shared changes ready. It checks shared-file equality, tests the checker, and runs both core suites. The package workflow runs the same command on Mac and Windows before building. Do not bypass or narrow the check to hide accidental drift. If a shared location needs an intentional platform difference, explain the reason and review the contract change explicitly.
+- Keep Swift, PowerShell, native tests, packaging, and operating-system integration platform-specific. Windows defect fixes can proceed independently while preserving the accepted macOS product behavior.
+- For a Windows follow-up, obtain the latest approved repository change, adapt the native Windows implementation where necessary, update the installed app using the project scripts, and verify it on a real Windows desktop. Compare information order, wording, disclosures, detail/compact transitions, first-click behavior, and tray/taskbar entry points against the Mac baseline. Preserve saved settings and history.
+- Report the commit being validated, shared/core checks, native checks, and physical desktop results separately. If Windows desktop validation has not occurred, name it as outstanding; code equality and CI do not establish visual or interaction acceptance. Repository rules do not automatically start another computer's Codex or update its installed app.
+
 ## Development and privacy
 
 Follow [CONTRIBUTING.md](CONTRIBUTING.md) for checks, builds, script encoding, and reports. Keep the repository private and do not publish GitHub Releases. Store screenshots, logs, generated packages, and development checklists outside the repository; do not commit real account information. Use the project stop scripts and isolated installer tests, and preserve user preferences.

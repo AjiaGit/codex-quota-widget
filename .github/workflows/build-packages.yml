@@ -70,7 +70,7 @@ jobs:
           test "$("$node_root/bin/node" --version)" = "v${NODE_VERSION}"
           printf 'NODE_ROOT=%s\n' "$node_root" >> "$GITHUB_ENV"
           printf '%s\n' "$node_root/bin" >> "$GITHUB_PATH"
-      - name: Check documentation and both core test suites
+      - name: Check documentation, shared files, tooling, and both core suites
         run: |
           node scripts/check-docs.mjs
           node scripts/core-test.mjs
@@ -268,7 +268,7 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $actualVersion -ne "v$env:NODE_VERSION") { throw 'Unexpected Node version.' }
           "NODE_ROOT=$nodeRoot" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           $nodeRoot | Out-File $env:GITHUB_PATH -Encoding utf8 -Append
-      - name: Check documentation and both core test suites
+      - name: Check documentation, shared files, tooling, and both core suites
         run: |
           node scripts/check-docs.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Documentation check failed.' }

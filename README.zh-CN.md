@@ -65,4 +65,6 @@ Codex 更新可能改变 App Server。托管运行环境测试使用虚构数据
 
 开发和构建说明见 [CONTRIBUTING.md](CONTRIBUTING.md)，版本说明见 [CHANGELOG.md](CHANGELOG.md)。
 
+macOS 是共享产品体验的基准，Windows 跟随。维护和实机验证流程已写入[项目规则](AGENTS.md)，无需每次重复提醒。核心测试命令和自动打包会检查两端的共享服务、浏览器页面和测试文件；内容不同或缺少对应文件时会报错。
+
 项目代码和文档采用 [MIT](LICENSE)，版权归 2026 AjiaGit。内置依赖和外部服务遵循各自条款，见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

@@ -8,6 +8,8 @@ macOS is the primary product version. Its current accepted interface is the base
 
 Reset-credit details belong inline in the main detail view, following macOS. Record explanations, earlier updates, history, and data sources also expand inline. Windows implementation constraints must not silently change the accepted macOS design. Include a comparison against the macOS baseline when reviewing Windows UI changes, and distinguish functional checks from visual parity and real desktop validation. See [project rules](AGENTS.md).
 
+For each shared change, check the current branch/commit and local changes, implement against the approved Mac baseline, and synchronize Windows in the same change. The Windows follow-up uses that repository change, adapts the native implementation, updates the installed app, and verifies it on a real Windows desktop while preserving settings and history. Report the validated commit and distinguish automated checks, native checks, and desktop results. These rules apply without a repeated reminder; they do not automatically start Codex on another computer or update its installation.
+
 ## Develop and test
 
 Use Node.js 24; packaged builds pin **24.19.0**. The service has no npm dependencies. From the repository root:
@@ -17,7 +19,9 @@ node scripts/check-docs.mjs
 node scripts/core-test.mjs
 ```
 
-The core command runs both platform copies of the service/browser tests. Keep equivalent `.mjs` and `public` changes synchronized. Native macOS tests require macOS and Apple Command Line Tools:
+The core command first checks shared-file equality, then runs the repository tooling tests and both platform copies of the service/browser tests. The same command gates the Mac and Windows package jobs in CI. The equality check covers platform-root `.mjs` modules, all files recursively under `public/`, and `.mjs` test files except `native*` tests. It compares bytes and reports changed or missing counterparts, including newly added files. It excludes only `.DS_Store` and `Thumbs.db` system metadata and rejects symbolic links in shared files or directories. It does not rewrite files. Run it separately with `node scripts/check-shared.mjs` when investigating drift.
+
+Keep shared changes synchronized in the same change. Native code, native tests, and platform packaging remain separate. If an intentional difference is needed in a shared location, explain it and review the checker contract change; do not suppress a mismatch as a shortcut. The check establishes source equality, not desktop UI parity. Native macOS tests require macOS and Apple Command Line Tools:
 
 ```sh
 node --test macos/test/native*.mjs

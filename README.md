@@ -65,4 +65,6 @@ App Server can change with Codex updates. Hosted-runner tests use fabricated dat
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for tests and builds, and [CHANGELOG.md](CHANGELOG.md) for version notes.
 
+macOS sets the shared product baseline; Windows follows it. [Project rules](AGENTS.md) define the maintenance and desktop-validation workflow. The core test command and package CI reject differences or missing counterparts in shared service, browser, and test files.
+
 [MIT](LICENSE), copyright 2026 AjiaGit, applies to project code and documentation. Bundled dependencies and external services retain their own terms; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
