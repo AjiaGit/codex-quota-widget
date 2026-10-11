@@ -1,8 +1,46 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeResets, queryExternal } from '../external.mjs';
+import { normalizeAnnouncements, normalizeResets, queryExternal } from '../external.mjs';
 
 const now = Date.parse('2026-09-29T09:00:00Z');
+
+test('an expired but valid announcement response preserves its source time and explains the expiry', () => {
+  const data={schema:'whenreset/v1',generated_at:'2026-09-26T00:00:00Z',products:{codex:{scheduled:null,events:[]}}};
+  const result=normalizeAnnouncements(data,now);
+  assert.equal(result.reason,'source-stale');
+  assert.equal(result.sourceUpdatedAt,'2026-09-26T00:00:00.000Z');
+  assert.equal(result.status,'unavailable');
+  assert.equal(result.stale,true);
+  assert.equal(normalizeAnnouncements({...data,schema:'invalid'},now).reason,'invalid-data');
+});
+
+test('a failed request and unusable announcement data have different reasons',async()=>{
+  for(const [response,reason] of [
+    [new Error('offline'),'request-failed'],
+    [{schema:'unexpected',generated_at:new Date(now).toISOString()},'invalid-data'],
+  ]) {
+    const result=await queryExternal({now,fetchFn:async url=>{
+      if(!url.includes('whenreset'))throw new Error('offline');
+      if(response instanceof Error)throw response;
+      return {ok:true,json:async()=>response};
+    }});
+    assert.equal(result.announcements.reason,reason);
+  }
+});
+
+test('an HTTP success with non-JSON content is unusable data rather than a connection failure',async()=>{
+  const result=await queryExternal({now,fetchFn:async()=>({ok:true,json:async()=>{throw new SyntaxError('Not JSON');}})});
+  assert.equal(result.announcements.reason,'invalid-data');
+});
+
+test('expired malformed schedules and imprecise source timestamps are not classified as source delays',()=>{
+  const raw={schema:'whenreset/v1',generated_at:'2026-09-26T00:00:00Z',products:{codex:{scheduled:null,events:[]}}};
+  for(const data of [
+    {...raw,products:{codex:{scheduled:123,events:[]}}},
+    {...raw,generated_at:'2026-09-26'},
+    {...raw,generated_at:'2026-02-30T00:00:00Z'},
+  ])assert.equal(normalizeAnnouncements(data,now).reason,'invalid-data');
+});
 
 test('public refresh queries only reset records and preserves confirmed announcements without forecasts', async () => {
   const urls=[];

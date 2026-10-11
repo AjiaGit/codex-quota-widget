@@ -10,8 +10,12 @@ $script:WidgetStrings = @{
         activityEmpty = 'No recent updates'
         activityEmptyHelp = 'Earlier records are available in History.'
         localTimeNote = 'All times are local (currently {0})'
-        publicRefreshFailed = 'Couldn''t refresh public updates'
-        publicStale = 'Public information needs updating'
+        publicRefreshFailed = 'Public updates could not be fetched'
+        publicStale = 'Public announcement source has not updated'
+        publicInvalid = 'Public source returned unusable data'
+        publicSourceDelayed = 'Recent announcements may not be included'
+        publicSourceTime = 'Source data updated {0}'
+        publicPending = 'Public information pending update'
         publicCache = 'Showing saved public updates'
         publicNoCache = 'No saved public updates are available.'
         publicRetry = 'Retry'
@@ -84,8 +88,12 @@ $script:WidgetStrings = @{
         activityEmpty = '最近没有新动态'
         activityEmptyHelp = '历史消息仍可在下方查看。'
         localTimeNote = '所有时间均为本地时间（当前 {0}）'
-        publicRefreshFailed = '公共信息刷新失败'
-        publicStale = '公开信息待更新'
+        publicRefreshFailed = '暂时无法获取公共信息'
+        publicStale = '公告源暂未更新'
+        publicInvalid = '公告源数据暂不可用'
+        publicSourceDelayed = '新公告可能尚未收录'
+        publicSourceTime = '来源数据更新于 {0}'
+        publicPending = '公开数据待更新'
         publicCache = '正在显示已保存的公共信息'
         publicNoCache = '暂无已保存的公共信息。'
         publicRetry = '重试'
@@ -278,8 +286,18 @@ function Get-WidgetPublicNoticeView($external, [string]$language, [DateTimeOffse
     $feed=$external.announcements;$stamp=ConvertTo-WidgetTimestamp $feed.sourceUpdatedAt
     $fresh=$stamp -and $stamp -le $now.AddMinutes(5) -and ($now-$stamp).TotalHours -le 24
     $fetched=''
-    if ($null -ne $feed.lastFetchedAt) {try {$date=[DateTimeOffset]::FromUnixTimeMilliseconds([long]$feed.lastFetchedAt);if ($date -le $now) {$fetched=Get-WidgetText 'lastFetched' $language @((Format-WidgetAnnouncementDate $date $language ([TimeZoneInfo]::Local) $now))}} catch {}}
-    [pscustomobject]@{visible=($external.status -ne 'loading' -and -not ($external.status -eq 'ok' -and $feed.status -eq 'ok' -and -not $feed.stale -and $fresh));hasCache=(@($feed.items).Where({$_}).Count+@($feed.history).Where({$_}).Count -gt 0);failed=($external.status -eq 'unavailable' -or $feed.status -eq 'unavailable');lastFetchedText=$fetched}
+    if ($null -ne $feed.lastFetchedAt) {try {$date=[DateTimeOffset]::FromUnixTimeMilliseconds([long]$feed.lastFetchedAt);if ($date -le $now) {$fetched=Get-WidgetText 'lastFetched' $language @((Format-WidgetCompactDate $date $language ([TimeZoneInfo]::Local) $now))}} catch {}}
+    $reason=$feed.reason
+    if (-not $reason) {$reason=if ($external.status -eq 'unavailable' -or $feed.status -eq 'unavailable') {'request-failed'} elseif (-not $fresh) {'source-stale'} else {$null}}
+    $titleKey=switch ($reason) {'request-failed' {'publicRefreshFailed'} 'invalid-data' {'publicInvalid'} 'source-stale' {'publicStale'} default {'publicPending'}}
+    [pscustomobject]@{
+        visible=($external.status -ne 'loading' -and -not ($external.status -eq 'ok' -and $feed.status -eq 'ok' -and -not $feed.stale -and $fresh))
+        hasCache=(@($feed.items).Where({$_}).Count+@($feed.history).Where({$_}).Count -gt 0)
+        reason=$reason;failed=($reason -eq 'request-failed');title=(Get-WidgetText $titleKey $language)
+        help=$(if ($reason -eq 'source-stale') {Get-WidgetText 'publicSourceDelayed' $language} else {''})
+        sourceUpdatedText=$(if ($stamp -and $stamp -le $now) {Get-WidgetText 'publicSourceTime' $language @((Format-WidgetCompactDate $stamp $language ([TimeZoneInfo]::Local) $now))} else {''})
+        lastFetchedText=$fetched
+    }
 }
 function Get-WidgetLocalTimeNote([string]$language, [DateTimeOffset]$now=[DateTimeOffset]::UtcNow) {
     $offset=[int]$now.ToLocalTime().Offset.TotalMinutes;$sign=if ($offset -lt 0) {'-'} else {'+'};$minutes=[Math]::Abs($offset)
@@ -564,6 +582,7 @@ function Merge-WidgetExternalData($previous, $incoming, [bool]$transportFailure 
     if ($transportFailure -or -not $fresh -or $fresh.status -ne 'ok') {
         if ($transportFailure -or -not $incoming) {
             $result | Add-Member -NotePropertyName status -NotePropertyValue 'unavailable' -Force
+            $feed | Add-Member -NotePropertyName reason -NotePropertyValue 'request-failed' -Force
         }
         $feed | Add-Member -NotePropertyName stale -NotePropertyValue $true -Force
         if ($entries.Count -gt 0) {$feed | Add-Member -NotePropertyName status -NotePropertyValue 'ok' -Force}

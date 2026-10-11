@@ -16,7 +16,7 @@ function safeHttpsUrl(value) {
   } catch { return null; }
 }
 
-const emptyAnnouncements = () => ({ status: 'unavailable', items: [], history: [], sourceUpdatedAt: null, lastFetchedAt: null, stale: true });
+const emptyAnnouncements = (reason = 'request-failed', sourceUpdatedAt = null) => ({ status: 'unavailable', reason, items: [], history: [], sourceUpdatedAt, lastFetchedAt: null, stale: true });
 function preciseTimestamp(value) {
   // A calendar date or an unzoned clock time cannot be converted reliably.
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/i.test(value) || !dateOnly(value.slice(0,10))) return NaN;
@@ -74,8 +74,8 @@ const confirmedAnnouncement = item => item.certainty === 'announced' || Boolean(
 
 export function normalizeAnnouncements(data, now = Date.now()) {
   const product = data?.products?.codex;
-  if (data?.schema !== 'whenreset/v1' || !recentTimestamp(data.generated_at, now) || !product ||
-      !Object.hasOwn(product, 'scheduled') || !Array.isArray(product.events)) return emptyAnnouncements();
+  if (data?.schema !== 'whenreset/v1' || !Number.isFinite(preciseTimestamp(data.generated_at)) || !product ||
+      !Object.hasOwn(product, 'scheduled') || !Array.isArray(product.events)) return emptyAnnouncements('invalid-data');
   const signals = product.scheduled === null ? [] : Array.isArray(product.scheduled) ? product.scheduled : [product.scheduled];
   let invalid = false;
   const upcoming = [];
@@ -84,11 +84,15 @@ export function normalizeAnnouncements(data, now = Date.now()) {
     const item = raw?.certainty === 'announced' ? normalizedAnnouncement(raw, now, true) : null;
     if (item) upcoming.push(item); else invalid = true;
   }
+  if (!recentTimestamp(data.generated_at, now)) {
+    const expired = now - Date.parse(data.generated_at) > MAX_AGE_MS;
+    return emptyAnnouncements(!invalid && expired ? 'source-stale' : 'invalid-data', timestamp(data.generated_at, now));
+  }
   const history = product.events.filter(raw => raw?.certainty !== 'hinted').map(raw => normalizedAnnouncement(raw, now)).filter(Boolean);
   const current = history.filter(item => item.announcedAt && now - Date.parse(item.announcedAt) < MAX_AGE_MS ||
     item.deliveredAt && active(item, now));
   const combined = deduplicate([...upcoming, ...current]);
-  return { status: invalid ? 'unavailable' : 'ok', items: combined.filter(item => active(item, now)),
+  return { status: invalid ? 'unavailable' : 'ok', reason: invalid ? 'invalid-data' : null, items: combined.filter(item => active(item, now)),
     history: deduplicate(history).sort((a,b) => Date.parse(b.announcedAt || 0) - Date.parse(a.announcedAt || 0)).slice(0,50),
     sourceUpdatedAt: data.generated_at, stale: invalid };
 }
@@ -169,6 +173,7 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
         reconciled && !reconciled.has(item.id) && !item.deliveredAt ? {...item,sourceWithdrawn:true} : item);
       for(const item of retained)if(item.sourceWithdrawn)unread.delete(item.id);
       snapshot = { status: input?.status === 'ok' ? 'ok' : 'unavailable',
+        reason: input?.status === 'ok' ? null : ['source-stale','invalid-data'].includes(input?.reason) ? input.reason : 'request-failed',
         lastFetchedAt: fresh ? now() : snapshot.lastFetchedAt,
         items: deduplicate([...retained, ...freshItems]),
         history: deduplicate([...previous.history, ...freshHistory, ...retained.filter(item=>item.sourceWithdrawn)]),
@@ -204,7 +209,11 @@ async function fetchJson(url, fetchFn) {
     headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(15000),
   });
   if (!response.ok) throw new Error(`External API returned ${response.status}`);
-  return response.json();
+  try { return await response.json(); }
+  catch (error) {
+    if (error instanceof SyntaxError) throw Object.assign(new Error('External API returned invalid JSON', { cause: error }), { code: 'invalid-data' });
+    throw error;
+  }
 }
 
 export async function queryExternal({ fetchFn = fetch, now = Date.now() } = {}) {
@@ -213,7 +222,7 @@ export async function queryExternal({ fetchFn = fetch, now = Date.now() } = {}) 
     fetchJson('https://whenreset.app/api/v1/resets.json', fetchFn),
   ]);
   const lastGlobal = resets.status === 'fulfilled' ? normalizeResets(resets.value, now) : null;
-  const announcementView=announcements.status === 'fulfilled' ? normalizeAnnouncements(announcements.value, now) : emptyAnnouncements();
+  const announcementView=announcements.status === 'fulfilled' ? normalizeAnnouncements(announcements.value, now) : emptyAnnouncements(announcements.reason?.code === 'invalid-data' ? 'invalid-data' : 'request-failed');
   if (lastGlobal && announcementView.status === 'ok') {
     const events=[...resets.value.events,...announcements.value.products.codex.events];
     const records=events.map(raw=>normalizedAnnouncement(raw,now));

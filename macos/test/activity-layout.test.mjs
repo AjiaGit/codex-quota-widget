@@ -5,11 +5,75 @@ import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import * as presentation from '../public/app.mjs';
 const {deriveResetActivityView,derivePublicNotice}=presentation;
-import {createAnnouncementStore} from '../external.mjs';
+import {createAnnouncementStore,normalizeAnnouncements} from '../external.mjs';
 
 const now=Date.parse('2026-10-07T04:00:00Z');
 const item=(id,age,extra={})=>({id,kind:'regular',sourceUrl:`https://example.org/${id}`,announcedAt:new Date(now-age).toISOString(),...extra});
 const recovery=(age)=>({observedFrom:now-age-60000,detectedAt:now-age,beforePercent:45,afterPercent:99});
+
+test('a local public request failure replaces the prior source reason while preserving saved records',()=>{
+  assert.equal(typeof presentation.publicRequestFailure,'function');
+  for(const reason of ['source-stale','invalid-data']){
+    const state={status:'ok',announcements:{status:'unavailable',reason,stale:true,sourceUpdatedAt:new Date(now-80*3600000).toISOString(),history:[item('saved',60000)],items:[]}};
+    const original=JSON.stringify(state);
+    const failed=presentation.publicRequestFailure(state);
+    assert.equal(failed.announcements.reason,'request-failed');
+    assert.equal(derivePublicNotice(failed,now,'UTC','en').failed,true);
+    assert.equal(failed.announcements.history.length,1);
+    assert.equal(failed.announcements.sourceUpdatedAt,state.announcements.sourceUpdatedAt);
+    assert.equal(JSON.stringify(state),original);
+  }
+});
+
+test('retaining a pending announcement after a fresh incomplete update does not claim a stale source',async()=>{
+  let clock=now;
+  const store=await createAnnouncementStore({now:()=>clock});
+  await store.update({status:'ok',sourceUpdatedAt:new Date(clock).toISOString(),items:[item('pending',60000,{certainty:'announced'})],history:[]});
+  clock+=60000;
+  await store.update({status:'ok',sourceUpdatedAt:new Date(clock).toISOString(),items:[],history:[]});
+  assert.equal(store.state.stale,true);
+  assert.equal(store.state.items.length,1);
+  const current=derivePublicNotice({status:'ok',announcements:store.state},clock,'UTC','en');
+  const expired=derivePublicNotice({status:'ok',announcements:{...store.state,reason:'source-stale'}},clock,'UTC','en');
+  assert.equal(current.visible,true);
+  assert.equal(current.reason,null);
+  assert.notEqual(current.title,expired.title);
+  assert.equal(current.help,'');
+});
+
+test('expired source data remains distinct from a request failure through the cache and public notice',async()=>{
+  let clock=now-80*3600000;
+  const sourceTime=new Date(clock).toISOString();
+  const store=await createAnnouncementStore({now:()=>clock});
+  const raw={schema:'whenreset/v1',generated_at:sourceTime,products:{codex:{scheduled:null,events:[{kind:'regular',url:'https://example.org/saved',announced_at:sourceTime}]}}};
+  await store.update(normalizeAnnouncements(raw,clock));
+  const fetched=store.state.lastFetchedAt;
+  clock=now;
+  await store.update(normalizeAnnouncements(raw,clock));
+  const expired=derivePublicNotice({status:'ok',announcements:store.state},clock,'Asia/Shanghai','zh-CN');
+  assert.equal(expired.reason,'source-stale');
+  assert.equal(expired.failed,false);
+  assert.equal(expired.visible,true);
+  assert.equal(expired.hasCache,true);
+  assert.match(expired.sourceUpdatedText,/10\/04.*04:00/);
+  assert.equal(store.state.lastFetchedAt,fetched,'An old source response does not become a successful fresh retrieval');
+  assert.equal(store.state.history.length,1,'The stale response preserves saved records');
+  await store.update({status:'unavailable',reason:'request-failed'});
+  const failed=derivePublicNotice({status:'unavailable',announcements:store.state},clock,'Asia/Shanghai','zh-CN');
+  assert.equal(failed.reason,'request-failed');
+  assert.equal(failed.failed,true);
+  assert.notEqual(failed.title,expired.title);
+  assert.equal(failed.sourceUpdatedText,expired.sourceUpdatedText);
+  await store.update({status:'unavailable',reason:'invalid-data'});
+  const invalid=derivePublicNotice({status:'unavailable',announcements:store.state},clock,'Asia/Shanghai','zh-CN');
+  assert.equal(invalid.reason,'invalid-data');
+  assert.notEqual(invalid.title,failed.title);
+  assert.notEqual(invalid.title,expired.title);
+  await store.update(normalizeAnnouncements({...raw,generated_at:new Date(clock).toISOString()},clock));
+  const refreshed=derivePublicNotice({status:'ok',announcements:store.state},clock,'UTC','en');
+  assert.equal(refreshed.visible,false);
+  assert.equal(refreshed.reason,null);
+});
 
 test('compact activity keeps every confirmed pending event and the latest personal and public records',()=>{
   const quota={status:'ok',recoveryHistory:{status:'ok',records:[recovery(60000),recovery(120000)]}};

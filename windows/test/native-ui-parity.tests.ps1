@@ -70,6 +70,30 @@ Test-Case 'public status uses the Mac cache and source freshness rules' {
  Assert-Equal $view.hasCache $true 'Saved records explicitly attributed'
  Assert-Equal $view.failed $true 'Failure distinct from current data'
 }
+Test-Case 'public source delay, unusable data and request failure keep distinct reasons and saved records' {
+ $record=[pscustomobject]@{id='https://example.invalid/FABRICATED-cache#regular';kind='regular';sourceUrl='https://example.invalid/FABRICATED-cache';announcedAt=$now.AddDays(-4).ToString('o')}
+ $sourceAt=$now.AddHours(-80).ToString('o')
+ $external=[pscustomobject]@{status='ok';announcements=[pscustomobject]@{status='unavailable';reason='source-stale';stale=$true;sourceUpdatedAt=$sourceAt;lastFetchedAt=$now.AddHours(-80).ToUnixTimeMilliseconds();items=@();history=@($record)}}
+ $delayed=Get-WidgetPublicNoticeView $external 'zh-CN' $now
+ Assert-Equal $delayed.reason 'source-stale' 'Old source data is not a failed request'
+ Assert-Equal $delayed.failed $false 'Do not use the request failure title'
+ Assert-Equal $delayed.hasCache $true 'Saved history remains available'
+ if (-not $delayed.help -or -not $delayed.sourceUpdatedText) {throw 'Source delay explanation or update time missing'}
+ $external.announcements.reason='invalid-data'
+ $invalid=Get-WidgetPublicNoticeView $external 'zh-CN' $now
+ if ($invalid.title -eq $delayed.title) {throw 'Unusable data and source delays share a title'}
+ $failed=Merge-WidgetExternalData $external $null $true
+ $failure=Get-WidgetPublicNoticeView $failed 'zh-CN' $now
+ Assert-Equal $failure.reason 'request-failed' 'Transport failure replaces the old reason'
+ Assert-Equal $failure.failed $true 'Failure uses its own title'
+ Assert-Equal $failed.announcements.history.Count 1 'Failure preserves history'
+ Assert-Equal $failed.announcements.sourceUpdatedAt $sourceAt 'Failure preserves the source time'
+ $external.announcements.reason=$null;$external.announcements.status='ok';$external.announcements.sourceUpdatedAt=$now.ToString('o')
+ $pending=Get-WidgetPublicNoticeView $external 'zh-CN' $now
+ if ($pending.title -eq $delayed.title -or $pending.help) {throw 'A fresh retained cache is described as a delayed source'}
+ $external.announcements.stale=$false
+ Assert-Equal (Get-WidgetPublicNoticeView $external 'en' $now).visible $false 'A fresh complete feed clears the notice'
+}
 Test-Case 'production announcement IDs acknowledge only the rendered service records' {
  $id='https://example.invalid/FABRICATED-announcement#banked'
  $record=[pscustomobject]@{id=$id;kind='banked';certainty='announced';announcedAt=$now.AddMinutes(-2).ToString('o');scheduledAt=$now.AddDays(1).ToString('o');sourceUrl='https://example.invalid/FABRICATED-announcement';scope='paid'}

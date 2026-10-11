@@ -845,8 +845,9 @@ function Show-External {
     $activityHeading.Text=T 'activityHeading';$localTimeNote.Text=Get-WidgetLocalTimeNote $script:language
     $activityEmpty.Text=T 'activityEmpty';$activityEmptyHelp.Text=T 'activityEmptyHelp'
     $notice=Get-WidgetPublicNoticeView $script:externalData $script:language
-    $publicStatusPanel.Visible=$notice.visible;$publicStatusTitle.Text=T $(if ($notice.failed){'publicRefreshFailed'}else{'publicStale'})
-    $publicStatusText.Text=T $(if ($notice.hasCache){'publicCache'}else{'publicNoCache'});$publicStatusFetched.Text=$notice.lastFetchedText;$publicStatusFetched.Visible=[bool]$publicStatusFetched.Text;$sourceChecked.Text=$notice.lastFetchedText
+    $publicStatusPanel.Visible=$notice.visible;$publicStatusTitle.Text=$notice.title
+    $publicStatusText.Text=(@($notice.help,(T $(if ($notice.hasCache){'publicCache'}else{'publicNoCache'}))) | Where-Object {$_}) -join ' · '
+    $publicStatusFetched.Text=(@($notice.sourceUpdatedText,$notice.lastFetchedText) | Where-Object {$_}) -join ' · ';$publicStatusFetched.Visible=[bool]$publicStatusFetched.Text;$sourceChecked.Text=$notice.lastFetchedText
     $publicRetry.Text=T $(if ($script:externalTask -and -not $script:externalTask.IsCompleted){'publicRetrying'}else{'publicRetry'});$publicRetry.Enabled=$null -eq $script:externalTask
     $recoveryWarning.Text=if ($script:data.recoveryHistory.status -eq 'unsaved'){T 'recoveryUnsaved'}else{''};$recoveryWarning.Visible=[bool]$recoveryWarning.Text
     $earlierButton.Text=T 'earlierUpdates' @($partition.earlier.Count);$earlierButton.Expanded=$script:earlierExpanded

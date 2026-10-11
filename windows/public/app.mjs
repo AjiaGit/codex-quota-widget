@@ -100,12 +100,20 @@ export function deriveResetActivityView(quotaState,publicState,now=Date.now(),ti
   const featured=new Set(featuredRows);
   return {rows,featuredRows,earlierRows:rows.filter(row=>!featured.has(row)),history,publicView,recoveryWarning:quotaState?.status==='ok'&&quotaState.recoveryHistory?.status==='unsaved'?t(language,'recoveryUnsaved'):''};
 }
+export function publicRequestFailure(state) {
+  return {...state,status:'unavailable',announcements:{...state?.announcements,status:'unavailable',reason:'request-failed',stale:true}};
+}
 export function derivePublicNotice(state,now=Date.now(),timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone,language='en') {
   const feed=state?.announcements;
   const visible=state?.status!=='loading'&&!(state?.status==='ok'&&feed?.status==='ok'&&!feed.stale&&publicSourceFresh(feed,now));
   const hasCache=Boolean(feed?.items?.length||feed?.history?.length);
   const stamp=feed?.lastFetchedAt;
-  return {visible,hasCache,failed:state?.status==='unavailable'||feed?.status==='unavailable',
+  const sourceStamp=Date.parse(feed?.sourceUpdatedAt);
+  const reason=feed?.reason||(state?.status==='unavailable'||feed?.status==='unavailable'?'request-failed':!publicSourceFresh(feed,now)?'source-stale':null);
+  return {visible,hasCache,reason,failed:reason==='request-failed',
+    title:t(language,reason==='request-failed'?'publicRefreshFailed':reason==='invalid-data'?'publicInvalid':reason==='source-stale'?'publicStale':'publicPending'),
+    help:reason==='source-stale'?t(language,'publicSourceDelayed'):'',
+    sourceUpdatedText:Number.isFinite(sourceStamp)&&sourceStamp<=now?t(language,'publicSourceTime',{time:formatCompactLocalDate(sourceStamp,timeZone,language,now)}):'',
     lastFetchedText:Number.isFinite(stamp)&&stamp<=now?t(language,'lastFetched',{time:formatCompactLocalDate(stamp,timeZone,language,now)}):''};
 }
 export function derivePublicStatus(state,now=Date.now(),timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone,language='en') {
@@ -174,9 +182,10 @@ if(typeof document!=='undefined') {
     byId('local-time-note').textContent=t(lang,'localTimeNote',{zone:localTimeZone(zone,now)});
     const publicNotice=derivePublicNotice(externalState,now,zone,lang);
     byId('public-status').hidden=!publicNotice.visible;
-    byId('public-status-title').textContent=t(lang,publicNotice.failed?'publicRefreshFailed':'publicStale');
-    byId('public-cache-note').textContent=t(lang,publicNotice.hasCache?'publicCache':'publicNoCache');
-    byId('public-fetch-time').textContent=publicNotice.lastFetchedText;byId('public-fetch-time').hidden=!publicNotice.lastFetchedText;
+    byId('public-status-title').textContent=publicNotice.title;
+    byId('public-cache-note').textContent=[publicNotice.help,t(lang,publicNotice.hasCache?'publicCache':'publicNoCache')].filter(Boolean).join(' · ');
+    const publicTimes=[publicNotice.sourceUpdatedText,publicNotice.lastFetchedText].filter(Boolean).join(' · ');
+    byId('public-fetch-time').textContent=publicTimes;byId('public-fetch-time').hidden=!publicTimes;
     byId('public-retry').disabled=loading||retryingPublic;byId('public-retry').textContent=t(lang,loading||retryingPublic?'publicRetrying':'publicRetry');
     byId('public-checked-time').textContent=publicNotice.lastFetchedText;byId('public-checked-time').hidden=!publicNotice.lastFetchedText;
     const activity=deriveResetActivityView(state,externalState.announcements,now,zone,lang);
@@ -231,12 +240,12 @@ if(typeof document!=='undefined') {
     reportDetailLayout();
     acknowledgeRenderedAnnouncements(visibleAnnouncementView(activity,{earlierOpen:!earlier.hidden&&earlier.open,historyOpen:byId('announcement-history').open}));
   }
-  async function loadExternal(){try{const response=await fetch('/api/external',{cache:'no-store'});if(!response.ok)throw Error();externalState=await response.json();}catch{externalState={...externalState,status:'unavailable',announcements:{...externalState.announcements,status:'unavailable',stale:true}};}render();}
+  async function loadExternal(){try{const response=await fetch('/api/external',{cache:'no-store'});if(!response.ok)throw Error();externalState=await response.json();}catch{externalState=publicRequestFailure(externalState);}render();}
   async function retryPublic(){
     if(retryingPublic||loading)return;
     retryingPublic=true;render();
     try{const response=await fetch('/api/external/refresh',{method:'POST',cache:'no-store'});if(!response.ok)throw Error();externalState=await response.json();}
-    catch{externalState={...externalState,status:'unavailable',announcements:{...externalState.announcements,status:'unavailable',stale:true}};}
+    catch{externalState=publicRequestFailure(externalState);}
     finally{retryingPublic=false;render();}
   }
   async function loadSettings(){try{const response=await fetch('/api/settings',{cache:'no-store'});if(response.ok)setting=(await response.json()).language;}catch{}render();}
