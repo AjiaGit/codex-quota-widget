@@ -26,21 +26,6 @@ public static class QuotaSmokeWindows {
         public int Height { get { return Bottom-Top; } }
     }
     public sealed class HeaderButton { public IntPtr Handle; public WindowBounds Bounds; }
-    [StructLayout(LayoutKind.Sequential)] private struct CursorPoint { public int X, Y; }
-    [DllImport("user32.dll", SetLastError=true)] private static extern bool SetCursorPos(int x, int y);
-    [DllImport("user32.dll")] private static extern bool GetCursorPos(out CursorPoint point);
-    public static string PlaceOwnedCursor(IntPtr control, int pid, int x, int y) {
-        var bounds=OwnedBounds(control,pid);
-        if (!IsWindowVisible(control) || x < 0 || y < 0 || x >= bounds.Width || y >= bounds.Height)
-            throw new InvalidOperationException("Cursor target escaped the owned visible fixture control");
-        CursorPoint before; GetCursorPos(out before);
-        if (!SetCursorPos(bounds.Left+x,bounds.Top+y))
-            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),"CI input desktop cannot move cursor to fixture");
-        CursorPoint after;
-        if (!GetCursorPos(out after) || after.X != bounds.Left+x || after.Y != bounds.Top+y)
-            throw new InvalidOperationException("CI input desktop did not retain the fixture cursor position");
-        return "before="+before.X+","+before.Y+" after="+after.X+","+after.Y;
-    }
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hWnd, out WindowBounds bounds);
     [DllImport("user32.dll")] private static extern bool IsChild(IntPtr parent, IntPtr child);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetClassName(IntPtr hWnd, StringBuilder text, int count);
@@ -51,37 +36,45 @@ public static class QuotaSmokeWindows {
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll", EntryPoint="SendMessageW", CharSet=CharSet.Unicode, ExactSpelling=true)] private static extern IntPtr SendMessageText(IntPtr hWnd, uint msg, IntPtr wParam, StringBuilder text);
-    public sealed class EditSnapshot {
-        public IntPtr Handle;
-        public string ClassName;
-        public uint Style;
-        public string Text;
+    [DllImport("user32.dll")] private static extern IntPtr GetParent(IntPtr window);
+    public sealed class ControlSnapshot {
+        public IntPtr Handle, ParentHandle;
+        public string ClassName, Text;
+        public bool Visible;
+        public WindowBounds Bounds;
     }
     private static bool IsOwned(IntPtr window, int pid) {
         uint owner;
         return window != IntPtr.Zero && GetWindowThreadProcessId(window, out owner) != 0 && owner == (uint)pid;
     }
-    public static EditSnapshot ReadOwnedEdit(IntPtr parent, int pid) {
-        if (!IsOwned(parent, pid)) return null;
-        EditSnapshot result = null;
+    public static ControlSnapshot[] ReadOwnedControls(IntPtr parent, int pid) {
+        var found = new List<ControlSnapshot>();
+        if (!IsOwned(parent, pid)) return found.ToArray();
         EnumChildWindows(parent, delegate(IntPtr child, IntPtr unused) {
             if (!IsChild(parent, child) || !IsOwned(child, pid)) return true;
-            var name = new StringBuilder(256);
-            GetClassName(child, name, name.Capacity);
-            if (!name.ToString().StartsWith("WindowsForms10.EDIT.", StringComparison.OrdinalIgnoreCase)) return true;
-            // WM_GETTEXT is marshalled by Windows for this owned child control;
-            // GetWindowText cannot reliably read another process's edit text.
+            var name = new StringBuilder(256); GetClassName(child, name, name.Capacity);
+            // Hosted CI can expose WinForms controls as generic UIA Panes.
+            // Read their actual captions, restricted to this fixture subtree.
             long length = SendMessage(child, 0x000E, IntPtr.Zero, IntPtr.Zero).ToInt64();
-            if (length < 0 || length > 1024 * 1024) return true;
-            var text = new StringBuilder((int)length + 1);
-            SendMessageText(child, 0x000D, new IntPtr(text.Capacity), text);
-            result = new EditSnapshot {
-                Handle = child, ClassName = name.ToString(),
-                Style = unchecked((uint)GetWindowStyle(child, -16)), Text = text.ToString()
-            };
-            return false;
+            if (length < 0 || length > 1024 * 1024) throw new InvalidOperationException("Invalid fixture caption length");
+            var caption = new StringBuilder((int)length + 1);
+            SendMessageText(child, 0x000D, new IntPtr(caption.Capacity), caption);
+            WindowBounds bounds;
+            if (!GetWindowRect(child, out bounds)) throw new InvalidOperationException("Fixture control has no bounds");
+            found.Add(new ControlSnapshot {
+                Handle = child, ParentHandle = GetParent(child), ClassName = name.ToString(),
+                Text = caption.ToString(), Visible = IsWindowVisible(child), Bounds = bounds
+            });
+            return true;
         }, IntPtr.Zero);
-        return result;
+        return found.ToArray();
+    }
+    public static void ClickOwnedButton(IntPtr parent, IntPtr button, int pid) {
+        var name = new StringBuilder(256); GetClassName(button, name, name.Capacity);
+        if (!IsOwned(parent, pid) || !IsOwned(button, pid) || !IsChild(parent, button)
+            || !IsWindowVisible(button) || !name.ToString().StartsWith("WindowsForms10.BUTTON.", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Click escaped the owned visible fixture button");
+        SendMessage(button, 0x00F5, IntPtr.Zero, IntPtr.Zero); // BM_CLICK
     }
     public static WindowBounds OwnedBounds(IntPtr window, int pid) {
         WindowBounds bounds;
@@ -188,6 +181,8 @@ function Read-UiText($element) {
     return $null
 }
 function Save-UiEvidence($element, [string]$language, [string]$phase) {
+    # Allow the queued native paint after an asserted disclosure/layout change.
+    Start-Sleep -Milliseconds 150
     # Only call for windows belonging to the completely fabricated local UI fixture.
     try {
         $rectangle = $element.Current.BoundingRectangle
@@ -215,22 +210,50 @@ function Save-UiEvidence($element, [string]$language, [string]$phase) {
             })
         } catch { }
     }
-    $nativeEdit = $null
-    try {
-        $snapshot = [QuotaSmokeWindows]::ReadOwnedEdit([IntPtr]$element.Current.NativeWindowHandle, $ui.Id)
-        if ($snapshot) {
-            $nativeEdit = @{
-                nativeHandle = $snapshot.Handle.ToInt64(); className = $snapshot.ClassName
-                style = ('0x{0:X8}' -f $snapshot.Style); actualText = $snapshot.Text
-            }
+    $nativeControls = @([QuotaSmokeWindows]::ReadOwnedControls([IntPtr]$element.Current.NativeWindowHandle, $ui.Id) | ForEach-Object {
+        [pscustomobject]@{
+            nativeHandle=$_.Handle.ToInt64(); parentHandle=$_.ParentHandle.ToInt64()
+            className=$_.ClassName; actualText=$_.Text; visible=$_.Visible; bounds=$_.Bounds
         }
-    } catch { }
+    })
     Write-WidgetJson (Join-Path $OutputDir ("ui-trace-$phase-$language.json")) @{
         phase = $phase; language = $language; capturedAt = [DateTimeOffset]::UtcNow.ToString('o')
-        controls = $rows.ToArray(); nativeEdit = $nativeEdit
+        controls = $rows.ToArray(); nativeControls = $nativeControls
     }
-    $summary = @($rows | ForEach-Object { "$($_.controlType) [$($_.className)] patterns=$($_.patterns -join ',')" }) -join '; '
-    Write-Output "Fabricated UI provider trace ($phase / $language): $summary"
+    Write-Output "Fabricated UI trace ($phase / $language): UIA controls=$($rows.Count), owned native controls=$($nativeControls.Count)"
+
+}
+function Get-VisibleControls([IntPtr]$parent, [int]$processId) {
+    @([QuotaSmokeWindows]::ReadOwnedControls($parent,$processId) | Where-Object {$_.Visible})
+}
+function Get-VisibleText([IntPtr]$parent, [int]$processId) {
+    @(Get-VisibleControls $parent $processId | ForEach-Object {$_.Text}) -join "`n"
+}
+function Find-VisibleControl([IntPtr]$parent, [int]$processId, [string]$caption) {
+    $found=@(Get-VisibleControls $parent $processId | Where-Object {$_.Text -ceq $caption})
+    Assert-True ($found.Count -eq 1) "Expected one visible fixture control: [$caption]; found $($found.Count)"
+    $found[0]
+}
+function Invoke-UiButton([IntPtr]$window, [IntPtr]$parent, [int]$processId, [string]$caption) {
+    $button=Find-VisibleControl $parent $processId $caption
+    $scroll=[QuotaSmokeWindows]::ScrollBody($window,$processId)
+    if ($scroll -ne [IntPtr]::Zero) {
+        # Reveal the real control before activating it, including after relayout.
+        $viewport=[QuotaSmokeWindows]::OwnedBounds($scroll,$processId)
+        for ($attempt=0; $attempt -lt 200; $attempt++) {
+            $bounds=[QuotaSmokeWindows]::OwnedBounds($button.Handle,$processId)
+            if ($bounds.Top -ge $viewport.Top -and $bounds.Bottom -le $viewport.Bottom) {break}
+            $direction=if ($bounds.Top -lt $viewport.Top) {0} else {1}
+            [void][QuotaSmokeWindows]::SendMessage($scroll,0x115,[IntPtr]$direction,[IntPtr]::Zero)
+        }
+        $bounds=[QuotaSmokeWindows]::OwnedBounds($button.Handle,$processId)
+        Assert-True ($bounds.Top -ge $viewport.Top -and $bounds.Bottom -le $viewport.Bottom) "Fixture button could not be scrolled into view: $caption"
+    }
+    [QuotaSmokeWindows]::ClickOwnedButton($parent,$button.Handle,$processId)
+}
+function Assert-InlineWindow([IntPtr]$window, [int]$processId, [string]$language) {
+    Assert-True ([QuotaSmokeWindows]::Find($processId,(Get-WidgetText 'app' $language)) -eq $window) 'Inline disclosure replaced the main window.'
+    Assert-True ([QuotaSmokeWindows]::Find($processId,(Get-WidgetText 'detailsTitle' $language)) -eq [IntPtr]::Zero) 'Inline disclosure opened the obsolete details dialog.'
 }
 function Assert-NoFixtureProcesses([string]$phase) {
     Wait-Until {
@@ -398,7 +421,9 @@ const http=require('node:http'),fs=require('node:fs'),path=require('node:path');
 const settingsFile=path.join(process.env.LOCALAPPDATA,'CodexWeeklyMonitor','settings.json');
 const refreshFile=path.join(__dirname,'ui-refreshes.txt');
 const fixtureNow=Date.now(),sourceUpdatedAt=fixtureNow-180000;
-const completed={id:'fixture-announcement-regular-id',kind:'regular',announcedAt:new Date(fixtureNow-86400000).toISOString(),scheduledAt:new Date(fixtureNow-3600000).toISOString(),scheduledDate:null,deliveredAt:new Date(fixtureNow-600000).toISOString(),scope:'all',scopeLabel:null,sourceUrl:'https://example.org/regular-announcement',deliverySourceUrl:'https://example.org/regular-delivery',summary:'Confirmed public reset delivery record',summaryZh:'已确认全局额度重置送达记录'};
+const completed={id:'fixture-announcement-regular-id',kind:'regular',certainty:'announced',announcedAt:new Date(fixtureNow-7200000).toISOString(),scheduledAt:new Date(fixtureNow-3600000).toISOString(),scheduledDate:null,deliveredAt:new Date(fixtureNow-600000).toISOString(),scope:'all',scopeLabel:null,sourceUrl:'https://example.org/regular-announcement',deliverySourceUrl:'https://example.org/regular-delivery',summary:'Confirmed public reset delivery record',summaryZh:'已确认全局额度重置送达记录'};
+const earlier={...completed,id:'fixture-earlier-id',kind:'banked',announcedAt:new Date(fixtureNow-172800000).toISOString(),scheduledAt:new Date(fixtureNow-32400000).toISOString(),deliveredAt:new Date(fixtureNow-28800000).toISOString(),sourceUrl:'https://example.org/earlier',deliverySourceUrl:null,summary:'Earlier grant fixture',summaryZh:'较早赠送测试记录'};
+const archived={...completed,id:'fixture-history-id',announcedAt:new Date(fixtureNow-345600000).toISOString(),scheduledAt:new Date(fixtureNow-262800000).toISOString(),deliveredAt:new Date(fixtureNow-259200000).toISOString(),sourceUrl:'https://example.org/history',deliverySourceUrl:null,summary:'Historical reset fixture',summaryZh:'历史重置测试记录'};
 http.createServer(async(req,res)=>{
   res.setHeader('Content-Type','application/json');
   if(req.url==='/api/settings') {
@@ -406,9 +431,9 @@ http.createServer(async(req,res)=>{
     else res.end(fs.readFileSync(settingsFile,'utf8'));
   } else if(req.url==='/api/external') {
     const now=fixtureNow;
-    res.end(JSON.stringify({status:'ok',lastGlobal:null,forecast:{next24h:12,next48h:25,next7d:61,sourceUpdatedAt:new Date(now).toISOString()},announcements:{status:'ok',stale:false,sourceUpdatedAt:new Date(now).toISOString(),history:[completed],items:[
-      {id:'fixture-announcement-banked-id',kind:'banked',announcedAt:new Date(now-86400000).toISOString(),scheduledAt:new Date(now+86400000).toISOString(),scheduledDate:null,deliveredAt:null,scope:'paid',scopeLabel:null,sourceUrl:'https://example.org/banked-announcement',deliverySourceUrl:null,summary:'Confirmed banked reset grant for paid accounts',summaryZh:'已确认向付费账号赠送重置次数'},
-      completed
+    res.end(JSON.stringify({status:'ok',lastGlobal:null,forecast:{next24h:12,next48h:25,next7d:61,sourceUpdatedAt:new Date(now).toISOString()},announcements:{status:'ok',stale:false,sourceUpdatedAt:new Date(now).toISOString(),history:[completed,archived],items:[
+      {id:'fixture-announcement-banked-id',kind:'banked',certainty:'announced',announcedAt:new Date(now-86400000).toISOString(),scheduledAt:new Date(now+86400000).toISOString(),scheduledDate:null,deliveredAt:null,scope:'paid',scopeLabel:null,sourceUrl:'https://example.org/banked-announcement',deliverySourceUrl:null,summary:'Confirmed banked reset grant for paid accounts',summaryZh:'已确认向付费账号赠送重置次数'},
+      completed,earlier
     ]}}));
   }
   else {if(req.url==='/api/refresh'&&req.method==='POST')fs.appendFileSync(refreshFile,'1\n');const now=Math.floor(fixtureNow/1000);res.end(JSON.stringify({status:'ok',plan:'plus',remainingPercent:39,resetsAt:now+259200,updatedAt:sourceUpdatedAt,resetCards:2,resetDetails:[{title:'Sample grant / 示例发放',description:'Fabricated test data / 虚构测试数据',grantedAt:now-86400,expiresAt:now+86400}],fiveHour:{remainingPercent:75,resetsAt:now+3600}}));}
@@ -428,6 +453,9 @@ http.createServer(async(req,res)=>{
         # Screenshots must contain only the completely fabricated UI response.
         Remove-Item -LiteralPath (Join-Path $dataDir 'native-public-cache.json') -ErrorAction SilentlyContinue
         [void](Invoke-RestMethod 'http://127.0.0.1:39225/api/settings' -Method Post -ContentType 'application/json' -Body ('{"language":"'+$language+'"}'))
+        # Fixed geometry deliberately exercises scrolling without changing the
+        # product's default automatic height. This is isolated fixture data.
+        Write-WidgetJson (Join-Path $dataDir 'window.json') @{ x=100; y=100; mode='Detail'; compactWidth=52; compactHeight=76; detailWidth=606; detailHeight=460; detailLayoutVersion=5; detailAutoHeight=$false; topMost=$true }
         $uiOut=Join-Path $OutputDir ('native-'+$language+'-stdout.log')
         $uiError=Join-Path $OutputDir ('native-'+$language+'-stderr.log')
         $ui = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe') -ArgumentList @('-NoProfile','-Sta','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',('"'+(Join-Path $installDir 'Floating.ps1')+'"'),'-BaseUrl','http://127.0.0.1:39225') -PassThru -WindowStyle Hidden -RedirectStandardOutput $uiOut -RedirectStandardError $uiError
@@ -437,140 +465,124 @@ http.createServer(async(req,res)=>{
         $handle = [QuotaSmokeWindows]::Find($ui.Id,$title)
         [void][QuotaSmokeWindows]::SetForegroundWindow($handle)
         $element = [Windows.Automation.AutomationElement]::FromHandle($handle)
-        $creditText = Get-WidgetText 'creditDetailsRow' $language @((Get-WidgetText 'cards' $language @(2)))
-        $creditCondition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty,$creditText)
-        Wait-Until { $null -ne $element.FindFirst([Windows.Automation.TreeScope]::Descendants,$creditCondition) } "Native quota failed to render: $language"
-        $labels = $element.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)
-        $names = @($labels | ForEach-Object { $_.Current.Name }) -join "`n"
-        Assert-True ($names.Contains((Get-WidgetText 'fiveHour' $language))) "5-hour title untranslated: $language"
-        Assert-True (-not $names.Contains('fixture-id-must-never-be-shown') -and -not $names.Contains('fixture-announcement-banked-id') -and -not $names.Contains('fixture-announcement-regular-id')) 'Native UI leaked an ID.'
+        $creditText=if ($language -eq 'en') {'Banked resets 2'} else {'可用重置 2次'}
+        $regularTitle=Get-WidgetText 'deliveredResetTitle' $language
+        $grantTitle=Get-WidgetText 'deliveredGrantTitle' $language
+        $pendingTitle=Get-WidgetText 'upcomingGrantTitle' $language
+        $moreText=Get-WidgetText 'moreMessage' $language
+        $earlierText=Get-WidgetText 'earlierUpdates' $language @(1)
+        $historyText=Get-WidgetText 'announcementHistory' $language
+        $sourcesText=Get-WidgetText 'dataSources' $language
         Wait-Until {
-            $script:layoutNames=@($element.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition) | ForEach-Object {$_.Current.Name}) -join "`n"
-            $script:layoutNames.Contains((Get-WidgetText 'confirmedBanked' $language)) -and $script:layoutNames.Contains((Get-WidgetText 'confirmedRegular' $language))
-        } "Confirmed announcement rows did not render: $language"
-        Save-UiEvidence $element $language 'native'
+            $script:layoutNames=Get-VisibleText $handle $ui.Id
+            $script:layoutNames.Contains($creditText) -and $script:layoutNames.Contains($regularTitle) -and $script:layoutNames.Contains($pendingTitle)
+        } "Current native quota and announcement rows failed to render: $language"
+        Assert-True (@([QuotaSmokeWindows]::ReadOwnedControls($handle,0)).Count -eq 0) 'Native reader accepted an unrelated process.'
+        $creditControl=Find-VisibleControl $handle $ui.Id $creditText
+        $wrongProcessRejected=$false
+        try {[QuotaSmokeWindows]::ClickOwnedButton($handle,$creditControl.Handle,0)} catch {$wrongProcessRejected=$true}
+        Assert-True $wrongProcessRejected 'Native click accepted an unrelated process.'
+        $wrongSubtreeRejected=$false
+        try {[QuotaSmokeWindows]::ClickOwnedButton($creditControl.Handle,$creditControl.Handle,$ui.Id)} catch {$wrongSubtreeRejected=$true}
+        Assert-True $wrongSubtreeRejected 'Native click escaped its descendant subtree.'
+        Assert-True ($script:layoutNames.Contains((Get-WidgetText 'fiveHour' $language)) -and $script:layoutNames.Contains('75%')) 'Plus five-hour quota was missing or untranslated.'
+        $fiveReset=Get-WidgetText 'reset' $language @((Format-WidgetCompactDate ([DateTimeOffset]::FromUnixTimeSeconds([long]$uiExpectedQuota.fiveHour.resetsAt)) $language))
+        Assert-True ($script:layoutNames.Contains($fiveReset)) 'Plus five-hour reset time missing.'
         Assert-True ($script:layoutNames -match $(if ($language -eq 'en') {'Updated \d+ minutes ago'} else {'\d+分钟前更新'})) 'Header used paint time instead of quota source age.'
-        $completedExpected=@($uiExpected.announcements.items | Where-Object {$_.kind -eq 'regular'})[0]
-        $plannedText=Get-WidgetText 'originalScheduled' $language @((Format-WidgetDate ([DateTimeOffset]$completedExpected.scheduledAt) $language))
-        $completedText=Get-WidgetText 'deliveredOn' $language @((Format-WidgetDate ([DateTimeOffset]$completedExpected.deliveredAt) $language))
-        Assert-True ($script:layoutNames.Contains($plannedText) -and $script:layoutNames.Contains($completedText) -and $script:layoutNames.Contains((Get-WidgetText 'all' $language))) 'Completed announcement omitted original plan, completion timestamp or scope.'
-        $displayedNames=@($element.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition) | ForEach-Object {$_.Current.Name})
-        Assert-True (@($displayedNames | Where-Object {$_ -ceq (Get-WidgetText 'confirmedRegular' $language)}).Count -eq 1) 'Service active/history duplicate hid or duplicated the completed announcement.'
-        Assert-True ($script:layoutNames.Contains((Get-WidgetText 'announcementSource' $language)) -and $script:layoutNames.Contains((Get-WidgetText 'deliverySource' $language))) 'Announcement or delivery record link missing.'
-        $fiveExpected=Get-WidgetFiveHourView $uiExpectedQuota $language
-        Assert-True ($script:layoutNames.Contains($fiveExpected.percentText) -and $script:layoutNames.Contains($fiveExpected.resetText)) 'Plus five-hour percentage or reset time missing.'
-        Assert-True ($script:layoutNames.Contains((Get-WidgetText 'sourceLinks' $language)) -and $script:layoutNames.Contains((Get-WidgetText 'refreshCadence' $language))) 'Source links or separate quota/public cadence missing.'
+        Assert-True ($script:layoutNames.Contains((Get-WidgetText 'activityHeading' $language)) -and $script:layoutNames.Contains((Get-WidgetLocalTimeNote $language))) 'Activity heading or local timezone note missing.'
+        Assert-True ($script:layoutNames.Contains((Get-WidgetText 'refreshCadence' $language))) 'Separate quota/public refresh cadence missing.'
+        foreach ($obsolete in @('12%','25%','61%')) {Assert-True (-not $script:layoutNames.Contains($obsolete)) 'Obsolete forecast probability column was rendered.'}
+        Assert-True (-not $script:layoutNames.Contains('Sample grant / 示例发放') -and -not $script:layoutNames.Contains($grantTitle) -and -not $script:layoutNames.Contains('codex-resets.com') -and -not $script:layoutNames.Contains('codexreset.dev')) 'A disclosure was expanded by default.'
+        Assert-True (@(Get-VisibleControls $handle $ui.Id | Where-Object {$_.Text -ceq $regularTitle}).Count -eq 1) 'Active/history duplication hid or duplicated the recent completed announcement.'
+        $completedExpected=@($uiExpected.announcements.items | Where-Object {$_.id -eq 'fixture-announcement-regular-id'})[0]
+        $completedText=Get-WidgetText 'deliveredOn' $language @((Format-WidgetCompactDate ([DateTimeOffset]$completedExpected.deliveredAt) $language))
+        $completedFact=$completedText+' · '+(Get-WidgetText 'all' $language)
+        Assert-True ($script:layoutNames.Contains($completedFact)) 'Recent announcement omitted completion timestamp or account scope.'
+        $creditBounds=$creditControl.Bounds
+        $activityBounds=(Find-VisibleControl $handle $ui.Id (Get-WidgetText 'activityHeading' $language)).Bounds
+        $historyBounds=(Find-VisibleControl $handle $ui.Id $historyText).Bounds
+        $sourcesBounds=(Find-VisibleControl $handle $ui.Id $sourcesText).Bounds
+        $cadenceBounds=(Find-VisibleControl $handle $ui.Id (Get-WidgetText 'refreshCadence' $language)).Bounds
+        Assert-True ($creditBounds.Bottom -le $activityBounds.Top -and $activityBounds.Bottom -le $historyBounds.Top -and $historyBounds.Bottom -le $sourcesBounds.Top -and $sourcesBounds.Bottom -le $cadenceBounds.Top) 'Current detail sections overlapped or changed order.'
+        Save-UiEvidence $element $language 'native'
         $buttons=@([QuotaSmokeWindows]::Toolbar($handle,$ui.Id))
         Assert-True ($buttons.Count -eq 3) 'Fixed header did not contain exactly three icon buttons.'
-        foreach ($button in $buttons) { Assert-True ($button.Bounds.Width -eq 32 -and $button.Bounds.Height -eq 32) 'Toolbar hit targets were inconsistent.' }
+        foreach ($button in $buttons) {Assert-True ($button.Bounds.Width -eq 32 -and $button.Bounds.Height -eq 32) 'Toolbar hit targets were inconsistent.'}
         $beforeRefresh=if (Test-Path (Join-Path $fixtureRoot 'ui-refreshes.txt')) {[IO.File]::ReadAllText((Join-Path $fixtureRoot 'ui-refreshes.txt')).Length} else {0}
-        [void][QuotaSmokeWindows]::SendMessage($buttons[0].Handle,0xF5,[IntPtr]::Zero,[IntPtr]::Zero)
-        Wait-Until { [IO.File]::ReadAllText((Join-Path $fixtureRoot 'ui-refreshes.txt')).Length -gt $beforeRefresh } 'First toolbar icon did not refresh quota.'
+        [QuotaSmokeWindows]::ClickOwnedButton($handle,$buttons[0].Handle,$ui.Id)
+        Wait-Until {[IO.File]::ReadAllText((Join-Path $fixtureRoot 'ui-refreshes.txt')).Length -gt $beforeRefresh} 'First toolbar icon did not refresh quota.'
         $scrollBody=[QuotaSmokeWindows]::ScrollBody($handle,$ui.Id)
-        Assert-True ($scrollBody -ne [IntPtr]::Zero) 'Two announcements and Plus quota did not have a scrollable body.'
-        $oddsControls=@()
-        foreach ($percent in @('12%','25%','61%')) {
-            $condition=[Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty,$percent)
-            $oddsControl=$element.FindFirst([Windows.Automation.TreeScope]::Descendants,$condition)
-            Assert-True ($null -ne $oddsControl) 'Permanent probability column was missing.'
-            $oddsControls+=,[QuotaSmokeWindows]::OwnedBounds([IntPtr]$oddsControl.Current.NativeWindowHandle,$ui.Id)
+        Assert-True ($scrollBody -ne [IntPtr]::Zero) 'Fixed fixture detail window did not have a scrollable body.'
+
+        # Count and actual grant/expiry fields expand inside the main window.
+        Invoke-UiButton $handle $handle $ui.Id $creditText
+        Wait-Until {(Get-VisibleText $handle $ui.Id).Contains('Sample grant / 示例发放')} "Inline reset details did not expand: $language"
+        Assert-InlineWindow $handle $ui.Id $language
+        $grantRow=(Find-VisibleControl $handle $ui.Id 'Sample grant / 示例发放').ParentHandle
+        $grantValue=Get-VisibleText $grantRow $ui.Id
+        foreach ($field in @(@('grantedAt','grant'),@('expiresAt','expiry'))) {
+            $date=Format-WidgetCompactDate ([DateTimeOffset]::FromUnixTimeSeconds([long]$uiExpectedQuota.resetDetails[0].($field[0]))) $language
+            Assert-True ($grantValue.Contains((Get-WidgetText $field[1] $language @($date)))) 'Inline grant or expiry field was missing or untranslated.'
         }
-        Assert-True ($oddsControls[0].Top -eq $oddsControls[1].Top -and $oddsControls[1].Top -eq $oddsControls[2].Top -and $oddsControls[0].Right -le $oddsControls[1].Left -and $oddsControls[1].Right -le $oddsControls[2].Left) 'Probability columns overlapped or stacked.'
-        $footerBounds=@()
-        foreach ($text in @((Get-WidgetText 'sourceLinks' $language),(Get-WidgetText 'refreshCadence' $language))) {
-            $condition=[Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty,$text)
-            $control=$element.FindFirst([Windows.Automation.TreeScope]::Descendants,$condition)
-            Assert-True ($null -ne $control) 'Readable footer line was missing.'
-            $footerBounds+=,[QuotaSmokeWindows]::OwnedBounds([IntPtr]$control.Current.NativeWindowHandle,$ui.Id)
-        }
-        Assert-True ($footerBounds[0].Bottom -le $footerBounds[1].Top) 'Source links and refresh cadence overlapped instead of using separate lines.'
-        $noteCondition=[Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty,(Get-WidgetText 'oddsNote' $language))
-        $noteElement=$element.FindFirst([Windows.Automation.TreeScope]::Descendants,$noteCondition)
-        Assert-True ($null -ne $noteElement) 'Historical estimate explanation missing.'
-        $noteBounds=[QuotaSmokeWindows]::OwnedBounds([IntPtr]$noteElement.Current.NativeWindowHandle,$ui.Id)
-        Assert-True ($oddsControls[0].Bottom -le $noteBounds.Top -and $noteBounds.Bottom -le $footerBounds[0].Top) 'Estimate explanation was not below probability and before the source footer.'
+        Assert-True ($grantValue.Contains('Fabricated test data / 虚构测试数据') -and (Get-VisibleText $handle $ui.Id).Contains((Get-WidgetText 'detailsPartial' $language))) 'Inline reset details omitted description or authoritative-count explanation.'
+        [void](Find-VisibleControl $handle $ui.Id $creditText)
+        Save-UiEvidence $element $language 'reset-details-inline'
+        Invoke-UiButton $handle $handle $ui.Id $creditText
+        Wait-Until {-not (Get-VisibleText $handle $ui.Id).Contains('Sample grant / 示例发放')} 'Inline reset details did not collapse.'
+        [void](Find-VisibleControl $handle $ui.Id $creditText)
+
+        # The recent record exposes its original plan and delivery link on demand.
+        $recentPanel=(Find-VisibleControl $handle $ui.Id $regularTitle).ParentHandle
+        Assert-True (-not (Get-VisibleText $recentPanel $ui.Id).Contains((Get-WidgetText 'deliverySource' $language))) 'Delivery link was expanded by default.'
+        Invoke-UiButton $handle $recentPanel $ui.Id $moreText
+        $summary=if ($language -eq 'en') {'Confirmed public reset delivery record'} else {'已确认全局额度重置送达记录'}
+        Wait-Until {(Get-VisibleText $recentPanel $ui.Id).Contains($summary)} 'Message details did not expand in their record.'
+        $plannedText=Get-WidgetText 'originalReset' $language @((Format-WidgetCompactDate ([DateTimeOffset]$completedExpected.scheduledAt) $language))
+        $recentText=Get-VisibleText $recentPanel $ui.Id
+        Assert-True ($recentText.Contains($plannedText) -and $recentText.Contains($completedFact) -and $recentText.Contains((Get-WidgetText 'announcementSource' $language)) -and $recentText.Contains((Get-WidgetText 'deliverySource' $language))) 'Expanded message omitted original plan, completion, scope or source links.'
+        Assert-InlineWindow $handle $ui.Id $language
+        Save-UiEvidence $element $language 'message-details-inline'
+        Invoke-UiButton $handle $recentPanel $ui.Id $moreText
+        Wait-Until {-not (Get-VisibleText $recentPanel $ui.Id).Contains($summary)} 'Message details did not collapse.'
+
+        # One earlier active record and one historical record are distinct from
+        # the recent completed record duplicated in the service history feed.
+        Invoke-UiButton $handle $handle $ui.Id $earlierText
+        Wait-Until {(Get-VisibleText $handle $ui.Id).Contains($grantTitle)} 'Earlier updates did not expand.'
+        $earlierExpected=@($uiExpected.announcements.items | Where-Object {$_.id -eq 'fixture-earlier-id'})[0]
+        $earlierFact=(Get-WidgetText 'deliveredOn' $language @((Format-WidgetCompactDate ([DateTimeOffset]$earlierExpected.deliveredAt) $language)))+' · '+(Get-WidgetText 'all' $language)
+        [void](Find-VisibleControl $handle $ui.Id $earlierFact)
+        Assert-InlineWindow $handle $ui.Id $language
+        Save-UiEvidence $element $language 'earlier-updates-inline'
+        Invoke-UiButton $handle $handle $ui.Id $earlierText
+        Wait-Until {-not (Get-VisibleText $handle $ui.Id).Contains($grantTitle)} 'Earlier updates did not collapse.'
+        Invoke-UiButton $handle $handle $ui.Id $historyText
+        Wait-Until {(Get-VisibleText $handle $ui.Id).Contains('codex-resets.com')} 'History did not expand inline.'
+        $historyExpected=@($uiExpected.announcements.history | Where-Object {$_.id -eq 'fixture-history-id'})[0]
+        $historyFact=(Get-WidgetText 'deliveredOn' $language @((Format-WidgetCompactDate ([DateTimeOffset]$historyExpected.deliveredAt) $language)))+' · '+(Get-WidgetText 'all' $language)
+        [void](Find-VisibleControl $handle $ui.Id $historyFact)
+        Assert-True (@(Get-VisibleControls $handle $ui.Id | Where-Object {$_.Text -ceq $regularTitle}).Count -eq 2) 'Expanded history duplicated the recent completed record or omitted the archived record.'
+        Assert-InlineWindow $handle $ui.Id $language
+        Save-UiEvidence $element $language 'history-inline'
+        Invoke-UiButton $handle $handle $ui.Id $historyText
+        Wait-Until {-not (Get-VisibleText $handle $ui.Id).Contains('codex-resets.com')} 'History did not collapse.'
+        Assert-True (@(Get-VisibleControls $handle $ui.Id | Where-Object {$_.Text -ceq $regularTitle}).Count -eq 1) 'Collapsing history changed the recent activity record.'
+
+        Invoke-UiButton $handle $handle $ui.Id $sourcesText
+        Wait-Until {(Get-VisibleText $handle $ui.Id).Contains('codexreset.dev')} 'Data sources did not expand inline.'
+        $sourceOne=(Find-VisibleControl $handle $ui.Id 'codex-reset.com').Bounds
+        $sourceTwo=(Find-VisibleControl $handle $ui.Id 'codexreset.dev').Bounds
+        $cadenceBounds=(Find-VisibleControl $handle $ui.Id (Get-WidgetText 'refreshCadence' $language)).Bounds
+        Assert-True ($sourceOne.Top -eq $sourceTwo.Top -and $sourceOne.Right -le $sourceTwo.Left -and $sourceTwo.Bottom -le $cadenceBounds.Top) 'Source links overlapped each other or the separate refresh cadence.'
+        Assert-InlineWindow $handle $ui.Id $language
         [void][QuotaSmokeWindows]::SendMessage($scrollBody,0x115,[IntPtr]7,[IntPtr]::Zero)
-        Save-UiEvidence $element $language 'native-content-bottom'
-        [void][QuotaSmokeWindows]::SendMessage($scrollBody,0x115,[IntPtr]6,[IntPtr]::Zero)
-        # Click the disclosure portion of the merged credit row.
-        $creditElement = $element.FindFirst([Windows.Automation.TreeScope]::Descendants,$creditCondition)
-        $creditHandle = [IntPtr]$creditElement.Current.NativeWindowHandle
-        $creditBounds=[QuotaSmokeWindows]::OwnedBounds($creditHandle,$ui.Id)
-        $fontHandle=[QuotaSmokeWindows]::SendMessage($creditHandle,0x31,[IntPtr]::Zero,[IntPtr]::Zero)
-        $baseFont=if ($fontHandle -ne [IntPtr]::Zero) {[Drawing.Font]::FromHfont($fontHandle)} else {[Drawing.Font]::new('Segoe UI',10.5)}
-        $linkFont=[Drawing.Font]::new($baseFont,($baseFont.Style -bor [Drawing.FontStyle]::Underline))
-        $linkGraphics=[Drawing.Graphics]::FromHwnd($creditHandle)
-        $linkFormat=[Drawing.StringFormat]::new()
-        $linkRegions=@()
-        try {
-            # Partial LinkLabel links use GDI+ character ranges, even when the
-            # surrounding labels use GDI TextRenderer. Hit the actual range's
-            # center rather than estimating its start from the prefix width.
-            $linkStart=$creditText.IndexOf(' · ')+3
-            Assert-True ($linkStart -ge 3) 'Credit disclosure separator missing.'
-            $linkFormat.SetMeasurableCharacterRanges([Drawing.CharacterRange[]]@([Drawing.CharacterRange]::new($linkStart,$creditText.Length-$linkStart)))
-            $linkRegions=@($linkGraphics.MeasureCharacterRanges($creditText,$linkFont,[Drawing.RectangleF]::new(0,0,$creditBounds.Width,$creditBounds.Height),$linkFormat))
-            $linkRegion=$linkRegions[0].GetBounds($linkGraphics)
-            Assert-True ($linkRegion.Width -gt 0 -and $linkRegion.Height -gt 0) 'Credit disclosure has no measurable hit area.'
-            $linkX=[int][Math]::Round($linkRegion.Left+$linkRegion.Width/2)
-            $linkY=[int][Math]::Round($linkRegion.Top+$linkRegion.Height/2)
-            Assert-True ($linkX -gt 0 -and $linkX -lt $creditBounds.Width -and $linkY -ge 0 -and $linkY -lt $creditBounds.Height) 'Credit disclosure click escaped its owned control.'
-            Write-Output ("Fabricated credit disclosure: text=[$creditText], bounds=$($creditBounds.Left),$($creditBounds.Top),$($creditBounds.Width),$($creditBounds.Height), linkRegion=$linkRegion, click=$linkX,$linkY, offscreen=$($creditElement.Current.IsOffscreen), fontHandle=$fontHandle")
-        } finally {
-            foreach ($region in $linkRegions) {$region.Dispose()}
-            $linkFormat.Dispose(); $linkGraphics.Dispose(); $linkFont.Dispose(); $baseFont.Dispose()
+        Save-UiEvidence $element $language 'data-sources-inline'
+        Invoke-UiButton $handle $handle $ui.Id $sourcesText
+        Wait-Until {-not (Get-VisibleText $handle $ui.Id).Contains('codexreset.dev')} 'Data sources did not collapse.'
+        foreach ($control in @([QuotaSmokeWindows]::ReadOwnedControls($handle,$ui.Id))) {
+            Assert-True ($control.Text -notmatch 'fixture-(?:id|announcement|earlier|history)') 'Native UI leaked a fixture ID.'
         }
-        $linkPoint=[IntPtr](($linkY -shl 16) -bor $linkX)
-        # Keep the actual CI cursor in this owned link as well as sending its
-        # messages, so WinForms tracking cannot clear Hover with MouseLeave.
-        Write-Output ('Fabricated fixture cursor: '+[QuotaSmokeWindows]::PlaceOwnedCursor($creditHandle,$ui.Id,$linkX,$linkY))
-        # LinkLabel activates the link hit by WM_MOUSEMOVE before mouse-down;
-        # a down/up pair alone never puts its link into the Hover state.
-        [void][QuotaSmokeWindows]::SendMessage($creditHandle,0x200,[IntPtr]::Zero,$linkPoint)
-        [void][QuotaSmokeWindows]::SendMessage($creditHandle,0x201,[IntPtr]1,$linkPoint)
-        [void][QuotaSmokeWindows]::SendMessage($creditHandle,0x202,[IntPtr]0,$linkPoint)
-        $detailsTitle = Get-WidgetText 'detailsTitle' $language
-        Wait-Until { [QuotaSmokeWindows]::Find($ui.Id,$detailsTitle) -ne [IntPtr]::Zero } "Reset details window missing: $language"
-        $detailsHandle = [QuotaSmokeWindows]::Find($ui.Id,$detailsTitle)
-        $detailsElement = [Windows.Automation.AutomationElement]::FromHandle($detailsHandle)
-        Assert-True ($null -eq [QuotaSmokeWindows]::ReadOwnedEdit($detailsHandle, 0)) 'Native text reader accepted an unrelated process.'
-        Assert-True ($null -eq [QuotaSmokeWindows]::ReadOwnedEdit($handle, $ui.Id)) 'Native text reader escaped the details dialog.'
-        Save-UiEvidence $detailsElement $language 'reset-details'
-        # Hosted CI can expose every WinForms control as a generic Pane without
-        # text patterns. Keep UIA text when available; otherwise read WM_GETTEXT
-        # from the EDIT descendant owned by this exact dialog and process.
-        $editCondition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Edit)
-        $documentCondition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Document)
-        $textCondition = [Windows.Automation.OrCondition]::new($editCondition, $documentCondition)
-        $script:detailValue = $null; $script:detailNative = $null; $script:detailReadMethod = $null
-        Wait-Until {
-            $script:detailNative = [QuotaSmokeWindows]::ReadOwnedEdit($detailsHandle, $ui.Id)
-            if (-not $script:detailNative) { return $false }
-            $script:detailValue = try {
-                $textControl = $detailsElement.FindFirst([Windows.Automation.TreeScope]::Descendants, $textCondition)
-                if ($textControl) { Read-UiText $textControl } else { $null }
-            } catch { $null }
-            $script:detailReadMethod = 'UIA'
-            if ([string]::IsNullOrWhiteSpace($script:detailValue)) {
-                $script:detailValue = $script:detailNative.Text
-                $script:detailReadMethod = 'Win32 WM_GETTEXT'
-            }
-            -not [string]::IsNullOrWhiteSpace($script:detailValue)
-        } "Owned reset details textbox did not expose readable text: $language" 15
-        # ES_MULTILINE | ES_READONLY | WS_VSCROLL proves this is the actual
-        # scrollable, read-only native text area, regardless of the UIA proxy.
-        $requiredStyles = [uint32]0x00200804
-        Assert-True (($script:detailNative.Style -band $requiredStyles) -eq $requiredStyles) 'Reset details textbox was not multiline, read-only and vertically scrollable.'
-        Write-Output ("Fabricated reset details text ($language): $($script:detailReadMethod), $($script:detailNative.ClassName), style=0x{0:X8}" -f $script:detailNative.Style)
-        $detailValue = $script:detailValue
-        $expectedCount = if ($language -eq 'en') { 'Available banked resets: 2' } else { '可用重置次数：2' }
-        $expectedGrant = if ($language -eq 'en') { 'Granted:' } else { '发放：' }
-        $expectedExpiry = if ($language -eq 'en') { 'Expires:' } else { '到期：' }
-        Assert-True ($detailValue.Contains($expectedCount)) 'Reset details changed authoritative count.'
-        Assert-True ($detailValue.Contains($expectedGrant) -and $detailValue.Contains($expectedExpiry)) 'Grant or expiry fields were not localized.'
-        Assert-True (-not $detailValue.Contains('fixture-id-must-never-be-shown')) 'Reset details exposed an ID.'
-        Save-UiEvidence $detailsElement $language 'reset-details'
-        [void][QuotaSmokeWindows]::SendMessage($detailsHandle,0x10,[IntPtr]::Zero,[IntPtr]::Zero)
+        [void][QuotaSmokeWindows]::SendMessage($scrollBody,0x115,[IntPtr]6,[IntPtr]::Zero)
         [void][QuotaSmokeWindows]::SendMessage($buttons[1].Handle,0xF5,[IntPtr]::Zero,[IntPtr]::Zero)
         Wait-Until { [QuotaSmokeWindows]::OwnedBounds($handle,$ui.Id).Width -le 160 } 'Dash did not return to the compact widget.'
         Start-Sleep -Milliseconds 300 # Let the existing 260ms transition finish before clicking the compact surface.
