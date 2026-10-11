@@ -44,7 +44,7 @@ $script:WidgetStrings = @{
         fiveHour = 'Plus · 5-hour quota'; percentRemaining = '{0}% remaining'; external = 'Public global resets'; lastAnnouncement = 'Announced {0} · {1}'
         paid = 'Paid accounts'; all = 'All accounts'; unknownScope = 'Account scope: see announcement'; delivered = 'Delivered {0}'; deliveryUnknown = 'Delivery not confirmed'
         publicUnavailable = 'Public reset data unavailable'; deliveryEmpty = 'Delivery time —';
-        attribution = 'Public reset data · codexreset.ai / whenreset.app'; publicSource = 'Public data · codexreset.ai'
+        attribution = 'Public reset data · codex-reset.com / codexreset.dev'; publicSource = 'Public data · codex-reset.com'
         tipRefresh = 'Refresh quota now'; tipHide = 'Hide to tray'; tipCompact = 'Switch to mini widget'; tipExpand = 'Click to expand; drag to move'
         tipResize = 'Drag the edge to resize';
         tipRemaining = 'Weekly remaining {0}% · click to expand'; tipUnavailable = 'Quota unavailable · click to expand'; tipDrag = 'Drag to move'
@@ -69,11 +69,11 @@ $script:WidgetStrings = @{
         creditDetailsRow = '{0} · Details ›'; confirmedBanked = 'Confirmed banked reset grant'; confirmedRegular = 'Confirmed global reset'
         noAnnouncements = 'Monitored sources report no confirmed banked reset grants or global resets'; announcementsUnavailable = 'Confirmed announcements unavailable'; pendingUpdate = 'Information pending update'
         retention = 'Completed results retained for 24h'; phaseUpcoming = 'Upcoming'; phaseWaiting = 'Scheduled time passed; monitoring sources have no completion record'; phaseAnnounced = 'Announced · awaiting delivery'; phaseUnknown = 'Source did not provide a delivery record'; phaseDelivered = 'Delivered'; phaseArchived = 'Delivered'
-        scheduled = 'Scheduled {0}'; originalScheduled = 'Originally scheduled {0}'; scheduleUnknown = 'Delivery time not announced'; announcedOn = 'Published: {0}'; deliveredOn = 'Completed {0}'
+        scheduled = 'Scheduled {0}'; originalScheduled = 'Originally scheduled {0}'; scheduleUnknown = 'Delivery time not announced'; announcedOn = 'Published: {0}'; completionPosted = 'Completion statement posted {0}'; deliveredOn = 'Completed {0}'
         scheduledGrant = 'Scheduled grant: {0}'; scheduledReset = 'Scheduled reset: {0}'; originalGrant = 'Originally scheduled grant: {0}'; originalReset = 'Originally scheduled reset: {0}'
         localAnnouncementTime = '{0} (local {1})'; dateOnlySchedule = '{0} (time not announced)'
         sourceTimeZoneNote = 'Converted from {0} by the monitoring source; see original post.'; sourceWithdrawn = 'Monitoring sources no longer list this record'; withdrawnRecord = 'Record withdrawn by sources'
-        publicUpdated = 'Public data updated {0}'; publicUpdateUnknown = 'Public update time unavailable'; refreshCadence = 'Auto-refresh: quota every 1 min · public data every 10 min'; sourceLinks = 'codexreset.ai / whenreset.app'
+        publicUpdated = 'Public data updated {0}'; publicUpdateUnknown = 'Public update time unavailable'; refreshCadence = 'Auto-refresh: quota every 1 min · public data every 10 min'; sourceLinks = 'codex-reset.com / codexreset.dev'
         announcementSource = 'View announcement'; deliverySource = 'Delivery record'; announcementHistory = 'History'; historyEmpty = 'No history yet'
 
         expandHistory = 'Show history'; collapseHistory = 'Hide history'
@@ -122,7 +122,7 @@ $script:WidgetStrings = @{
         fiveHour = 'Plus · 5小时额度'; percentRemaining = '{0}% 剩余'; external = '公开全局额度重置'; lastAnnouncement = '上次公告 {0} · {1}'
         paid = '付费账号'; all = '全部账号'; unknownScope = '适用范围详见公告'; delivered = '记录送达 {0}'; deliveryUnknown = '送达时间未确认'
         publicUnavailable = '上次公开重置暂不可用'; deliveryEmpty = '送达时间 —';
-        attribution = '公开重置记录 · codexreset.ai / whenreset.app'; publicSource = '公开数据 · codexreset.ai'
+        attribution = '公开重置记录 · codex-reset.com / codexreset.dev'; publicSource = '公开数据 · codex-reset.com'
         tipRefresh = '立即刷新额度'; tipHide = '隐藏到系统托盘'; tipCompact = '切换到极简悬浮窗'; tipExpand = '单击展开，拖动可调整位置'
         tipResize = '拖动边缘调整大小';
         tipRemaining = '本周剩余 {0}% · 单击展开'; tipUnavailable = '额度暂不可用 · 单击展开'; tipDrag = '拖动悬浮窗'
@@ -147,11 +147,11 @@ $script:WidgetStrings = @{
         creditDetailsRow = '{0} · 查看明细 ›'; confirmedBanked = '已确认重置次数赠送'; confirmedRegular = '已确认全局额度重置'
         noAnnouncements = '监控来源暂无已确认的重置次数赠送或全局额度重置公告'; announcementsUnavailable = '已确认公告暂不可用'; pendingUpdate = '信息待更新'
         retention = '完成结果保留24小时'; phaseUpcoming = '即将进行'; phaseWaiting = '预定时间已过，监控来源未提供完成记录'; phaseAnnounced = '已公告 · 等待送达'; phaseUnknown = '来源未提供送达记录'; phaseDelivered = '已送达'; phaseArchived = '已送达'
-        scheduled = '计划 {0}'; originalScheduled = '原定 {0}'; scheduleUnknown = '送达时间尚未公布'; announcedOn = '公告发布 {0}'; deliveredOn = '确认完成 {0}'
+        scheduled = '计划 {0}'; originalScheduled = '原定 {0}'; scheduleUnknown = '送达时间尚未公布'; announcedOn = '公告发布 {0}'; completionPosted = '完成声明发布 {0}'; deliveredOn = '确认完成 {0}'
         scheduledGrant = '预定送达 {0}'; scheduledReset = '预定重置 {0}'; originalGrant = '原定送达 {0}'; originalReset = '原定重置 {0}'
         localAnnouncementTime = '{0}（本地 {1}）'; dateOnlySchedule = '{0}（具体时间未公布）'
         sourceTimeZoneNote = '来源按 {0} 时区换算；原文见公告。'; sourceWithdrawn = '监控来源已撤下此记录'; withdrawnRecord = '来源已撤下的公告记录'
-        publicUpdated = '公告数据更新 {0}'; publicUpdateUnknown = '公告更新时间暂不可用'; refreshCadence = '自动刷新：额度每1分钟 · 公共信息每10分钟'; sourceLinks = 'codexreset.ai / whenreset.app'
+        publicUpdated = '公告数据更新 {0}'; publicUpdateUnknown = '公告更新时间暂不可用'; refreshCadence = '自动刷新：额度每1分钟 · 公共信息每10分钟'; sourceLinks = 'codex-reset.com / codexreset.dev'
         announcementSource = '查看公告'; deliverySource = '送达记录'; announcementHistory = '历史记录'; historyEmpty = '暂无历史记录'
 
         expandHistory = '展开历史记录'; collapseHistory = '收起历史记录'
@@ -475,7 +475,8 @@ function ConvertTo-WidgetAnnouncementRow($row, [string]$language, [DateTimeOffse
     }
     if (-not $explicit) { $scheduledText=$null }
     if ($explicit -and -not $scheduledText -and -not $completed -and -not $historical) { $scheduledText=Get-WidgetText 'scheduleUnknown' $language }
-    if ($completed) { $completedText=Get-WidgetText 'deliveredOn' $language @((Format-WidgetAnnouncementDate $delivered $language $timeZone $now)) }
+    $completionKey=if ($row.completionTimeBasis -eq 'announcement') {'completionPosted'} else {'deliveredOn'}
+    if ($completed) { $completedText=Get-WidgetText $completionKey $language @((Format-WidgetAnnouncementDate $delivered $language $timeZone $now)) }
     $announced=ConvertTo-WidgetTimestamp $row.announcedAt
     if ($announced) { $announcedText=Get-WidgetText $(if ($explicit) {'announcedOn'} else {'postedOn'}) $language @((Format-WidgetAnnouncementDate $announced $language $timeZone $now)) }
     $scope=if ($row.scope -eq 'paid') {Get-WidgetText 'paid' $language} elseif ($row.scope -eq 'all') {Get-WidgetText 'all' $language} elseif ($row.scopeLabel) {[string]$row.scopeLabel} else {Get-WidgetText 'unknownScope' $language}
@@ -485,7 +486,7 @@ function ConvertTo-WidgetAnnouncementRow($row, [string]$language, [DateTimeOffse
     $summary=if ((Resolve-WidgetLanguage $language) -eq 'zh-CN' -and $row.summaryZh) {[string]$row.summaryZh} elseif ($row.summary) {[string]$row.summary} else {''}
     $compactScheduled=$scheduledText;$compactCompleted=$completedText;$compactAnnounced=$announcedText
     if ($scheduled -and $scheduledText) {$compactScheduled=Get-WidgetText $scheduleKey $language @((Format-WidgetCompactDate $scheduled $language $timeZone $now))}
-    if ($completed) {$compactCompleted=Get-WidgetText 'deliveredOn' $language @((Format-WidgetCompactDate $delivered $language $timeZone $now))}
+    if ($completed) {$compactCompleted=Get-WidgetText $completionKey $language @((Format-WidgetCompactDate $delivered $language $timeZone $now))}
     if ($announced) {$compactAnnounced=Get-WidgetText $(if ($explicit) {'announcedOn'} else {'postedOn'}) $language @((Format-WidgetCompactDate $announced $language $timeZone $now))}
     $details=@((Get-WidgetText $phaseKey $language))
     if ($scheduledText) {$details+=,$scheduledText}
@@ -556,6 +557,15 @@ function Merge-WidgetExternalData($previous, $incoming, [bool]$transportFailure 
     $fresh=if ($incoming -and -not $transportFailure) {$incoming.announcements} else {$null}
     $old=if ($previous) {$previous.announcements} else {$null}
     $feed=if ($fresh) {$fresh | ConvertTo-Json -Depth 12 | ConvertFrom-Json} elseif ($old) {$old | ConvertTo-Json -Depth 12 | ConvertFrom-Json} else {[pscustomobject]@{status='unavailable';items=@();history=@();sourceUpdatedAt=$null;stale=$true}}
+    $originalKinds=@{}
+    foreach ($snapshot in @($old,$fresh)) {
+        if (-not $snapshot) { continue }
+        foreach ($row in @($snapshot.history)+@($snapshot.items)) {
+            if ($row -and $row.kind -in @('banked','regular') -and $row.kindBasis -eq 'original' -and (Test-WidgetHttpsUrl $row.sourceUrl)) {
+                $originalKinds[[string]$row.sourceUrl]=[string]$row.kind
+            }
+        }
+    }
     $entries=[ordered]@{}
     foreach ($snapshot in @($old,$fresh)) {
         if (-not $snapshot) { continue }
@@ -565,17 +575,42 @@ function Merge-WidgetExternalData($previous, $incoming, [bool]$transportFailure 
         foreach ($bucket in @('history','items')) {
             foreach ($row in @($snapshot.$bucket)) {
                 if (-not $row -or $row.kind -notin @('banked','regular')) { continue }
-                $identity=Get-WidgetAnnouncementKey $row
                 $copy=$row | ConvertTo-Json -Depth 8 | ConvertFrom-Json
+                if ($originalKinds.ContainsKey([string]$copy.sourceUrl)) {
+                    $copy.kind=$originalKinds[[string]$copy.sourceUrl]
+                    $copy | Add-Member -NotePropertyName id -NotePropertyValue ($copy.sourceUrl+'#'+$copy.kind) -Force
+                    $copy | Add-Member -NotePropertyName kindBasis -NotePropertyValue 'original' -Force
+                }
+                $identity=Get-WidgetAnnouncementKey $copy
                 if ($entries.Contains($identity)) {
                     $known=$entries[$identity].row
-                    foreach ($field in @('deliveredAt','scheduledAt','scheduledDate','announcedAt','sourceUrl','deliverySourceUrl')) {
+                    foreach ($field in @('deliveredAt','scheduledAt','scheduledDate','announcedAt','sourceUrl','deliverySourceUrl','completionTimeBasis','kindBasis')) {
                         if (-not $copy.$field -and $known.$field) { $copy | Add-Member -NotePropertyName $field -NotePropertyValue $known.$field -Force }
+                    }
+                }
+                # A later full original can invalidate a pairing inferred from a
+                # mirror's category; do not preserve those old completion fields.
+                if ($copy.deliveredAt -and $copy.deliverySourceUrl -ne $copy.sourceUrl -and $originalKinds.ContainsKey([string]$copy.deliverySourceUrl) -and $originalKinds[[string]$copy.deliverySourceUrl] -ne $copy.kind) {
+                    foreach ($field in @('deliveredAt','deliverySourceUrl','completionTimeBasis')) {
+                        $copy | Add-Member -NotePropertyName $field -NotePropertyValue $null -Force
                     }
                 }
                 $entries[$identity]=[pscustomobject]@{row=$copy;bucket=$bucket}
             }
         }
+    }
+    # A paired row replaces its independently cached completion post, including
+    # aliases from an earlier partial response and rows without a persisted id.
+    $completionAliases=@{}
+    foreach ($entry in @($entries.Values)) {
+        $row=$entry.row
+        if ($row.deliveredAt -and (Test-WidgetHttpsUrl $row.deliverySourceUrl) -and $row.deliverySourceUrl -ne $row.sourceUrl) {
+            $completionAliases["$($row.kind):$($row.deliverySourceUrl)"]=$true
+        }
+    }
+    foreach ($identity in @($entries.Keys)) {
+        $row=$entries[$identity].row
+        if ($completionAliases.ContainsKey("$($row.kind):$($row.sourceUrl)")) { $entries.Remove($identity) }
     }
     $feed | Add-Member -NotePropertyName items -NotePropertyValue @($entries.Values | Where-Object {$_.bucket -eq 'items'} | ForEach-Object {$_.row}) -Force
     $feed | Add-Member -NotePropertyName history -NotePropertyValue @($entries.Values | Where-Object {$_.bucket -eq 'history'} | ForEach-Object {$_.row}) -Force

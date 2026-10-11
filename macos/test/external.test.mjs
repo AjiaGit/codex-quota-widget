@@ -20,7 +20,7 @@ test('a failed request and unusable announcement data have different reasons',as
     [{schema:'unexpected',generated_at:new Date(now).toISOString()},'invalid-data'],
   ]) {
     const result=await queryExternal({now,fetchFn:async url=>{
-      if(!url.includes('whenreset'))throw new Error('offline');
+      if(!url.includes('codex-reset.com'))throw new Error('offline');
       if(response instanceof Error)throw response;
       return {ok:true,json:async()=>response};
     }});
@@ -44,14 +44,14 @@ test('expired malformed schedules and imprecise source timestamps are not classi
 
 test('public refresh queries only reset records and preserves confirmed announcements without forecasts', async () => {
   const urls=[];
-  const event={kind:'regular',certainty:'announced',url:'https://example.org/reset',ts:'2026-09-29T08:00:00Z',announced_at:'2026-09-29T08:00:00Z'};
+  const event={id:'1000000000000000003',text:'Global reset by EOD.',url:'https://x.com/thsottiaux/status/1000000000000000003',at:'2026-09-29T08:00:00Z'};
   const result=await queryExternal({now,fetchFn:async url=>{
     urls.push(url);
-    return {ok:true,json:async()=>url.includes('whenreset')
-      ? {schema:'whenreset/v1',generated_at:new Date(now).toISOString(),products:{codex:{scheduled:null,events:[event]}}}
-      : {schema_version:1,generated_at:new Date(now).toISOString(),events:[event]}};
+    return {ok:true,json:async()=>url.includes('codex-reset.com')
+      ? {version:1,fetched_at:new Date(now).toISOString(),profile:{handle:'thsottiaux'},stale:false,tweets:[event],events:[]}
+      : {coverage:'partial',events:[],count:0,timezone:'UTC'}};
   }});
-  assert.deepEqual(urls.sort(),['https://codexreset.ai/api/v1/resets.json','https://whenreset.app/api/v1/resets.json'].sort());
+  assert.deepEqual(urls.sort(),['https://codex-reset.com/api/feed','https://codexreset.dev/api/history'].sort());
   assert.equal(Object.hasOwn(result,'forecast'),false);
   assert.equal(result.announcements.items[0].certainty,'announced');
   assert.equal(result.lastGlobal.sourceUrl,event.url);
@@ -59,8 +59,8 @@ test('public refresh queries only reset records and preserves confirmed announce
 
 test('fresh announcement data remains usable when the secondary reset feed is unavailable', async () => {
   const result=await queryExternal({now,fetchFn:async url=>{
-    if(!url.includes('whenreset'))throw Error('offline');
-    return {ok:true,json:async()=>({schema:'whenreset/v1',generated_at:new Date(now).toISOString(),products:{codex:{scheduled:null,events:[]}}})};
+    if(!url.includes('codex-reset.com'))throw Error('offline');
+    return {ok:true,json:async()=>({version:1,fetched_at:new Date(now).toISOString(),profile:{handle:'thsottiaux'},stale:false,tweets:[],events:[]})};
   }});
   assert.equal(result.status,'ok');
   assert.equal(result.announcements.status,'ok');
@@ -90,20 +90,20 @@ test('does not claim delivery from an announcement alone', () => {
   assert.equal(normalizeResets({ schema_version: 1, generated_at: '2026-09-26T00:00:00Z', events: [] }, now), null);
 });
 
-test('reconciliation requires two complete fresh valid feeds and includes schedules absent from history', async () => {
-  const event={kind:'regular',url:'https://example.org/record',ts:'2026-09-28T00:00:00Z',announced_at:'2026-09-28T00:00:00Z'};
-  const resets={schema_version:1,generated_at:new Date(now).toISOString(),events:[event]};
-  const scheduled={day:'2026-09-30',scheduled_for:'2026-09-30T17:00:00Z',announced_at:'2026-09-28T00:00:00Z',certainty:'announced',url:'https://example.org/scheduled'};
-  const announcements={schema:'whenreset/v1',generated_at:new Date(now).toISOString(),products:{codex:{scheduled,events:[]}}};
+test('partial providers cannot withdraw records by absence, even when both responses are fresh', async () => {
+  const event={type:'global_reset',status:'recorded',source_url:'https://x.com/thsottiaux/status/1000000000000000004',announced_at:'2026-09-28T00:00:00Z',retrieved_at:new Date(now).toISOString(),time_basis:'announcement',evidence_text:'All propagated.'};
+  const resets={coverage:'partial',events:[event],count:1,timezone:'UTC'};
+  const announcements={version:1,fetched_at:new Date(now).toISOString(),profile:{handle:'thsottiaux'},stale:false,tweets:[],events:[]};
   const query=async(resetValue,announcementValue=announcements)=>queryExternal({now,fetchFn:async url=>{
-    const value=url.includes('whenreset')?announcementValue:resetValue;
+    const value=url.includes('codex-reset.com')?announcementValue:resetValue;
     if(value instanceof Error)throw value;
     return {ok:true,json:async()=>value};
   }});
   const good=await query(resets);
-  assert.deepEqual(good.announcements.reconciledIds,['https://example.org/record#regular','https://example.org/scheduled#regular']);
-  for(const bad of [new Error('network'),{...resets,generated_at:'2026-09-25T00:00:00Z'},{...resets,events:[event,{kind:'unexpected',url:'https://example.org/bad'}]}]) {
+  assert.equal(good.announcements.status,'ok');
+  assert.equal(good.announcements.reconciledIds,undefined);
+  for(const bad of [new Error('network'),{...resets,events:[{...event,retrieved_at:'2026-09-25T00:00:00Z'}]},{...resets,events:[event,{kind:'unexpected',url:'https://example.org/bad'}]}]) {
     assert.equal((await query(bad)).announcements.reconciledIds,undefined,'One unavailable, stale or malformed feed cannot withdraw cached records');
   }
-  assert.equal((await query(resets,{...announcements,products:{codex:{scheduled:{...scheduled,kind:'unexpected'},events:[]}}})).announcements.reconciledIds,undefined);
+  assert.equal((await query(resets,{...announcements,tweets:[{url:'javascript:invalid'}]})).announcements.reconciledIds,undefined);
 });

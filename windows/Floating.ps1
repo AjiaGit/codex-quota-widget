@@ -477,7 +477,7 @@ $sourceChecked=New-Label '' 0 0 346 24 9.75;[void]$sourcesPanel.Controls.Add($so
 $attribution=New-Object Windows.Forms.FlowLayoutPanel
 $attribution.WrapContents=$true; $attribution.Margin=[Windows.Forms.Padding]::Empty; $attribution.Padding=[Windows.Forms.Padding]::Empty
 $script:attributionSiteLinks=@()
-foreach ($site in @('codexreset.ai','whenreset.app')) {
+foreach ($site in @('codex-reset.com','codexreset.dev')) {
     if ($script:attributionSiteLinks.Count) {
         $separator=New-Label ' / ' 0 0 20 22 9
         $separator.AutoSize=$true; $separator.Margin=[Windows.Forms.Padding]::Empty
@@ -1104,7 +1104,7 @@ foreach ($sourceLink in $script:attributionSiteLinks) {
 $sourceLink.Add_LinkClicked({
     param($sender, $e)
     $url = [string]$e.Link.LinkData
-    if ($url -in @('https://codexreset.ai/', 'https://whenreset.app/')) {
+    if ($url -in @('https://codex-reset.com/', 'https://codexreset.dev/')) {
         try { Start-Process -FilePath $url | Out-Null } catch { }
     }
 })

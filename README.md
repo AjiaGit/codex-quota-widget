@@ -37,19 +37,19 @@ Quota queries and cache checks run every **60 seconds**. Manual refresh, reopeni
 
 Confirmed banked reset grants and global reset announcements stay visible until delivery is confirmed, then remain for 24 hours before moving into history. Known pending announcements survive source outages and app restarts. Five-hour usage is shown only for a confirmed Plus plan; Pro and unknown plans hide that row.
 
-Announcement cards and history show the newest publication first. A tracker category such as `regular` or `banked` does not confirm a promised reset. Only an explicit `certainty: announced` source record or a valid completion timestamp receives a confirmed label; other records appear as related updates and do not trigger the compact notice dot. Summaries and account scope are attributed to the source. These are tracker confirmations, not independent verification of X posts.
+Announcement cards and history show the newest publication first. The widget reads original announcement text from codex-reset.com and archived evidence from codexreset.dev. Narrow phrase rules recognize explicit promises and completion statements; tracker categories alone, conditions and teasers do not confirm a reset. Publication times are retained, and a completion statement is labelled **Completion statement posted**, not the exact delivery time for your account. Original-post links remain available.
 
-Unconfirmed news moves into history 24 hours after publication. Confirmed pending announcements remain visible until delivery is recorded. A missing completion timestamp is labelled **Tracker has no completion time**, including when the source summary says a reset happened.
+One recent same-kind promise can be paired with a later completion statement within 48 hours; ambiguous multiple promises remain separate. Mirrored records are deduplicated by original-post URL. These partial feeds cannot withdraw cached announcements by omission. Pending original-feed announcements remain active until completion; old promises first discovered in the archive remain in history. An unspecified EOD deadline is never converted into a precise local time or timezone. Older cached schedules remain readable.
 
-Precise public schedules and publication times are displayed separately in your local timezone, with the UTC offset. Date-only schedules keep their original calendar date. Timezone interpretations supplied by a tracker are labelled as source conversions. If both fresh, complete tracker feeds no longer list an unconfirmed record, it moves into history with a source-withdrawal label; withdrawal is not proof of delivery.
+When mirror categories conflict, an explicit type in the complete original post also corrects the cached type for that URL. Later partial archive updates preserve that correction.
 
 Historical announcements without delivery evidence say **Source did not provide a delivery record**. An account's personal grant date does not confirm delivery of a public announcement to every account.
 
 After a scheduled time passes, a missing public completion record is shown neutrally as a monitoring-source status. Your account's quota updates independently; restored personal quota does not prove that a global reset has finished for all accounts.
 
-Public reset announcements and delivery records from [codexreset.ai](https://codexreset.ai/) and [whenreset.app](https://whenreset.app/) refresh separately every **10 minutes**.
+Public reset announcements and delivery records from [codex-reset.com](https://codex-reset.com/) and [codexreset.dev](https://codexreset.dev/) refresh separately every **10 minutes**.
 
-The footer states **Auto-refresh: quota every 1 min · public data every 10 min**. The widget reads structured tracker APIs; it does not search or interpret X posts. Provider records may be delayed or incomplete. See [terms and data sources](docs/TERMINOLOGY.md) for official reset names, translated labels and source boundaries.
+The footer states **Auto-refresh: quota every 1 min · public data every 10 min**. The widget reads structured tracker APIs; it does not search X or use an AI model. Phrase matching on the supplied original text is conservative and may miss unfamiliar wording. Provider records may be delayed or incomplete. See [terms and data sources](docs/TERMINOLOGY.md) for official reset names, translated labels and source boundaries.
 
 ## Privacy and troubleshooting
 

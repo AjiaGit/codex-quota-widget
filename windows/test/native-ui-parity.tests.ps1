@@ -103,6 +103,53 @@ Test-Case 'production announcement IDs acknowledge only the rendered service rec
  Assert-Equal ((Get-WidgetAnnouncementReadIds $alerts $view $true) -join ',') $id 'Real service ID shape must match native rendered identity'
  Assert-Equal (Get-WidgetAnnouncementReadIds $alerts $view $false).Count 0 'Hidden details leave notices unread'
 }
+Test-Case 'paired completion replaces its cached standalone alias and preserves publication wording' {
+ $preUrl='https://x.com/thsottiaux/status/1000000000000000001';$doneUrl='https://x.com/thsottiaux/status/1000000000000000002'
+ $done=[pscustomobject]@{id=($doneUrl+'#regular');kind='regular';certainty='announced';sourceUrl=$doneUrl;deliverySourceUrl=$doneUrl;announcedAt=$now.AddHours(-1).ToString('o');deliveredAt=$now.AddHours(-1).ToString('o');completionTimeBasis='announcement'}
+ $paired=[pscustomobject]@{id=($preUrl+'#regular');kind='regular';certainty='announced';sourceUrl=$preUrl;deliverySourceUrl=$doneUrl;announcedAt=$now.AddHours(-2).ToString('o');deliveredAt=$done.deliveredAt;completionTimeBasis='announcement'}
+ $previous=[pscustomobject]@{status='ok';announcements=[pscustomobject]@{status='ok';items=@($done);history=@();stale=$false}}
+ $incoming=[pscustomobject]@{status='ok';announcements=[pscustomobject]@{status='ok';items=@($paired);history=@($paired);stale=$false}}
+ $merged=Merge-WidgetExternalData $previous $incoming
+ Assert-Equal $merged.announcements.items.Count 1 'Cached standalone completion is removed'
+ Assert-Equal $merged.announcements.history.Count 0 'Active canonical row is not repeated in history'
+ Assert-Equal $merged.announcements.items[0].id $paired.id 'Canonical preannouncement owns the pair'
+ Assert-Equal $previous.announcements.items[0].id $done.id 'Input cache is not mutated'
+ foreach($language in @('en','zh-CN')) {
+  $row=ConvertTo-WidgetAnnouncementRow $merged.announcements.items[0] $language $now
+  $prefix=if($language -eq 'en'){'Completion statement posted'}else{'完成声明发布'}
+  if(-not $row.completedText.StartsWith($prefix)){throw 'Completion time is not explicitly the statement publication time'}
+ }
+ $partial=[pscustomobject]@{status='ok';announcements=[pscustomobject]@{status='ok';items=@([pscustomobject]@{id=$paired.id;kind='regular';sourceUrl=$preUrl;certainty='announced';announcedAt=$paired.announcedAt});history=@();stale=$false}}
+ $retained=Merge-WidgetExternalData $merged $partial
+ Assert-Equal $retained.announcements.items[0].completionTimeBasis 'announcement' 'Partial updates preserve the time basis'
+ Assert-Equal $retained.announcements.items[0].deliverySourceUrl $doneUrl 'Partial updates preserve the completion source'
+}
+Test-Case 'original category corrects native cached mirror rows and survives partial updates' {
+ $url='https://x.com/thsottiaux/status/1000000000000000002'
+ $cached=[pscustomobject]@{id=($url+'#regular');kind='regular';sourceUrl=$url;certainty='announced';announcedAt=$now.AddHours(-1).ToString('o');deliveredAt=$now.AddHours(-1).ToString('o');deliverySourceUrl=$url;completionTimeBasis='announcement'}
+ $original=$cached | ConvertTo-Json -Depth 8 | ConvertFrom-Json
+ $original.kind='banked';$original.id=$url+'#banked';$original | Add-Member -NotePropertyName kindBasis -NotePropertyValue 'original'
+ $previous=[pscustomobject]@{status='ok';announcements=[pscustomobject]@{status='ok';items=@($cached);history=@();stale=$false}}
+ $incoming=[pscustomobject]@{status='ok';announcements=[pscustomobject]@{status='ok';items=@($original);history=@();stale=$false}}
+ $merged=Merge-WidgetExternalData $previous $incoming
+ Assert-Equal $merged.announcements.items.Count 1 'Same source is not repeated under a conflicting category'
+ Assert-Equal $merged.announcements.items[0].kind 'banked' 'Full original overrides the mirror category'
+ Assert-Equal $merged.announcements.items[0].id ($url+'#banked') 'Canonical identity follows the corrected category'
+ $retained=Merge-WidgetExternalData $merged $previous
+ Assert-Equal $retained.announcements.items.Count 1 'Later partial archive does not restore the old category'
+ Assert-Equal $retained.announcements.items[0].kindBasis 'original' 'Original category authority is preserved'
+ Assert-Equal $retained.announcements.items[0].kind 'banked' 'Partial update stays in the original category'
+ Assert-Equal $previous.announcements.items[0].kind 'regular' 'Input cache is not mutated'
+ $preUrl='https://x.com/thsottiaux/status/1000000000000000001'
+ $promise=[pscustomobject]@{id=($preUrl+'#regular');kind='regular';kindBasis='original';sourceUrl=$preUrl;certainty='announced';announcedAt=$now.AddHours(-2).ToString('o');deliveredAt=$cached.deliveredAt;deliverySourceUrl=$url;completionTimeBasis='announcement'}
+ $pairedCache=[pscustomobject]@{status='ok';announcements=[pscustomobject]@{status='ok';items=@($promise);history=@();stale=$false}}
+ $split=Merge-WidgetExternalData $pairedCache $incoming
+ Assert-Equal $split.announcements.items.Count 2 'Corrected banked completion and global promise remain separate'
+ $pending=@($split.announcements.items | Where-Object {$_.sourceUrl -eq $preUrl})[0]
+ Assert-Equal $pending.deliveredAt $null 'Incompatible completion evidence releases the cached promise'
+ Assert-Equal $pending.deliverySourceUrl $null 'Old completion source is removed'
+ Assert-Equal $pending.completionTimeBasis $null 'Pending promise has no completion time basis'
+}
 $start=$source.IndexOf('$script:data = $null');$end=$source.IndexOf('function New-Color',$start)
 Invoke-Expression $source.Substring($start,$end-$start)
 $script:creditsExpanded=$false;$script:sourcesExpanded=$false;$script:earlierExpanded=$false;$script:creditRenderKey='';$script:creditRows=@();$script:recordExpanded=@{};$script:language='zh-CN';$script:languageSetting='auto';$script:externalData=[pscustomobject]@{status='ok';announcements=[pscustomobject]@{status='ok';stale=$false;sourceUpdatedAt=$now.ToString('o');items=@();history=@()}}

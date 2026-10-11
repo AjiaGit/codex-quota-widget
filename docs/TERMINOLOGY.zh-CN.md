@@ -24,12 +24,12 @@
 
 | 内容 | 结构化数据来源 |
 | --- | --- |
-| 已记录的全局额度重置 | `https://codexreset.ai/api/v1/resets.json` |
-| 已确认的计划公告与历史 | `https://whenreset.app/api/v1/resets.json` |
+| 全局与储备重置历史 | `https://codexreset.dev/api/history` |
+| 公告原帖列表 | `https://codex-reset.com/api/feed` |
 
-来源说明见 [CodexReset API 文档](https://codexreset.ai/developers/)与 [WhenReset](https://whenreset.app/)。它们是独立监控站点，不是 OpenAI 官方 API。
+来源说明见 [Codex Reset API 文档](https://codex-reset.com/developers)与 [CodexReset.dev](https://codexreset.dev/api/)。它们是独立监控站点，不是 OpenAI 官方 API。
 
-工具不会搜索 X、抓取推文或调用 AI 解读推文。站点提供的来源链接可能指向 X 上的公告，也可能指向其他证据。只有结构化数据明确标为 `announced` 的计划才展示为已确认；暗示和条件性表述不会当作已确认公告。只有来源提供确认完成的时间，才显示已送达；计划时间已到不等于完成。
+工具不会搜索 X、直接抓取 X 或调用 AI，而是对站点提供的原文做保守短语匹配，识别明确预告与完成声明；分类、预测及条件性表述不足以确认重置。完成声明发布时间不等于个人账号恢复时间。未注明时区的 EOD 不会推断为具体日期、时刻或时区。codexreset.dev 转发 Codex Resets 的历史，镜像记录一致不构成独立验证。两家接口均为部分覆盖，缺失记录不会撤销缓存的预告。
 
 新信息要等站点收录、工具成功刷新后才能显示，无法保证无遗漏、站点判断始终准确或即时到达。接口失败、格式变化或数据过旧时会显示不可用或待更新，已知的确认公告会保留。历史记录是公开站点的记录，不代表个人账号已经收到重置。
 

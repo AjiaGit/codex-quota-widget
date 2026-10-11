@@ -59,13 +59,14 @@ export function deriveAnnouncementsView(state,now=Date.now(),timeZone=Intl.DateT
     const scopeText=explicit?scope:t(language,'sourceScope',{scope});
     const scheduleKey=(confirmed?'original':'scheduled')+(item.kind==='banked'?'Grant':'Reset');
     const plannedText=!explicit?'':plannedDate?t(language,scheduleKey,{time:plannedDate}):!confirmed&&!historical?t(language,'scheduleUnknown'):'';
-    const completedText=confirmed?`${t(language,'completed')} ${formatLocalAnnouncementDate(delivered,timeZone,language,now)}`:'';
+    const completionLabel=item.completionTimeBasis==='announcement'?'completionPosted':'completed';
+    const completedText=confirmed?`${t(language,completionLabel)} ${formatLocalAnnouncementDate(delivered,timeZone,language,now)}`:'';
     const announcedText=Number.isFinite(announced)?t(language,explicit?'published':'posted',{time:formatLocalAnnouncementDate(announced,timeZone,language,now)}):'';
     const status=confirmed?t(language,item.kind==='banked'?'grantDone':'resetDone'):t(language,item.sourceWithdrawn?'sourceWithdrawn':phase==='unknown'?'historyDeliveryUnknown':phase==='unconfirmed'?'sourceUnconfirmed':phase==='waiting'?'waitingDelivery':phase==='upcoming'?'upcoming':'announcedWaiting');
     const summary=language==='zh-CN'?(item.summaryZh||item.summary||''):(item.summary||'');
     const titleKey=item.sourceWithdrawn?'withdrawnRecord':(confirmed?'delivered':explicit?'upcoming':'unconfirmed')+(item.kind==='banked'?'GrantTitle':'ResetTitle');
     const compactPlanned=!explicit?'':plannedDate?t(language,scheduleKey,{time:Number.isFinite(scheduled)?formatCompactLocalDate(scheduled,timeZone,language,now):plannedDate}):!confirmed&&!historical?t(language,'scheduleUnknown'):'';
-    const compactCompleted=confirmed?`${t(language,'completed')} ${formatCompactLocalDate(delivered,timeZone,language,now)}`:'';
+    const compactCompleted=confirmed?`${t(language,completionLabel)} ${formatCompactLocalDate(delivered,timeZone,language,now)}`:'';
     const compactAnnounced=Number.isFinite(announced)?t(language,explicit?'published':'posted',{time:formatCompactLocalDate(announced,timeZone,language,now)}):'';
     return {id:item.id||item.sourceUrl+'#'+item.kind,kind:item.kind,phase,announcedAt:Number.isFinite(announced)?announced:null,title:t(language,item.sourceWithdrawn?'withdrawnRecord':item.kind==='banked'?(explicit?'confirmedGrant':'relatedGrant'):(explicit?'confirmedReset':'relatedReset')),status,
       scheduleNote:explicit&&Number.isFinite(scheduled)&&item.scheduledTimeZone?t(language,'sourceTimeZoneNote',{zone:item.scheduledTimeZone}):'',scheduleNoteDetail:language==='zh-CN'?(item.summaryZh||''):(item.summary||item.summaryZh||''),

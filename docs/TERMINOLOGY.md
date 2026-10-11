@@ -24,12 +24,12 @@ The English reset names and distinctions follow [OpenAI's banked-reset guide](ht
 
 | Data | Structured source |
 | --- | --- |
-| Recorded global resets | `https://codexreset.ai/api/v1/resets.json` |
-| Confirmed scheduled announcements and history | `https://whenreset.app/api/v1/resets.json` |
+| Archived global and banked resets | `https://codexreset.dev/api/history` |
+| Original announcement posts | `https://codex-reset.com/api/feed` |
 
-See the [CodexReset API documentation](https://codexreset.ai/developers/) and [WhenReset](https://whenreset.app/). These are independent trackers, not OpenAI APIs.
+See the [Codex Reset API documentation](https://codex-reset.com/developers) and [CodexReset.dev](https://codexreset.dev/api/). These are independent trackers, not OpenAI APIs.
 
-The widget does not search X, scrape posts, or use an AI model to interpret them. Source links supplied by the trackers can point to X announcement posts or other evidence. Only a structured `announced` schedule is treated as confirmed; a hinted or conditional statement is not a confirmed announcement. Delivery is displayed only when the source provides a delivery timestamp; an elapsed scheduled time is not proof of delivery.
+The widget does not search X, scrape X directly, or use an AI model. It conservatively matches explicit promises and completion phrases in the original text supplied by the trackers. Categories, forecasts and conditional language are insufficient. Completion-statement publication time is not personal delivery time. An unspecified EOD deadline has no inferred clock time or timezone. codexreset.dev mirrors the Codex Resets archive; mirrored agreement is not independent verification. Both APIs have partial coverage, so absence cannot withdraw a cached promise.
 
 New information appears after the provider records it and the widget successfully refreshes. Completeness, provider accuracy and instant delivery cannot be guaranteed. Failed, malformed or expired responses are shown as unavailable or pending update; previously known confirmed announcements are retained. The history contains public provider records, not proof that an individual account received a reset.
 

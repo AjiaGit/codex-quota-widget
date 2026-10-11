@@ -112,7 +112,7 @@ try {
    $sourcesPanel=[Windows.Forms.Panel]::new();$fonts=@()
    try {
     Invoke-Expression $sourceFactory
-    Set-AttributionLinks 'codexreset.ai / whenreset.app'
+    Set-AttributionLinks 'codex-reset.com / codexreset.dev'
     $links=@($attribution.Controls | Where-Object {$_ -is [Windows.Forms.LinkLabel]})
     if($links.Count -ne 2){throw 'Website links share a GDI+ multi-link label'}
     $fonts=@($attribution.Controls | ForEach-Object {$_.Font})

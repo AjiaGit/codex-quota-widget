@@ -1,6 +1,10 @@
 import { readFile, mkdir, writeFile, rename } from 'node:fs/promises';
 import { dirname } from 'node:path';
-const ROOT = 'https://codexreset.ai/api/v1';
+import { setDefaultResultOrder } from 'node:dns';
+// Prefer the working IPv4 route on networks whose IPv6 TLS path resets connections.
+// This changes only this service process and retains IPv6 as a fallback.
+setDefaultResultOrder('ipv4first');
+const PROVIDERS = ['https://codex-reset.com/api/feed', 'https://codexreset.dev/api/history'];
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 function recentTimestamp(value, now) {
@@ -52,20 +56,149 @@ function normalizedAnnouncement(raw, now, scheduled = false, persisted = false) 
     sourceUrl, deliverySourceUrl: deliveredAt ? safeHttpsUrl(persisted ? raw.deliverySourceUrl : raw.delivered_source_url) : null,
     summary: text(raw.summary ?? (scheduled ? raw.note_en : null)), summaryZh: text(persisted ? raw.summaryZh : raw.summary_zh ?? (scheduled ? raw.note_zh : null)),
     sourceWithdrawn: persisted && raw.sourceWithdrawn === true,
+    completionTimeBasis: persisted && raw.completionTimeBasis === 'announcement' ? 'announcement' : null,
+    kindBasis: persisted && raw.kindBasis === 'original' ? 'original' : null,
   };
 }
-function deduplicate(items) {
+function deduplicate(items, knownItems = []) {
+  // The complete original post overrides a mirror's category, including a
+  // previously cached category. Keep that authority across partial refreshes.
+  const originalKinds = new Map([...knownItems, ...items].filter(item => item.kindBasis === 'original')
+    .map(item => [item.sourceUrl, item.kind]));
   const map = new Map();
-  for (const item of items) {
+  for (let item of items) {
+    const kind = originalKinds.get(item.sourceUrl);
+    if (kind) item = { ...item, kind, id: item.sourceUrl + '#' + kind, kindBasis: 'original' };
     const previous = map.get(item.id);
     map.set(item.id, previous ? { ...previous, ...item,
       scheduledAt: item.scheduledAt || previous.scheduledAt,
       scheduledDate: item.scheduledDate || previous.scheduledDate,
       certainty: item.certainty === 'announced' || previous.certainty === 'announced' ? 'announced' : 'unconfirmed',
       deliveredAt: item.deliveredAt || previous.deliveredAt,
+      kindBasis: item.kindBasis || previous.kindBasis,
+      completionTimeBasis: item.deliveredAt ? item.completionTimeBasis : previous.completionTimeBasis,
       deliverySourceUrl: item.deliverySourceUrl || previous.deliverySourceUrl } : item);
   }
+  // If the original completion post proves a different type, release an older
+  // inferred pairing instead of retaining its completion fields through merging.
+  for (const item of map.values()) {
+    const completionKind = originalKinds.get(item.deliverySourceUrl);
+    if (item.deliveredAt && item.deliverySourceUrl !== item.sourceUrl && completionKind && completionKind !== item.kind)
+      map.set(item.id, { ...item, deliveredAt: null, deliverySourceUrl: null, completionTimeBasis: null });
+  }
+  // A paired announcement already contains the evidence from its completion post.
+  for (const item of map.values()) if (item.deliveredAt && item.deliverySourceUrl && item.deliverySourceUrl !== item.sourceUrl)
+    map.delete(item.deliverySourceUrl + '#' + item.kind);
   return [...map.values()];
+}
+
+function linkCompletions(items) {
+  const records = deduplicate(items).map(item=>({...item})).sort((a,b) => Date.parse(a.announcedAt || 0) - Date.parse(b.announcedAt || 0));
+  for (const completion of [...records]) {
+    if (!completion.deliveredAt || completion.completionTimeBasis !== 'announcement' ||
+        completion.deliverySourceUrl !== completion.sourceUrl) continue;
+    // Associate only one recent, same-kind promise with a later completion statement.
+    // Ambiguous multiple promises stay separate rather than guessing a relationship.
+    const pending = records.filter(item => item !== completion && !item.deliveredAt && item.certainty === 'announced' &&
+      officialPostUrl(item.sourceUrl) && item.kind === completion.kind && item.announcedAt &&
+      Date.parse(item.announcedAt) < Date.parse(completion.deliveredAt) &&
+      Date.parse(completion.deliveredAt) - Date.parse(item.announcedAt) <= 2 * MAX_AGE_MS);
+    if (pending.length !== 1) continue;
+    const item = pending[0];
+    item.deliveredAt = completion.deliveredAt;
+    item.deliverySourceUrl = completion.deliverySourceUrl || completion.sourceUrl;
+    item.completionTimeBasis = 'announcement';
+    item.sourceWithdrawn = false;
+    records.splice(records.indexOf(completion), 1);
+  }
+  return deduplicate(records);
+}
+
+function officialPostUrl(value) {
+  const safe = safeHttpsUrl(value);
+  if (!safe) return null;
+  const url = new URL(safe);
+  return ['x.com','twitter.com','www.twitter.com'].includes(url.hostname) &&
+    /^\/thsottiaux\/status\/\d+$/.test(url.pathname) ? 'https://x.com' + url.pathname : null;
+}
+
+function postClaim(value) {
+  const sentences = ((text(value) || '').match(/[^.!?\n]+[.!?]?/g) || []).map(sentence => sentence.trim().toLowerCase());
+  const usable = sentences.filter(sentence => !/\?\s*$/.test(sentence) &&
+    !/\b(if|would|could|might|maybe|when|once|unless|until|assuming|provided|whether|not|never|no)\b|as long as|n't\b/.test(sentence));
+  // Match affirmative completion clauses, not mentions inside questions or hypotheticals.
+  const complete = usable.some(sentence => !/\b(will|going to|should|plan|planning|expect|tomorrow|tonight|soon|later|by)\b/.test(sentence) &&
+    /^(?:all propagated|confirmed (?:landed|delivered)|all reset for everyone|(?:(?:the|this) )?(?:global |codex |quota )?resets? (?:(?:has|have) been processed|(?:is|are) (?:complete|done|live)|(?:all )?propagated))\b/.test(sentence));
+  // Require an actual action or an explicit promise, rather than a modal suggestion or request.
+  const announced = usable.some(sentence => /^global reset (?:by|at|today|tomorrow|tonight|landing)\b|^global reset will (?:happen|occur|take place|be (?:issued|applied|performed|rolled out))\b/.test(sentence) ||
+    /^(?:(?:we|i)(?:'re|'m| are| am) )?(?:loading|granting|giving) (?:a |one |the )?(?:new )?(?:banked |global )reset\b/.test(sentence) ||
+    /^(?:(?:we|i)(?:'ll| will|(?:'re|'m| are| am) going to)|will|going to) (?:(?:load|grant|give|perform|issue|apply|roll out|do) (?:a |one |the )?(?:new )?(?:banked |global )reset\b|reset (?:rate|usage) limits\b)/.test(sentence));
+  return complete ? 'complete' : announced ? 'announced' : 'unconfirmed';
+}
+
+function publicRecord({kind, url, at, summary, claim, scope = null, kindBasis = null}) {
+  if (!kind || !url) return null;
+  const announcedAt = at;
+  const deliveredAt = claim === 'complete' && at ? at : null;
+  return { id: url + '#' + kind, kind, sourceUrl: url, announcedAt, deliveredAt,
+    deliverySourceUrl: deliveredAt ? url : null, completionTimeBasis: deliveredAt ? 'announcement' : null,
+    certainty: claim === 'announced' || deliveredAt ? 'announced' : 'unconfirmed',
+    scheduledAt: null, scheduledDate: null, scheduledTimeZone: null, scope, scopeLabel: null, kindBasis,
+    summary: text(summary), summaryZh: null, sourceWithdrawn: false };
+}
+
+function providerView(records, sourceUpdatedAt, now, stale = false, keepPending = true) {
+  const history = deduplicate(records).sort((a,b)=>Date.parse(b.announcedAt || 0)-Date.parse(a.announcedAt || 0));
+  const expired = !recentTimestamp(sourceUpdatedAt, now) || stale;
+  return { status: expired ? 'unavailable' : 'ok', reason: expired ? 'source-stale' : null,
+    items: history.filter(item => active(item, now) && (keepPending || item.announcedAt && now - Date.parse(item.announcedAt) < MAX_AGE_MS)),
+    history, sourceUpdatedAt, stale: expired };
+}
+
+function normalizeCodexFeed(data, now, archiveKinds) {
+  if (data?.version !== 1 || !Array.isArray(data.tweets) || data.profile?.handle !== 'thsottiaux' ||
+      !timestamp(data.fetched_at, now)) return emptyAnnouncements('invalid-data');
+  const categories = new Map((Array.isArray(data.events) ? data.events : []).map(event =>
+    [officialPostUrl(event?.url), event?.reset_kind === 'banked' || event?.group === 'credits' ? 'banked' : event?.group === 'reset' ? 'regular' : null]));
+  const records = [];
+  for (const post of data.tweets) {
+    const url = officialPostUrl(post?.url), summary = text(post?.text), at = timestamp(post?.declared_at ?? post?.at, now);
+    if (!url || !summary || !at) continue;
+    const kind = /\bbanked reset\b/i.test(summary) ? 'banked' : /\bglobal reset\b/i.test(summary) ? 'regular' :
+      archiveKinds.get(url) || categories.get(url) || (/\breset\b/i.test(summary) ? 'regular' : null);
+    const claim = postClaim(summary);
+    // Site categories and classifier flags alone cannot confirm an announcement.
+    if (claim === 'unconfirmed') continue;
+    const scope = /\bpaid accounts\b|\bplus,? pro(?:,? and)? business\b/i.test(summary) ? 'paid' : null;
+    const kindBasis = /\b(?:banked|global) reset\b/i.test(summary) ? 'original' : null;
+    const item = publicRecord({kind, url, at, summary, claim, scope, kindBasis});
+    if (item) records.push(item);
+  }
+  return providerView(records, data.fetched_at, now, data.stale === true);
+}
+
+function normalizeCodexHistory(data, now) {
+  if (!Array.isArray(data?.events) || !['partial','complete'].includes(data.coverage)) return emptyAnnouncements('invalid-data');
+  const records = [], sourceTimes = [];
+  for (const event of data.events) {
+    const supported = ['banked_reset','global_reset'].includes(event?.type);
+    const evidence = text(event?.evidence_text) || '';
+    const kind = !supported ? null : /\bbanked reset\b/i.test(evidence) ? 'banked' :
+      /\bglobal reset\b/i.test(evidence) ? 'regular' : event.type === 'banked_reset' ? 'banked' : 'regular';
+    const url = officialPostUrl(event?.source_url);
+    const checked = timestamp(event?.retrieved_at, now);
+    if (checked) sourceTimes.push(checked);
+    if (!kind || !url || !['recorded','verified'].includes(event?.status)) continue;
+    // effective_at can contain a tracker's observation time or the publication time.
+    // Neither is evidence of when this user's account received a reset.
+    const at = event.time_basis === 'announcement' ? timestamp(event.announced_at, now) : null;
+    const summary = event.evidence_text || event.summary;
+    const item = publicRecord({kind, url, at, summary, claim: postClaim(event.evidence_text), scope: text(event.scope)});
+    if (item) records.push(item);
+  }
+  const sourceUpdatedAt = sourceTimes.sort().at(-1) || null;
+  // An empty archive is valid, but without an upstream check time it cannot establish freshness.
+  return providerView(records, sourceUpdatedAt, now, false, false);
 }
 const active = (item, now) => !item.sourceWithdrawn && (item.deliveredAt
   ? now - Date.parse(item.deliveredAt) < MAX_AGE_MS
@@ -153,15 +286,24 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
     async update(input) {
       const known=new Map([...snapshot.history,...snapshot.items].map(item=>[item.id,item]));
       const mergeKnown=item=>known.has(item.id)?deduplicate([known.get(item.id),item])[0]:item;
-      const freshItems = clean(input?.items).map(mergeKnown), freshHistory = clean(input?.history).map(mergeKnown);
+      const incomingItems = clean(input?.items), incomingHistory = clean(input?.history);
+      const originals = [...known.values(), ...incomingHistory, ...incomingItems].filter(item=>item.kindBasis === 'original');
+      const freshItems = deduplicate(incomingItems, originals).map(mergeKnown), freshHistory = deduplicate(incomingHistory, originals).map(mergeKnown);
       const fresh=input?.status === 'ok' && !input.stale && recentTimestamp(input.sourceUpdatedAt,now());
       if(fresh) {
         if(baselineAt !== null)for(const item of freshItems) {
-          if(confirmedAnnouncement(item) && (!observed.has(item.id) || known.has(item.id) && !confirmedAnnouncement(known.get(item.id))) && item.announcedAt && Date.parse(item.announcedAt) >= baselineAt)
+          const completionId = item.deliverySourceUrl + '#' + item.kind;
+          const newCompletion = item.completionTimeBasis === 'announcement' && item.deliveredAt &&
+            !observed.has(completionId) && known.get(item.id)?.deliverySourceUrl !== item.deliverySourceUrl;
+          const publication = newCompletion ? item.deliveredAt : item.announcedAt;
+          if(confirmedAnnouncement(item) && (newCompletion || !observed.has(item.id) || known.has(item.id) && !confirmedAnnouncement(known.get(item.id))) && publication && Date.parse(publication) >= baselineAt)
             unread.set(item.id,{id:item.id,kind:item.kind});
         }
         else baselineAt = now();
-        for(const item of [...freshHistory,...freshItems])observed.add(item.id);
+        for(const item of [...freshHistory,...freshItems]) {
+          observed.add(item.id);
+          if(item.completionTimeBasis === 'announcement' && item.deliverySourceUrl)observed.add(item.deliverySourceUrl + '#' + item.kind);
+        }
       }
       for(const item of [...freshHistory,...freshItems])if(!confirmedAnnouncement(item))unread.delete(item.id);
       const previous = project(), previousItems = previous.items;
@@ -172,13 +314,26 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
       const retained = previousItems.map(item => evidence.has(item.id) ? deduplicate([item, evidence.get(item.id)])[0] :
         reconciled && !reconciled.has(item.id) && !item.deliveredAt ? {...item,sourceWithdrawn:true} : item);
       for(const item of retained)if(item.sourceWithdrawn)unread.delete(item.id);
+      const records = linkCompletions([...previous.history, ...retained, ...freshHistory, ...freshItems]);
+      for (const item of records) if (item.kindBasis === 'original') {
+        const oldId = item.sourceUrl + (item.kind === 'banked' ? '#regular' : '#banked');
+        if (unread.delete(oldId)) unread.set(item.id, {id:item.id,kind:item.kind});
+      }
+      for (const item of records) if (item.deliverySourceUrl && item.deliverySourceUrl !== item.sourceUrl) {
+        const alias = item.deliverySourceUrl + '#' + item.kind;
+        if (unread.delete(alias)) unread.set(item.id, {id:item.id,kind:item.kind});
+      }
+      const currentIds = new Set([...retained, ...freshItems].map(item=>item.id));
+      const historicalIds = new Set([...previous.history, ...freshHistory, ...retained.filter(item=>item.sourceWithdrawn)].map(item=>item.id));
+      const currentRecords = records.filter(item => currentIds.has(item.id) || currentIds.has(item.deliverySourceUrl + '#' + item.kind));
       snapshot = { status: input?.status === 'ok' ? 'ok' : 'unavailable',
         reason: input?.status === 'ok' ? null : ['source-stale','invalid-data'].includes(input?.reason) ? input.reason : 'request-failed',
         lastFetchedAt: fresh ? now() : snapshot.lastFetchedAt,
-        items: deduplicate([...retained, ...freshItems]),
-        history: deduplicate([...previous.history, ...freshHistory, ...retained.filter(item=>item.sourceWithdrawn)]),
+        items: currentRecords,
+        history: records.filter(item=>historicalIds.has(item.id) || historicalIds.has(item.deliverySourceUrl + '#' + item.kind)),
         sourceUpdatedAt: timestamp(input?.sourceUpdatedAt, now()) || snapshot.sourceUpdatedAt,
-        stale: input?.status !== 'ok' || input?.stale === true || retained.some(item => !item.sourceWithdrawn && !evidence.has(item.id)) };
+        stale: input?.status !== 'ok' || input?.stale === true || currentRecords.some(item => !item.sourceWithdrawn &&
+          !evidence.has(item.id) && !evidence.has(item.deliverySourceUrl + '#' + item.kind)) };
       await persist();
       return project();
     },
@@ -205,9 +360,16 @@ export function normalizeResets(data, now = Date.now()) {
 }
 
 async function fetchJson(url, fetchFn) {
-  const response = await fetchFn(url, {
-    headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(15000),
-  });
+  let response;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      response = await fetchFn(url, { headers: { Accept: 'application/json',
+        'User-Agent': 'codex-quota-widget/0.1.0 (+https://github.com/AjiaGit)' }, signal: AbortSignal.timeout(15000) });
+      break;
+    } catch (error) {
+      if (attempt || !['ECONNRESET','ETIMEDOUT'].includes(error?.cause?.code)) throw error;
+    }
+  }
   if (!response.ok) throw new Error(`External API returned ${response.status}`);
   try { return await response.json(); }
   catch (error) {
@@ -217,24 +379,32 @@ async function fetchJson(url, fetchFn) {
 }
 
 export async function queryExternal({ fetchFn = fetch, now = Date.now() } = {}) {
-  const [resets, announcements] = await Promise.allSettled([
-    fetchJson(`${ROOT}/resets.json`, fetchFn),
-    fetchJson('https://whenreset.app/api/v1/resets.json', fetchFn),
-  ]);
-  const lastGlobal = resets.status === 'fulfilled' ? normalizeResets(resets.value, now) : null;
-  const announcementView=announcements.status === 'fulfilled' ? normalizeAnnouncements(announcements.value, now) : emptyAnnouncements(announcements.reason?.code === 'invalid-data' ? 'invalid-data' : 'request-failed');
-  if (lastGlobal && announcementView.status === 'ok') {
-    const events=[...resets.value.events,...announcements.value.products.codex.events];
-    const records=events.map(raw=>normalizedAnnouncement(raw,now));
-    if(records.every(Boolean))announcementView.reconciledIds=[...new Set([
-      ...records.map(item=>item.id),
-      ...announcementView.items.map(item=>item.id),
-    ])];
-  }
+  const [primary, backup] = await Promise.allSettled(PROVIDERS.map(url=>fetchJson(url,fetchFn)));
+  const failed = result => emptyAnnouncements(result.reason?.code === 'invalid-data' ? 'invalid-data' : 'request-failed');
+  const archive = backup.status === 'fulfilled' ? normalizeCodexHistory(backup.value,now) : failed(backup);
+  const kinds = new Map(archive.history.map(item=>[item.sourceUrl,item.kind]));
+  const feed = primary.status === 'fulfilled' ? normalizeCodexFeed(primary.value,now,kinds) : failed(primary);
+  const views = [archive,feed];
+  const fresh = views.filter(view=>view.status === 'ok' && !view.stale);
+  const records = linkCompletions(views.flatMap(view=>view.history));
+  const activeIds = new Set(views.flatMap(view=>view.items).map(item=>item.id));
+  const sourceUpdatedAt = (fresh.length ? fresh : views).map(view=>view.sourceUpdatedAt).filter(Boolean).sort().at(-1) || null;
+  const announcementView = { status: fresh.length ? 'ok' : 'unavailable',
+    reason: fresh.length ? null : views.some(view=>view.reason === 'source-stale') ? 'source-stale' :
+      views.some(view=>view.reason === 'invalid-data') ? 'invalid-data' : 'request-failed',
+    items: records.filter(item=>active(item, now) && (activeIds.has(item.id) || activeIds.has(item.deliverySourceUrl + '#' + item.kind))),
+    history: records, sourceUpdatedAt, stale: !fresh.length };
+  // These feeds are partial and retain different event stages. Absence cannot withdraw a promise.
+  const latest = records.filter(item=>item.kind === 'regular' && item.announcedAt)
+    .sort((a,b)=>Date.parse(b.deliveredAt || b.announcedAt)-Date.parse(a.deliveredAt || a.announcedAt))[0];
+  const lastGlobal = latest ? { announcedAt: latest.announcedAt, deliveredAt: latest.deliveredAt,
+    sourceUrl: latest.sourceUrl, deliverySourceUrl: latest.deliverySourceUrl, scope: latest.scope,
+    sourceUpdatedAt, completionTimeBasis: latest.completionTimeBasis } : null;
   return {
     status: lastGlobal || announcementView.status === 'ok' ? 'ok' : 'unavailable',
     lastGlobal,
     announcements: announcementView,
+    sources: ['https://codex-reset.com/', 'https://codexreset.dev/'],
     updatedAt: now,
   };
 }

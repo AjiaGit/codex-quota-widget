@@ -2,6 +2,8 @@
 
 ## 0.1.0
 
+- Public announcements now use codex-reset.com and codexreset.dev, retaining original publication times, pairing unambiguous preannouncements with completion statements, and preserving cached history through partial feeds or outages. Completion-statement time remains separate from account recovery.
+
 - Windows follows the primary macOS interface with inline reset-credit details, responsive activity cards and section icons, earlier-update/history/source disclosures, and a separate refresh-cadence footer. Direct GDI text and website links remain intact.
 - Native Windows announcement acknowledgements use the service record ID and include only displayed records; pending public responses are consumed before another request starts.
 
