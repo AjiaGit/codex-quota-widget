@@ -357,6 +357,113 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
    foreach($record in $script:visibleActivityView.active | Where-Object {$_.id -like '*hidden-2*'}){if($record.key -notin $renderedIds){throw 'Read view includes an undisplayed earlier record'}}
   }finally{$script:externalData=$oldExternal;$script:earlierExpanded=$false;$script:announcementRenderKey='';$form.Show();Show-External}
  }
+
+ Test-Case 'expanded history restores the user detail anchor after collapse and persistence' {
+  $oldExternal=$script:externalData;$oldPosition=$script:modePositions;$oldPath=$script:positionPath;$oldAuto=$script:automaticDetailHeight;$oldBounds=$form.Bounds
+  $temp=Join-Path ([IO.Path]::GetTempPath()) ('widget-anchor-'+[guid]::NewGuid().ToString('N')+'.json')
+  try {
+   $screen=[Windows.Forms.Screen]::AllScreens[-1].WorkingArea
+   $anchor=[pscustomobject]@{x=$screen.Left+55;y=$screen.Top+80}
+   $script:positionPath=$temp;$script:modePositions=@{Detail=$anchor;Compact=[pscustomobject]@{x=$screen.Left+10;y=$screen.Top+100}}
+   $script:automaticDetailHeight=$true;$script:historyExpanded=$false;$script:creditsExpanded=$false;$script:earlierExpanded=$false;$script:sourcesExpanded=$false
+   $form.Bounds=[Drawing.Rectangle]::new($anchor.x,$anchor.y,644,700)
+   $script:externalData=[pscustomobject]@{status='ok';announcements=[pscustomobject]@{status='ok';sourceUpdatedAt=$now.ToString('o');stale=$false;items=@();history=@()}}
+   foreach($i in 1..50){$script:externalData.announcements.history+=,[pscustomobject]@{id=('https://example.invalid/FABRICATED-anchor-'+$i+'#regular');kind='regular';sourceUrl='https://example.invalid/FABRICATED';certainty='announced';announcedAt=$now.AddDays(-$i).ToString('o');deliveredAt=$now.AddDays(-$i).ToString('o')}}
+   Show-External
+   Assert-Equal $form.Top $anchor.y 'Short view starts at the user anchor'
+   $script:historyExpanded=$true;Show-External
+   Assert-Equal $form.Top $screen.Top 'Long history temporarily fits the full screen'
+   Save-WindowPosition
+   Assert-Equal (Read-WidgetJson $temp).detailY $anchor.y 'Temporary screen fitting must not overwrite the user anchor'
+   $script:historyExpanded=$false;Show-External
+   Assert-Equal $form.Top $anchor.y 'Collapsing history returns to the user anchor'
+   Save-WindowPosition
+   Assert-Equal (Get-WidgetModePosition (Read-WidgetJson $temp) 'Detail').y $anchor.y 'Restart keeps the original anchor'
+  }finally {
+   $script:externalData=$oldExternal;$script:modePositions=$oldPosition;$script:positionPath=$oldPath;$script:automaticDetailHeight=$oldAuto;$script:historyExpanded=$false;$form.Bounds=$oldBounds
+   if(Test-Path -LiteralPath $temp){Remove-Item -LiteralPath $temp -Force};Show-External
+  }
+ }
+ Test-Case 'collapsed history creates no native rows and expanded unchanged history reuses controls' {
+  $oldExternal=$script:externalData
+  try {
+   $script:historyExpanded=$false;$script:announcementRenderKey=''
+   $script:externalData=[pscustomobject]@{status='ok';announcements=[pscustomobject]@{status='ok';sourceUpdatedAt=$now.ToString('o');stale=$false;items=@();history=@()}}
+   foreach($i in 1..50){$script:externalData.announcements.history+=,[pscustomobject]@{id=('https://example.invalid/FABRICATED-lazy-'+$i+'#regular');kind='regular';sourceUrl='https://example.invalid/FABRICATED';certainty='announced';announcedAt=$now.AddDays(-$i).ToString('o');deliveredAt=$now.AddDays(-$i).ToString('o')}}
+   Show-External
+   Assert-Equal $historyRowsPanel.Controls.Count 0 'Hidden history must not create fifty sets of native controls'
+   $script:historyExpanded=$true;Show-External
+   Assert-Equal $script:historyRows.Count 50 'All history records are available when opened'
+   $first=$script:historyRows[0];Show-External
+   if(-not [object]::ReferenceEquals($first,$script:historyRows[0])){throw 'An unchanged refresh rebuilt the history controls'}
+  }finally{$script:externalData=$oldExternal;$script:historyExpanded=$false;$script:announcementRenderKey='';Show-External}
+ }
+ Test-Case 'unchanged theme checks do not invalidate the visible native text tree' {
+  Set-Theme
+  $script:themeInvalidations=0
+  $handler=[Windows.Forms.InvalidateEventHandler]{$script:themeInvalidations++}
+  $title.Add_Invalidated($handler)
+  try {Set-Theme;Assert-Equal $script:themeInvalidations 0 'Unchanged theme must not repaint every label on each minute'}finally{$title.Remove_Invalidated($handler)}
+ }
+
+ Test-Case 'numeric tray badge uses large readable glyphs without a quota ring' {
+  $oldTray=$script:tray;$oldRemaining=$script:remaining;$oldKey=$script:trayIconKey;$oldIcon=$script:ownedTrayIcon
+  $script:tray=[Windows.Forms.NotifyIcon]::new();$script:ownedTrayIcon=$null
+  try {
+   foreach($value in @(76,100,0)) {
+    $script:remaining=$value;$script:trayIconKey='';Set-Tray-QuotaIcon
+    $bitmap=$script:ownedTrayIcon.ToBitmap()
+    try {
+     $accentPixels=0;$top=32;$bottom=-1
+     for($y=0;$y -lt 32;$y++){for($x=0;$x -lt 32;$x++){
+      $pixel=$bitmap.GetPixel($x,$y)
+      if($pixel.A -gt 0 -and $pixel.G -gt $pixel.R+35 -and $pixel.G -gt $pixel.B+20){$accentPixels++}
+      if($pixel.A -gt 100 -and $pixel.R -gt 190 -and $pixel.G -gt 190 -and $pixel.B -gt 190){$top=[Math]::Min($top,$y);$bottom=[Math]::Max($bottom,$y)}
+     }}
+     Assert-Equal $accentPixels 0 'Tray has no green ring crowding the number'
+     if($bottom-$top+1 -lt $(if($value -eq 100){13}else{15})){throw ('Numeric tray glyph is too small: '+$value+' height '+($bottom-$top+1))}
+     if($script:tray.Text -notmatch [string]$value){throw 'Tooltip loses the authoritative percentage'}
+    }finally{$bitmap.Dispose()}
+   }
+  }finally{if($script:ownedTrayIcon){$script:ownedTrayIcon.Dispose()};$script:tray.Dispose();$script:tray=$oldTray;$script:remaining=$oldRemaining;$script:trayIconKey=$oldKey;$script:ownedTrayIcon=$oldIcon}
+ }
+
+ Test-Case 'collapsed earlier updates retain their entry before native rows are created' {
+  $oldExternal=$script:externalData;$oldEarlier=$script:earlierExpanded
+  try {
+   $script:earlierExpanded=$false;$script:announcementRenderKey=''
+   $script:externalData=[pscustomobject]@{status='ok';announcements=[pscustomobject]@{status='ok';sourceUpdatedAt=$now.ToString('o');stale=$false;history=@();items=@()}}
+   foreach($i in 1..2){$script:externalData.announcements.items+=,[pscustomobject]@{id=('https://example.invalid/FABRICATED-earlier-'+$i+'#regular');kind='regular';sourceUrl=('https://example.invalid/FABRICATED-earlier-'+$i);certainty='announced';announcedAt=$now.AddMinutes(-$i).ToString('o');deliveredAt=$now.AddMinutes(-$i).ToString('o')}}
+   Show-External
+   Assert-Equal $script:earlierRows.Count 0 'Closed older records create no native controls'
+   Assert-Equal $earlierButton.Visible $true 'Existing older records still expose the entry'
+   $earlierButton.PerformClick()
+   Assert-Equal $script:earlierRows.Count 1 'Opening earlier updates materializes the older record'
+  }finally{$script:externalData=$oldExternal;$script:earlierExpanded=$oldEarlier;$script:announcementRenderKey='';Show-External}
+ }
+
+ Test-Case 'clicking the detail drag surface without moving preserves a temporary-fit anchor' {
+  $oldPositions=$script:modePositions;$oldBounds=$form.Bounds;$oldAuto=$script:automaticDetailHeight
+  try {
+   $screen=[Windows.Forms.Screen]::FromControl($form).WorkingArea
+   $script:automaticDetailHeight=$true;$script:modePositions=@{Detail=[pscustomobject]@{x=$screen.Left+55;y=$screen.Top+80};Compact=$null}
+   $form.Location=[Drawing.Point]::new($screen.Left+55,$screen.Top)
+   $start=$source.IndexOf('$drag = {');$end=$source.IndexOf('foreach ($control in @($form,$title',$start)
+   $handlerSource=$source.Substring($start,$end-$start)
+   # Replace only the blocking native mouse-move loop, preserving the actual
+   # product event handler and its anchor/persistence effects.
+   $handlerSource=$handlerSource -replace '\[void\]\[WidgetDrag\]::ReleaseCapture\(\)','[void]0' -replace '\[void\]\[WidgetDrag\]::SendMessage\([^\r\n]*\)','[void]0'
+   Invoke-Expression $handlerSource
+   & $drag $title ([Windows.Forms.MouseEventArgs]::new([Windows.Forms.MouseButtons]::Left,1,0,0,0))
+   Assert-Equal $script:modePositions.Detail.y ($screen.Top+80) 'A click is not a new window placement'
+   $movedSource=$source.Substring($start,$end-$start) -replace '\[void\]\[WidgetDrag\]::ReleaseCapture\(\)','[void]0' -replace '\[void\]\[WidgetDrag\]::SendMessage\([^\r\n]*\)','$form.Top+=24'
+   $beforeMove=$form.Top
+   Invoke-Expression $movedSource
+   & $drag $title ([Windows.Forms.MouseEventArgs]::new([Windows.Forms.MouseButtons]::Left,1,0,0,0))
+   Assert-Equal $script:modePositions.Detail.y ($beforeMove+24) 'A real move records the new anchor'
+   Assert-Equal $script:detailDragging $false 'Native move-loop guard resets after dragging'
+  }finally{$script:modePositions=$oldPositions;$script:automaticDetailHeight=$oldAuto;$form.Bounds=$oldBounds}
+ }
  Test-Case 'inline disclosure draws crisp GDI text and supports keyboard activation' {
   if($cards.GetType().Name -ne 'WidgetDisclosureButton' -or $cards.UseCompatibleTextRendering){throw 'Summary is not the direct GDI disclosure control'}
   $script:creditsExpanded=$false

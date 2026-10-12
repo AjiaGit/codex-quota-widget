@@ -336,7 +336,8 @@ function Get-WidgetDetailAutoHeightSetting($saved) {
     return $true
 }
 function Get-WidgetDetailFittedFrame([Drawing.Rectangle]$frame, [int]$contentHeight,
-                                    [int]$headerHeight, [Drawing.Rectangle]$screen) {
+                                    [int]$headerHeight, [Drawing.Rectangle]$screen, $preferredPosition = $null) {
+    if ($preferredPosition) { $frame.Location=[Drawing.Point]::new([int]$preferredPosition.x,[int]$preferredPosition.y) }
     $width=[Math]::Min($frame.Width,$screen.Width)
     $height=[Math]::Min($screen.Height,[Math]::Max(390,$contentHeight+$headerHeight+10))
     $x=[Math]::Max($screen.Left,[Math]::Min($frame.Left,$screen.Right-$width))

@@ -38,6 +38,33 @@ public static class WidgetDisplay {
         catch (EntryPointNotFoundException) { return false; }
     }
 }
+// Batch native layout without routing GDI text through a scaled bitmap buffer.
+// WM_SETREDRAW requires a visible window; never apply it to a tray-hidden form.
+// https://learn.microsoft.com/windows/win32/gdi/wm-setredraw
+public static class WidgetRenderBatch {
+    [DllImport("user32.dll")] private static extern IntPtr SendMessage(IntPtr h, int msg, IntPtr w, IntPtr l);
+    [DllImport("user32.dll")] private static extern bool RedrawWindow(IntPtr h, IntPtr rect, IntPtr region, uint flags);
+    private static readonly System.Collections.Generic.Dictionary<IntPtr,int> depths = new System.Collections.Generic.Dictionary<IntPtr,int>();
+    public static IDisposable Pause(System.Windows.Forms.Control control) {
+        if (control == null || control.IsDisposed || !control.IsHandleCreated) return new Scope(IntPtr.Zero);
+        var h=control.Handle;
+        if (depths.ContainsKey(h)) { depths[h]++; return new Scope(h); }
+        if (!control.Visible) return new Scope(IntPtr.Zero);
+        depths[h]=1; SendMessage(h,0x000B,IntPtr.Zero,IntPtr.Zero);
+        return new Scope(h);
+    }
+    private sealed class Scope : IDisposable {
+        private IntPtr handle;
+        public Scope(IntPtr h) { handle=h; }
+        public void Dispose() {
+            var h=handle;handle=IntPtr.Zero;
+            if (h==IntPtr.Zero || !depths.ContainsKey(h)) return;
+            if (--depths[h]>0) return;
+            depths.Remove(h);SendMessage(h,0x000B,new IntPtr(1),IntPtr.Zero);
+            RedrawWindow(h,IntPtr.Zero,IntPtr.Zero,0x0001|0x0004|0x0080|0x0400);
+        }
+    }
+}
 public class WidgetLabel : System.Windows.Forms.Label {
     public WidgetLabel() {
         // Match the GDI TextRenderer used to measure wrapped label layout.
@@ -220,9 +247,12 @@ $script:reallyExit = $false
 $script:colors = @{}
 $script:layoutPlus = $null
 $script:layoutBusy = $false
+$script:detailDragging = $false
 $script:historyExpanded = $false
 $script:visibleActivityView = $null
 $script:announcementRenderKey = ''
+$script:activityRenderKeys = @{}
+$script:themeIsLight = $null
 $script:announcementRows = @()
 $script:historyRows = @()
 $script:mode = 'Detail'
@@ -304,6 +334,8 @@ if ($saved) {
         }
     } catch { }
 }
+
+if (-not $script:modePositions[$script:mode]) { $script:modePositions[$script:mode]=[pscustomobject]@{x=$form.Left;y=$form.Top} }
 
 function Set-RoundedRegion {
     $size = $form.ClientSize
@@ -580,8 +612,10 @@ function Layout-ResetCreditRows([int]$width) {
     Set-ControlBox $creditRowsPanel 0 $creditRowsPanel.Top $width ([Math]::Max(1,$y));return $y
 }
 function Update-ResponsiveLayout {
-    if ($script:animating -or $script:layoutBusy) {return}
+    if ($script:animating -or $script:layoutBusy -or $script:detailDragging) {return}
     $script:layoutBusy=$true
+    $paintBatch=[WidgetRenderBatch]::Pause($form)
+    $form.SuspendLayout();$body.SuspendLayout();$content.SuspendLayout()
     try {
         $width=$form.ClientSize.Width;$height=$form.ClientSize.Height
         if ($script:mode -eq 'Compact') {
@@ -635,7 +669,7 @@ function Update-ResponsiveLayout {
             Set-ControlBox $activityRowsPanel 0 $aY $cw 1;$aY+=(Layout-AnnouncementRows $activityRowsPanel $script:announcementRows $cw)
             $activityEmpty.Visible=$script:activityIsEmpty -and -not $publicStatusPanel.Visible;$activityEmptyHelp.Visible=$activityEmpty.Visible
             if ($activityEmpty.Visible) {$aY+=(Set-WrappedBox $activityEmpty 0 $aY $cw 20)+4;$aY+=(Set-WrappedBox $activityEmptyHelp 0 $aY $cw 20)+4}
-            $hasEarlier=$script:earlierRows.Count -gt 0;$earlierButton.Visible=$hasEarlier;$earlierRowsPanel.Visible=$hasEarlier -and $script:earlierExpanded
+            $hasEarlier=$script:activityView.earlier.Count -gt 0;$earlierButton.Visible=$hasEarlier;$earlierRowsPanel.Visible=$hasEarlier -and $script:earlierExpanded
             if ($hasEarlier) {Set-ControlBox $earlierButton 0 $aY $cw 34;$aY+=34;if ($script:earlierExpanded) {Set-ControlBox $earlierRowsPanel 0 $aY $cw 1;$aY+=(Layout-AnnouncementRows $earlierRowsPanel $script:earlierRows $cw)}}
             $announcementPanel.Height=$aY+10
             Set-ControlBox $historyButton 0 10 $cw 30;$historyButton.Expanded=$script:historyExpanded
@@ -660,13 +694,13 @@ function Update-ResponsiveLayout {
             # displayed pixels to zero and back on every quota update.
             Set-ControlBox $content ($contentInset+$body.AutoScrollPosition.X) $body.AutoScrollPosition.Y $cw $y
             if ($script:automaticDetailHeight -and -not $script:resizing) {
-                $screen=[Windows.Forms.Screen]::FromControl($form).WorkingArea;$fitted=Get-WidgetDetailFittedFrame $form.Bounds ($y+8) $header.height $screen
+                $screen=[Windows.Forms.Screen]::FromControl($form).WorkingArea;$fitted=Get-WidgetDetailFittedFrame $form.Bounds ($y+8) $header.height $screen $script:modePositions.Detail
                 if ($form.Bounds -ne $fitted) {$form.Bounds=$fitted;$height=$form.ClientSize.Height;$offset=if ($script:layoutPlus){62}else{0};$script:detailSize=[Drawing.Size]::new($width,($height-$offset));Set-ControlBox $body 7 $header.height ($width-14) ($height-$header.height-10);$script:positionDirty=$true}
             }
             $body.AutoScrollMinSize=[Drawing.Size]::new(0,$y+8);Update-ResizeEdges $width $height $false
         }
         Set-RoundedRegion;$ring.Invalidate()
-    } finally {$script:layoutBusy=$false}
+    } finally {$content.ResumeLayout($false);$body.ResumeLayout($true);$form.ResumeLayout($true);$paintBatch.Dispose();$script:layoutBusy=$false}
 }
 function Update-DetailFonts {
     # Text stays readable at the minimum width. Wrapped section heights, rather
@@ -707,6 +741,8 @@ function Set-Theme {
             (Get-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -Name AppsUseLightTheme -ErrorAction Stop).AppsUseLightTheme -eq 1
         } catch { $false }
     }
+    if ($null -ne $script:themeIsLight -and $script:themeIsLight -eq $light) { return }
+    $script:themeIsLight=$light
     if ($light) {
         $script:colors = @{
             back = (New-Color '#F7F8FB'); text = (New-Color '#17202D'); muted = (New-Color '#637083')
@@ -724,6 +760,8 @@ function Set-Theme {
 }
 
 function Show-Quota {
+    $paintBatch=[WidgetRenderBatch]::Pause($form)
+    try {
     $now = [DateTimeOffset]::UtcNow
     $value = $script:data
     $fiveView=Get-WidgetFiveHourView $value $script:language $now
@@ -775,6 +813,8 @@ function Show-Quota {
     $ring.Invalidate()
     Set-Tray-QuotaIcon
     Show-External
+
+    } finally {$paintBatch.Dispose()}
 }
 
 function New-ResetCreditControl($record) {
@@ -827,20 +867,42 @@ function Clear-PanelControls($panel) {
     }
 }
 function Show-External {
+    $paintBatch=[WidgetRenderBatch]::Pause($form)
+    try {
     $view=Get-WidgetResetActivityView $script:data $script:externalData $script:language ([DateTimeOffset]::UtcNow)
     $partition=Get-WidgetActivityPartition $view.active
     $script:activityView=[pscustomobject]@{featured=$partition.featured;earlier=$partition.earlier;history=$view.history}
     $script:visibleActivityView=Get-WidgetVisibleActivityView $script:activityView $script:earlierExpanded $script:historyExpanded
     $key=$view | ConvertTo-Json -Depth 8 -Compress
-    if ($key -cne $script:announcementRenderKey) {
-        foreach ($panel in @($activityRowsPanel,$earlierRowsPanel,$historyRowsPanel)){Clear-PanelControls $panel}
-        $script:announcementRows=@();$script:earlierRows=@();$script:historyRows=@();$script:historyEmpty=$null
-        foreach ($row in $partition.featured){$panel=New-AnnouncementControl $row;[void]$activityRowsPanel.Controls.Add($panel);$script:announcementRows+=,$panel}
-        foreach ($row in $partition.earlier){$panel=New-AnnouncementControl $row;[void]$earlierRowsPanel.Controls.Add($panel);$script:earlierRows+=,$panel}
-        foreach ($row in $view.history){$panel=New-AnnouncementControl $row;[void]$historyRowsPanel.Controls.Add($panel);$script:historyRows+=,$panel}
-        if (-not $view.history.Count){$script:historyEmpty=New-Label (T 'historyEmpty') 0 0 346 24 10.5;[void]$historyRowsPanel.Controls.Add($script:historyEmpty)}
-        foreach ($panel in @($activityRowsPanel,$earlierRowsPanel,$historyRowsPanel)){Set-ControlTheme $panel};$script:announcementRenderKey=$key
+    $force=$script:announcementRenderKey -eq ''
+    if ($force) {
+        foreach ($panel in @($activityRowsPanel,$earlierRowsPanel,$historyRowsPanel)) {Clear-PanelControls $panel}
+        $script:activityRenderKeys=@{};$script:announcementRows=@();$script:earlierRows=@();$script:historyRows=@();$script:historyEmpty=$null
     }
+    # Build hidden disclosures only when opened, and keep native controls across
+    # unchanged refreshes. A fifty-record archive otherwise creates 500 controls
+    # before the user has asked to see any history.
+    $groups=@(
+        @{panel=$activityRowsPanel;records=@($partition.featured);enabled=$true;slot='announcementRows'},
+        @{panel=$earlierRowsPanel;records=@($partition.earlier);enabled=$script:earlierExpanded;slot='earlierRows'},
+        @{panel=$historyRowsPanel;records=@($view.history);enabled=$script:historyExpanded;slot='historyRows'}
+    )
+    foreach ($group in $groups) {
+        if (-not $group.enabled) {continue}
+        $rowKey=@{language=$script:language;rows=@($group.records)} | ConvertTo-Json -Depth 8 -Compress
+        if ($rowKey -ceq $script:activityRenderKeys[$group.slot]) {continue}
+        Clear-PanelControls $group.panel;$rows=@()
+        foreach ($row in $group.records) {
+            $panel=New-AnnouncementControl $row;[void]$group.panel.Controls.Add($panel);$rows+=,$panel
+        }
+        Set-Variable -Scope Script -Name $group.slot -Value $rows
+        if ($group.slot -eq 'historyRows') {
+            $script:historyEmpty=$null
+            if (-not $group.records.Count) {$script:historyEmpty=New-Label (T 'historyEmpty') 0 0 346 24 10.5;[void]$group.panel.Controls.Add($script:historyEmpty)}
+        }
+        Set-ControlTheme $group.panel;$script:activityRenderKeys[$group.slot]=$rowKey
+    }
+    $script:announcementRenderKey=$key
     $script:activityIsEmpty=$view.active.Count -eq 0
     $activityHeading.Text=T 'activityHeading';$localTimeNote.Text=Get-WidgetLocalTimeNote $script:language
     $activityEmpty.Text=T 'activityEmpty';$activityEmptyHelp.Text=T 'activityEmptyHelp'
@@ -854,7 +916,10 @@ function Show-External {
     $historyButton.Text=T 'announcementHistory';$historyButton.AccessibleName=T $(if ($script:historyExpanded){'collapseHistory'}else{'expandHistory'});$historyLabel.Text=T 'historyAttribution'
     $sourcesButton.Text=T 'dataSources';$sourcesButton.AccessibleName=$sourcesButton.Text;Set-AttributionLinks (T 'sourceLinks');$cadence.Text=T 'refreshCadence'
     Update-ResponsiveLayout;Update-AnnouncementIndicator;Start-AnnouncementRead
+
+    } finally {$paintBatch.Dispose()}
 }
+
 function Set-AttributionLinks([string]$text) {$attribution.AccessibleName=$text}
 function Toggle-ResetDetails {$script:creditsExpanded=-not $script:creditsExpanded;Update-ResetCreditDetails;Update-ResponsiveLayout}
 function Toggle-DataSources {$script:sourcesExpanded=-not $script:sourcesExpanded;Update-ResponsiveLayout}
@@ -891,7 +956,7 @@ function Set-Language {
 
     $script:message = if ($script:data) { Get-WidgetErrorText ([string]$script:data.errorCode) $script:language } else { T 'service_unavailable' }
     $script:trayIconKey = ''
-    Show-Quota; Show-External
+    Show-Quota
 }
 function Show-ResetDetails {
     $script:creditsExpanded=$true;$form.Show();$form.Activate();Update-ResetCreditDetails
@@ -963,43 +1028,32 @@ function Start-Request([bool]$manual) {
 
 function Set-Tray-QuotaIcon {
     if (-not $script:tray -or -not $script:colors.accent) { return }
-    $key = "$(if ($null -eq $script:remaining) { '?' } else { $script:remaining })/$($script:colors.accent.ToArgb())"
+    $key = "$(if ($null -eq $script:remaining) { '?' } else { $script:remaining })/$($script:colors.text.ToArgb())"
     if ($key -eq $script:trayIconKey) { return }
-    $bitmap = [System.Drawing.Bitmap]::new(32, 32)
-    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-    $trackPen = $null; $arcPen = $null; $backBrush = $null; $textBrush = $null; $font = $null; $format = $null
+    $bitmap = [Drawing.Bitmap]::new(32,32)
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    $textBrush=$null;$font=$null;$format=$null
     try {
-        $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-        $graphics.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::ClearTypeGridFit
-        $backBrush = [System.Drawing.SolidBrush]::new($script:colors.back)
-        $textBrush = [System.Drawing.SolidBrush]::new($script:colors.text)
-        $trackPen = [System.Drawing.Pen]::new($script:colors.track, 3)
-        $arcPen = [System.Drawing.Pen]::new($script:colors.accent, 3)
-        $graphics.FillEllipse($backBrush, 0, 0, 31, 31)
-        $graphics.DrawArc($trackPen, 3, 3, 25, 25, 0, 360)
-        if ($null -ne $script:remaining -and $script:remaining -gt 0) {
-            $graphics.DrawArc($arcPen, 3, 3, 25, 25, -90, (360 * $script:remaining / 100))
-        }
-        $text = if ($null -eq $script:remaining) { '—' } else { [string]$script:remaining }
-        $size = if ($text.Length -ge 3) { 10 } else { 12 }
-        $font = [System.Drawing.Font]::new('Segoe UI', $size, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
-        $format = [System.Drawing.StringFormat]::new()
-        $format.Alignment = [System.Drawing.StringAlignment]::Center
-        $format.LineAlignment = [System.Drawing.StringAlignment]::Center
-        $graphics.DrawString($text, $font, $textBrush, [System.Drawing.RectangleF]::new(3, 3, 26, 26), $format)
-        $handle = $bitmap.GetHicon()
-        try { $icon = [System.Drawing.Icon]::FromHandle($handle).Clone() }
-        finally { [void][WidgetDrag]::DestroyIcon($handle) }
-        $old = $script:ownedTrayIcon
-        $script:tray.Icon = $icon
-        $script:ownedTrayIcon = $icon
-        if ($old) { $old.Dispose() }
-        $script:tray.Text = if ($null -eq $script:remaining) { (T 'trayUnavailable') } else { (T 'trayRemaining' @($script:remaining)) }
-        $script:trayIconKey = $key
+        $graphics.Clear([Drawing.Color]::Transparent)
+        $graphics.TextRenderingHint=[Drawing.Text.TextRenderingHint]::AntiAliasGridFit
+        $textBrush=[Drawing.SolidBrush]::new($script:colors.text)
+        $text=if ($null -eq $script:remaining) {'—'} else {[string]$script:remaining}
+        $size=if ($text.Length -ge 3) {18} else {24}
+        $font=[Drawing.Font]::new('Segoe UI',$size,[Drawing.FontStyle]::Bold,[Drawing.GraphicsUnit]::Pixel)
+        $format=[Drawing.StringFormat]::new([Drawing.StringFormat]::GenericTypographic)
+        $format.Alignment=[Drawing.StringAlignment]::Center
+        $format.LineAlignment=[Drawing.StringAlignment]::Center
+        $format.FormatFlags=$format.FormatFlags -bor [Drawing.StringFormatFlags]::NoWrap
+        $graphics.DrawString($text,$font,$textBrush,[Drawing.RectangleF]::new(0,-1,32,34),$format)
+        $handle=$bitmap.GetHicon()
+        try {$icon=[Drawing.Icon]::FromHandle($handle).Clone()}
+        finally {[void][WidgetDrag]::DestroyIcon($handle)}
+        $old=$script:ownedTrayIcon;$script:tray.Icon=$icon;$script:ownedTrayIcon=$icon
+        if ($old) {$old.Dispose()}
+        $script:tray.Text=if ($null -eq $script:remaining) {(T 'trayUnavailable')} else {(T 'trayRemaining' @($script:remaining))}
+        $script:trayIconKey=$key
     } finally {
-        foreach ($resource in @($trackPen, $arcPen, $backBrush, $textBrush, $font, $format, $graphics, $bitmap)) {
-            if ($resource) { $resource.Dispose() }
-        }
+        foreach ($resource in @($textBrush,$font,$format,$graphics,$bitmap)) {if ($resource) {$resource.Dispose()}}
     }
 }
 
@@ -1035,7 +1089,9 @@ function Start-ModeTransition([string]$nextMode) {
     [WidgetOutsideClick]::Disable()
     $compact = $nextMode -eq 'Compact'
     $size = if ($compact) { $script:compactSize } else { [System.Drawing.Size]::new($script:detailSize.Width, ($script:detailSize.Height + $(if ($script:layoutPlus) { 62 } else { 0 }))) }
-    $script:modePositions[$script:mode] = [pscustomobject]@{ x = $form.Left; y = $form.Top }
+    if ($script:mode -ne 'Detail' -or -not $script:automaticDetailHeight -or -not $script:modePositions.Detail) {
+        $script:modePositions[$script:mode] = [pscustomobject]@{ x = $form.Left; y = $form.Top }
+    }
     $remembered = $script:modePositions[$nextMode]
     $screen = [System.Windows.Forms.Screen]::FromControl($form).WorkingArea
     if ($remembered) {
@@ -1112,8 +1168,17 @@ $sourceLink.Add_LinkClicked({
 $drag = {
     param($sender, $e)
     if ($script:mode -eq 'Detail' -and -not $script:animating -and $e.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
-        [void][WidgetDrag]::ReleaseCapture()
-        [void][WidgetDrag]::SendMessage($form.Handle, 0xA1, 2, [IntPtr]::Zero)
+        $origin=$form.Location
+        $script:detailDragging=$true
+        try {
+            [void][WidgetDrag]::ReleaseCapture()
+            [void][WidgetDrag]::SendMessage($form.Handle, 0xA1, 2, [IntPtr]::Zero)
+        } finally {$script:detailDragging=$false}
+        if ($form.Left -ne $origin.X -or $form.Top -ne $origin.Y) {
+            $script:modePositions.Detail=[pscustomobject]@{x=$form.Left;y=$form.Top}
+            $script:positionDirty=$true
+        }
+        Update-ResponsiveLayout
     }
 }
 foreach ($control in @($form,$title,$status,$ring,$caption,$countdown,$reset,$updated,$heroPanel,$fiveTitle,$fiveValue,$fiveReset)) {
@@ -1144,7 +1209,8 @@ $compactUp = {
     param($sender, $e)
     if (-not $script:compactDragging -or $e.Button -ne [System.Windows.Forms.MouseButtons]::Left) { return }
     $script:compactDragging = $false
-    if (-not $script:compactMoved) { Start-ModeTransition 'Detail' }
+    if ($script:compactMoved) {$script:modePositions.Compact=[pscustomobject]@{x=$form.Left;y=$form.Top};$script:positionDirty=$true}
+    else { Start-ModeTransition 'Detail' }
 }
 foreach ($control in @($form, $ring)) {
     $control.Add_MouseDown($compactDown)
@@ -1162,6 +1228,7 @@ function Complete-Resize {
         $script:detailSize = [System.Drawing.Size]::new($form.ClientSize.Width, ($form.ClientSize.Height - $offset))
         Update-DetailFonts
     }
+    $script:modePositions[$script:mode]=[pscustomobject]@{x=$form.Left;y=$form.Top}
     $script:positionDirty = $true
 }
 
@@ -1271,7 +1338,9 @@ $script:tray.Visible = $true
 $script:tray.Add_DoubleClick({ $form.Show(); $form.Activate(); Start-Request $true })
 function Save-WindowPosition {
     if ($script:animating) { return }
-    $script:modePositions[$script:mode] = [pscustomobject]@{ x = $form.Left; y = $form.Top }
+    if ($script:mode -ne 'Detail' -or -not $script:automaticDetailHeight -or -not $script:modePositions.Detail) {
+        $script:modePositions[$script:mode] = [pscustomobject]@{ x = $form.Left; y = $form.Top }
+    }
     Write-WidgetJson $script:positionPath @{
         x = $form.Left; y = $form.Top; mode = $script:mode
         compactX = $script:modePositions.Compact.x; compactY = $script:modePositions.Compact.y
@@ -1378,7 +1447,7 @@ $timer.Add_Tick({
     }
     if (-not $script:requestTask -and $now -ge $script:nextPoll) { Start-Request $false }
     if (-not $script:externalTask -and $now -ge $script:nextExternalPoll) { Start-ExternalRequest }
-    if (($now - $script:lastRender).TotalSeconds -ge 30) { Show-Quota; Show-External; $script:lastRender = $now }
+    if (($now - $script:lastRender).TotalSeconds -ge 30) { Show-Quota; $script:lastRender = $now }
     if (($now - $script:lastThemeCheck).TotalMinutes -ge 1) { Set-Theme; $script:lastThemeCheck = $now }
 })
 
@@ -1410,7 +1479,6 @@ $form.Add_FormClosed({
 })
 Set-Theme
 Show-Quota
-Show-External
 Set-ModeVisual ($script:mode -eq 'Compact')
 Set-Language
 # The event handler only sets a thread-safe flag; the UI timer consumes it.
