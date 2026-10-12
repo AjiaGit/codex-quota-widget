@@ -18,6 +18,30 @@ const query = (primary, backup = history()) => queryExternal({ now, fetchFn: asy
   return { ok: true, json: async () => data };
 } });
 
+test('a partial archive preserves known publication time and history retention without inventing missing times', async () => {
+  // FABRICATED TEST DATA: no network, account, or persisted cache.
+  const store = await createAnnouncementStore({ now: () => now });
+  const rows = Array.from({ length: 50 }, (_, i) => ({
+    id: `https://example.org/fabricated/${i}#regular`, kind: 'regular',
+    sourceUrl: `https://example.org/fabricated/${i}`, certainty: 'unconfirmed',
+    announcedAt: new Date(now - (i + 2) * 86400000).toISOString(), deliveredAt: null,
+  }));
+  const snapshot = history => ({ status: 'ok', stale: false, sourceUpdatedAt: new Date(now).toISOString(), items: [], history });
+  await store.update(snapshot(rows));
+  await store.update(snapshot([{ ...rows[0], announcedAt: null }]));
+  assert.equal(store.state.history[0].id, rows[0].id, 'Missing repeated metadata cannot discard a recent cached record');
+  assert.equal(store.state.history[0].announcedAt, rows[0].announcedAt);
+  assert.equal(store.state.history[0].deliveredAt, null, 'A retained publication is not delivery evidence');
+  assert.deepEqual(store.state.history.map(row => row.id), rows.map(row => row.id));
+  assert.deepEqual(store.alerts.unread, []);
+  const corrected = new Date(now - 86400000).toISOString();
+  await store.update(snapshot([{ ...rows[0], announcedAt: corrected }]));
+  assert.equal(store.state.history[0].announcedAt, corrected, 'An explicit new publication can update the known time');
+  const unknown = await createAnnouncementStore({ now: () => now });
+  await unknown.update(snapshot([{ ...rows[0], announcedAt: null }]));
+  assert.equal(unknown.state.history[0].announcedAt, null, 'No timestamp is invented for an unknown publication');
+});
+
 test('reads the new original announcement feed without inventing an EOD time or trusting timeline labels', async () => {
   const result = await query(feed([pre], { events: [{ id: pre.id, url: preUrl, announced_at: '2026-10-11T03:57:51Z', announcement_state: 'announced', group: 'reset' }] }));
   assert.equal(result.announcements.status, 'ok');

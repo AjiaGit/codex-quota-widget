@@ -71,6 +71,7 @@ function deduplicate(items, knownItems = []) {
     if (kind) item = { ...item, kind, id: item.sourceUrl + '#' + kind, kindBasis: 'original' };
     const previous = map.get(item.id);
     map.set(item.id, previous ? { ...previous, ...item,
+      announcedAt: item.announcedAt || previous.announcedAt,
       scheduledAt: item.scheduledAt || previous.scheduledAt,
       scheduledDate: item.scheduledDate || previous.scheduledDate,
       certainty: item.certainty === 'announced' || previous.certainty === 'announced' ? 'announced' : 'unconfirmed',
