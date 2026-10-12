@@ -38,6 +38,67 @@ public static class WidgetDisplay {
         catch (EntryPointNotFoundException) { return false; }
     }
 }
+// Native popup menus use physical coordinates independently of the float's
+// 96-DPI GDI model. A float on a 150% monitor must not move a 100% tray popup
+// outside that monitor by applying the float's coordinate transform.
+public static class WidgetTrayMenu {
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct Point { public int X,Y; }
+    [DllImport("user32.dll")] private static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
+    [DllImport("user32.dll")] private static extern bool GetPhysicalCursorPos(out Point point);
+    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr window);
+    [DllImport("user32.dll")] private static extern bool PostMessage(IntPtr window,int message,IntPtr w,IntPtr l);
+    [DllImport("user32.dll")] private static extern uint TrackPopupMenuEx(IntPtr menu,uint flags,int x,int y,IntPtr owner,IntPtr parameters);
+    [DllImport("user32.dll")] private static extern uint GetMenuItemID(IntPtr menu,int index);
+    private static System.Windows.Forms.NativeWindow owner;
+    public static void InPhysicalContext(Action action) {
+        var previous=SetThreadDpiAwarenessContext(new IntPtr(-3));
+        try { action(); } finally { if(previous!=IntPtr.Zero)SetThreadDpiAwarenessContext(previous); }
+    }
+    public static IntPtr OwnerHandle {
+        get {
+            InPhysicalContext(delegate {
+                if(owner!=null && owner.Handle!=IntPtr.Zero)return;
+                owner=new System.Windows.Forms.NativeWindow();
+                owner.CreateHandle(new System.Windows.Forms.CreateParams {
+                    Caption="Codex quota menu owner",Style=unchecked((int)0x80000000),ExStyle=0x80,
+                    X=0,Y=0,Width=1,Height=1
+                });
+            });
+            return owner.Handle;
+        }
+    }
+    public static void Show(System.Windows.Forms.ContextMenu menu) {
+        if(menu==null)return;
+        uint command=0;
+        InPhysicalContext(delegate {
+            Point point;if(!GetPhysicalCursorPos(out point))return;
+            var window=OwnerHandle;
+            SetForegroundWindow(window);
+            try {
+                // Return the chosen native command, including nested languages.
+                // Dispatch after restoring the float's original DPI context.
+                command=TrackPopupMenuEx(menu.Handle,0x0100|0x0080|0x0002,point.X,point.Y,window,IntPtr.Zero);
+            } finally { PostMessage(window,0,IntPtr.Zero,IntPtr.Zero); }
+        });
+        DispatchCommand(menu,command);
+    }
+    public static bool DispatchCommand(System.Windows.Forms.Menu menu,uint command) {
+        if(command==0 || menu==null)return false;
+        int index=0;
+        foreach(System.Windows.Forms.MenuItem item in menu.MenuItems) {
+            if(!item.Visible)continue;
+            uint id=GetMenuItemID(menu.Handle,index++);
+            if(!item.Enabled)continue;
+            if(item.MenuItems.Count>0) { if(DispatchCommand(item,command))return true; }
+            else if(id==command) { item.PerformClick();return true; }
+        }
+        return false;
+    }
+    public static void Dispose() {
+        if(owner!=null) { owner.DestroyHandle();owner=null; }
+    }
+}
 // Batch native layout without routing GDI text through a scaled bitmap buffer.
 // WM_SETREDRAW requires a visible window; never apply it to a tray-hidden form.
 // https://learn.microsoft.com/windows/win32/gdi/wm-setredraw
@@ -1316,28 +1377,28 @@ $body.Add_Scroll({Update-ActivityViewport;Start-AnnouncementRead})
 $body.Add_MouseWheel({Update-ActivityViewport;Start-AnnouncementRead})
 $content.Add_LocationChanged({if(-not $script:layoutBusy){Update-ActivityViewport;Start-AnnouncementRead}})
 
-$menu = New-Object System.Windows.Forms.ContextMenuStrip
-$showItem = $menu.Items.Add((T 'show'))
-$modeItem = $menu.Items.Add((T 'mode'))
-$hideItem = $menu.Items.Add((T 'hide'))
-$refreshItem = $menu.Items.Add((T 'refreshNow'))
-$topItem = $menu.Items.Add((T 'onTop'))
+$menu = New-Object System.Windows.Forms.ContextMenu
+$showItem = $menu.MenuItems.Add((T 'show'))
+$modeItem = $menu.MenuItems.Add((T 'mode'))
+$hideItem = $menu.MenuItems.Add((T 'hide'))
+$refreshItem = $menu.MenuItems.Add((T 'refreshNow'))
+$topItem = $menu.MenuItems.Add((T 'onTop'))
 $topItem.Checked = $form.TopMost
 
-$detailsItem = $menu.Items.Add((T 'openDetails'))
+$detailsItem = $menu.MenuItems.Add((T 'openDetails'))
 $detailsItem.Add_Click({ Show-ResetDetails })
-$setupItem = $menu.Items.Add((T 'setup'))
+$setupItem = $menu.MenuItems.Add((T 'setup'))
 $setupItem.Visible = $false
 $setupItem.Add_Click({ Show-Setup })
-$languageMenu = New-Object Windows.Forms.ToolStripMenuItem((T 'language'))
-$autoLanguageItem = $languageMenu.DropDownItems.Add((T 'languageAuto')); $autoLanguageItem.Tag = 'auto'
-$englishLanguageItem = $languageMenu.DropDownItems.Add((T 'languageEn')); $englishLanguageItem.Tag = 'en'
-$chineseLanguageItem = $languageMenu.DropDownItems.Add((T 'languageZh')); $chineseLanguageItem.Tag = 'zh-CN'
+$languageMenu = New-Object Windows.Forms.MenuItem((T 'language'))
+$autoLanguageItem = $languageMenu.MenuItems.Add((T 'languageAuto')); $autoLanguageItem.Tag = 'auto'
+$englishLanguageItem = $languageMenu.MenuItems.Add((T 'languageEn')); $englishLanguageItem.Tag = 'en'
+$chineseLanguageItem = $languageMenu.MenuItems.Add((T 'languageZh')); $chineseLanguageItem.Tag = 'zh-CN'
 foreach ($item in @($autoLanguageItem,$englishLanguageItem,$chineseLanguageItem)) { $item.Add_Click({ param($sender,$e) Save-WidgetLanguage ([string]$sender.Tag) }) }
-[void]$menu.Items.Add($languageMenu)
+[void]$menu.MenuItems.Add($languageMenu)
 
-[void]$menu.Items.Add('-')
-$exitItem = $menu.Items.Add((T 'quit'))
+[void]$menu.MenuItems.Add('-')
+$exitItem = $menu.MenuItems.Add((T 'quit'))
 $showItem.Add_Click({ $form.Show(); $form.Activate(); Start-Request $true })
 $modeItem.Add_Click({
     $form.Show(); $form.Activate()
@@ -1355,12 +1416,14 @@ $exitItem.Add_Click({
     $script:reallyExit = $true
     $form.Close()
 })
-$form.ContextMenuStrip = $menu
-$ring.ContextMenuStrip = $menu
+$form.ContextMenu = $menu
+$ring.ContextMenu = $menu
 $script:tray = New-Object System.Windows.Forms.NotifyIcon
 $script:tray.Icon = [System.Drawing.SystemIcons]::Information
 $script:tray.Text = (T 'app')
-$script:tray.ContextMenuStrip = $menu
+# NotifyIcon's automatic popup uses the floating monitor's virtualized context.
+# Keep both automatic menu properties empty and show one native popup ourselves.
+$script:tray.Add_MouseUp({param($sender,$e);if($e.Button -eq [Windows.Forms.MouseButtons]::Right){[WidgetTrayMenu]::Show($menu)}})
 $script:tray.Visible = $true
 $script:tray.Add_DoubleClick({ $form.Show(); $form.Activate(); Start-Request $true })
 function Save-WindowPosition {
@@ -1498,6 +1561,8 @@ $form.Add_FormClosed({
     $timer.Stop()
     $script:tray.Visible = $false
     $script:tray.Dispose()
+    [WidgetTrayMenu]::Dispose()
+    $menu.Dispose()
     if ($script:ownedTrayIcon) { $script:ownedTrayIcon.Dispose() }
 
     $client.Dispose()

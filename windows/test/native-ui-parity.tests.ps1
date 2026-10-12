@@ -559,8 +559,8 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
  }
  Test-Case 'language changes in compact mode preserve a usable detail window and inline history' {
   $oldLanguage=$script:languageSetting;$oldExternal=$script:externalData;$oldHistory=$script:historyExpanded;$oldEarlier=$script:earlierExpanded
-  $menuStart=$source.IndexOf('$menu = New-Object System.Windows.Forms.ContextMenuStrip')
-  $menuEnd=$source.IndexOf('$form.ContextMenuStrip = $menu',$menuStart)
+  $menuStart=$source.IndexOf('$menu = New-Object System.Windows.Forms.ContextMenu')
+  $menuEnd=$source.IndexOf('$form.ContextMenu = $menu',$menuStart)
   Invoke-Expression $source.Substring($menuStart,$menuEnd-$menuStart)
   # Keep the real native save path, substituting only local HTTP and its modal
   # warning presentation. No fixture settings reach the user's service or cache.
