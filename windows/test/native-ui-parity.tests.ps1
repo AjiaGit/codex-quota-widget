@@ -479,7 +479,7 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
   }
   $script:tray=[Windows.Forms.NotifyIcon]::new();$script:ownedTrayIcon=$null
   try {
-   $script:colors=@{text=[Drawing.Color]::FromArgb(243,245,247);accent=[Drawing.Color]::FromArgb(28,168,135)}
+   $script:colors=$oldColors.Clone();$script:colors.text=[Drawing.Color]::FromArgb(243,245,247)
    $script:data=[pscustomobject]@{status='unavailable'};$script:message='FABRICATED unavailable quota'
    $script:fixtureSystemLight=0;$script:trayIconKey='';$script:quotaRenderKey=''
    Show-Quota;Show-Quota
