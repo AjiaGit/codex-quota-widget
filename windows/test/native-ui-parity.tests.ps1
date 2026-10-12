@@ -420,7 +420,7 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
      for($y=0;$y -lt 32;$y++){for($x=0;$x -lt 32;$x++){
       $pixel=$bitmap.GetPixel($x,$y)
       if($pixel.A -gt 0 -and $pixel.G -gt $pixel.R+35 -and $pixel.G -gt $pixel.B+20){$accentPixels++}
-      if($pixel.A -gt 100 -and $pixel.R -gt 190 -and $pixel.G -gt 190 -and $pixel.B -gt 190){$top=[Math]::Min($top,$y);$bottom=[Math]::Max($bottom,$y)}
+      if($pixel.A -gt 100){$top=[Math]::Min($top,$y);$bottom=[Math]::Max($bottom,$y)}
      }}
      Assert-Equal $accentPixels 0 'Tray has no green ring crowding the number'
      if($bottom-$top+1 -lt $(if($value -eq 100){13}else{15})){throw ('Numeric tray glyph is too small: '+$value+' height '+($bottom-$top+1))}
@@ -428,6 +428,42 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
     }finally{$bitmap.Dispose()}
    }
   }finally{if($script:ownedTrayIcon){$script:ownedTrayIcon.Dispose()};$script:tray.Dispose();$script:tray=$oldTray;$script:remaining=$oldRemaining;$script:trayIconKey=$oldKey;$script:ownedTrayIcon=$oldIcon}
+ }
+
+ Test-Case 'numeric tray contrast follows the taskbar independently of light or dark apps' {
+  # FABRICATED theme settings: do not change the real registry or taskbar.
+  $oldTray=$script:tray;$oldRemaining=$script:remaining;$oldKey=$script:trayIconKey;$oldIcon=$script:ownedTrayIcon;$oldColors=$script:colors
+  $existingReader=Get-Item Function:\Get-ItemProperty -ErrorAction SilentlyContinue
+  function script:Get-ItemProperty {
+   [CmdletBinding()]param([string]$Path,[string]$Name)
+   if($Path -ne 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -or $Name -ne 'SystemUsesLightTheme'){throw 'Unexpected theme registry query'}
+   [pscustomobject]@{SystemUsesLightTheme=$script:fixtureSystemLight}
+  }
+  $script:tray=[Windows.Forms.NotifyIcon]::new();$script:ownedTrayIcon=$null
+  try {
+   foreach($appColor in @([Drawing.Color]::FromArgb(23,32,45),[Drawing.Color]::FromArgb(243,245,247))) {
+    $script:colors=@{text=$appColor;accent=[Drawing.Color]::FromArgb(28,168,135)}
+    $script:remaining=76;$script:trayIconKey=''
+    foreach($systemLight in @(0,1,0)) {
+     $script:fixtureSystemLight=$systemLight;Set-Tray-QuotaIcon
+     $bitmap=$script:ownedTrayIcon.ToBitmap()
+     try {
+      $matching=0
+      for($y=0;$y -lt 32;$y++){for($x=0;$x -lt 32;$x++){
+       $pixel=$bitmap.GetPixel($x,$y)
+       if($pixel.A -gt 200 -and $(if($systemLight -eq 1){$pixel.R -lt 80 -and $pixel.G -lt 80 -and $pixel.B -lt 80}else{$pixel.R -gt 190 -and $pixel.G -gt 190 -and $pixel.B -gt 190})){$matching++}
+      }}
+      if($matching -lt 20){throw ('Tray digits lack contrast for taskbar light='+$systemLight+' app foreground='+$appColor+'; matching pixels='+$matching)}
+     }finally{$bitmap.Dispose()}
+    }
+   }
+  }finally{
+   if($script:ownedTrayIcon){$script:ownedTrayIcon.Dispose()};$script:tray.Dispose()
+   $script:tray=$oldTray;$script:remaining=$oldRemaining;$script:trayIconKey=$oldKey;$script:ownedTrayIcon=$oldIcon;$script:colors=$oldColors
+   Remove-Item Function:\Get-ItemProperty -ErrorAction SilentlyContinue
+   if($existingReader){Set-Item Function:\Get-ItemProperty $existingReader.ScriptBlock}
+   Remove-Variable fixtureSystemLight -Scope Script -ErrorAction SilentlyContinue
+  }
  }
 
  Test-Case 'collapsed earlier updates retain their entry before native rows are created' {
