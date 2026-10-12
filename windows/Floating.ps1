@@ -870,7 +870,7 @@ function Show-Quota {
     # and public activity still update when an unchanged read skips repainting.
     $renderKey=@{language=$script:language;mode=$script:mode;valid=$valid;five=$fiveView;localDay=$now.ToLocalTime().ToString('yyyy-MM-dd');data=($value | Select-Object * -ExcludeProperty updatedAt);message=$script:message;size=$form.ClientSize;credits=$script:creditsExpanded;sources=$script:sourcesExpanded;
         relative=$(if($value -and $null -ne $value.updatedAt){Format-WidgetRelativeUpdate $value.updatedAt $script:language $now});countdown=$(if($valid){Format-WidgetCountdown ($resetAt-$now) $script:language})} | ConvertTo-Json -Depth 12 -Compress
-    if ($renderKey -ceq $script:quotaRenderKey) {Show-External;return}
+    if ($renderKey -ceq $script:quotaRenderKey) {Set-Tray-QuotaIcon;Show-External;return}
     $paintBatch=[WidgetRenderBatch]::Pause($form)
     try {
     Set-Layout $fiveView.visible
@@ -1149,7 +1149,12 @@ function Start-Request([bool]$manual) {
 
 function Set-Tray-QuotaIcon {
     if (-not $script:tray -or -not $script:colors.accent) { return }
-    $key = "$(if ($null -eq $script:remaining) { '?' } else { $script:remaining })/$($script:colors.text.ToArgb())"
+    # Windows/app modes can differ; tray digits must contrast with the taskbar.
+    $taskbarLight = try {
+        (Get-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -Name SystemUsesLightTheme -ErrorAction Stop).SystemUsesLightTheme -eq 1
+    } catch { $false }
+    $foreground = New-Color $(if ($taskbarLight) {'#17202D'} else {'#F3F5F7'})
+    $key = "$(if ($null -eq $script:remaining) { '?' } else { $script:remaining })/$($foreground.ToArgb())"
     if ($key -eq $script:trayIconKey) { return }
     $bitmap = [Drawing.Bitmap]::new(32,32)
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
@@ -1157,7 +1162,7 @@ function Set-Tray-QuotaIcon {
     try {
         $graphics.Clear([Drawing.Color]::Transparent)
         $graphics.TextRenderingHint=[Drawing.Text.TextRenderingHint]::AntiAliasGridFit
-        $textBrush=[Drawing.SolidBrush]::new($script:colors.text)
+        $textBrush=[Drawing.SolidBrush]::new($foreground)
         $text=if ($null -eq $script:remaining) {'—'} else {[string]$script:remaining}
         $size=if ($text.Length -ge 3) {18} else {24}
         $font=[Drawing.Font]::new('Segoe UI',$size,[Drawing.FontStyle]::Bold,[Drawing.GraphicsUnit]::Pixel)
