@@ -557,6 +557,36 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
    Assert-Equal $status.Text (T 'unavailable') 'Same failure returns to unavailable'
   }finally{$script:client=$oldClient;$script:requestTask=$oldTask;$script:settingsTask=$oldSettings;$script:data=$oldData;$script:message=$oldMessage;$script:quotaRenderKey='';Show-Quota}
  }
+ Test-Case 'language changes in compact mode preserve a usable detail window and inline history' {
+  $oldLanguage=$script:languageSetting;$oldExternal=$script:externalData;$oldHistory=$script:historyExpanded;$oldEarlier=$script:earlierExpanded
+  $menuStart=$source.IndexOf('$menu = New-Object System.Windows.Forms.ContextMenuStrip')
+  $menuEnd=$source.IndexOf('$form.ContextMenuStrip = $menu',$menuStart)
+  Invoke-Expression $source.Substring($menuStart,$menuEnd-$menuStart)
+  # Keep the real native save path, substituting only local HTTP and its modal
+  # warning presentation. No fixture settings reach the user's service or cache.
+  function Invoke-RestMethod {param($Uri,$Method,$ContentType,$Body,$TimeoutSec);[Text.Encoding]::UTF8.GetString($Body) | ConvertFrom-Json}
+  $saveDefinition=$ast.EndBlock.Statements | Where-Object {$_ -is [Management.Automation.Language.FunctionDefinitionAst] -and $_.Name -eq 'Save-WidgetLanguage'}
+  $warning="[void][Windows.Forms.MessageBox]::Show((T 'languageSaveFailed'), (T 'app'), [Windows.Forms.MessageBoxButtons]::OK, [Windows.Forms.MessageBoxIcon]::Warning)"
+  Invoke-Expression $saveDefinition.Extent.Text.Replace($warning,'$script:languageFailure=$_.Exception.Message')
+  try {
+   $languageRecords=@(1..50 | ForEach-Object {[pscustomobject]@{id=('https://example.invalid/FABRICATED-language-'+$_+'#regular');kind='regular';certainty='announced';announcedAt=$now.AddDays(-$_).ToString('o');sourceUrl=('https://example.invalid/FABRICATED-language-'+$_);summary='FABRICATED TEST DATA - Long history for language switching';summaryZh='虚构测试数据 - 语言切换长历史';deliveredAt=$now.AddDays(-$_).AddHours(1).ToString('o')}})
+   $script:externalData=[pscustomobject]@{status='ok';announcements=[pscustomobject]@{status='ok';stale=$false;sourceUpdatedAt=$now.ToString('o');lastFetchedAt=$now.ToUnixTimeMilliseconds();items=@();history=$languageRecords}}
+   $script:historyExpanded=$true;Show-External
+   $script:historyExpanded=$false;Show-External;Start-ModeTransition 'Compact'
+   foreach($setting in @('en','zh-CN','auto')) {
+    $script:languageFailure=$null;Save-WidgetLanguage $setting;if($script:languageFailure){throw $script:languageFailure}
+    Assert-Equal $script:mode 'Compact' 'Changing language keeps the current mode'
+    Assert-Equal $script:layoutBusy $false 'Language update releases layout'
+    Start-ModeTransition 'Detail'
+    if($form.ClientSize.Width -lt 404 -or $form.ClientSize.Height -lt 390){throw 'Expanded detail kept compact dimensions'}
+    $script:historyExpanded=$true;Show-External
+    Assert-Equal $script:historyRows.Count 50 'All history survives language switching'
+    Assert-Equal $title.Text (T 'app') 'Title translated'
+    Assert-Equal $cadence.Text (T 'refreshCadence') 'Footer translated'
+    $script:historyExpanded=$false;Show-External;Start-ModeTransition 'Compact'
+   }
+  }finally{$script:languageSetting=$oldLanguage;$script:externalData=$oldExternal;$script:historyExpanded=$oldHistory;$script:earlierExpanded=$oldEarlier;Set-Language;Start-ModeTransition 'Detail';$menu.Dispose()}
+ }
  Test-Case 'inline disclosure draws crisp GDI text and supports keyboard activation' {
   if($cards.GetType().Name -ne 'WidgetDisclosureButton' -or $cards.UseCompatibleTextRendering){throw 'Summary is not the direct GDI disclosure control'}
   $script:creditsExpanded=$false

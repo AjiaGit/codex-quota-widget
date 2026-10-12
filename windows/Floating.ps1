@@ -993,8 +993,9 @@ function Start-SettingsRequest {
 }
 function Save-WidgetLanguage([string]$setting) {
     try {
-        $body = @{ language = $setting } | ConvertTo-Json -Compress
-        $result = Invoke-RestMethod -Uri "$script:baseUrl/api/settings" -Method Post -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) -TimeoutSec 3
+        # Use a distinct name: child functions resolve the widget body dynamically.
+        $settingsJson = @{ language = $setting } | ConvertTo-Json -Compress
+        $result = Invoke-RestMethod -Uri "$script:baseUrl/api/settings" -Method Post -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($settingsJson)) -TimeoutSec 3
         if ($result.language -notin @('auto','en','zh-CN')) { throw 'Invalid settings response' }
         $script:languageSetting = [string]$result.language
         Set-Language
