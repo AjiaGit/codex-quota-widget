@@ -434,6 +434,7 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
   # FABRICATED theme settings: do not change the real registry or taskbar.
   $oldTray=$script:tray;$oldRemaining=$script:remaining;$oldKey=$script:trayIconKey;$oldIcon=$script:ownedTrayIcon;$oldColors=$script:colors
   $existingReader=Get-Item Function:\Get-ItemProperty -ErrorAction SilentlyContinue
+  $existingReaderScript=if($existingReader){$existingReader.ScriptBlock}else{$null}
   function script:Get-ItemProperty {
    [CmdletBinding()]param([string]$Path,[string]$Name)
    if($Path -ne 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -or $Name -ne 'SystemUsesLightTheme'){throw 'Unexpected theme registry query'}
@@ -461,8 +462,39 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
    if($script:ownedTrayIcon){$script:ownedTrayIcon.Dispose()};$script:tray.Dispose()
    $script:tray=$oldTray;$script:remaining=$oldRemaining;$script:trayIconKey=$oldKey;$script:ownedTrayIcon=$oldIcon;$script:colors=$oldColors
    Remove-Item Function:\Get-ItemProperty -ErrorAction SilentlyContinue
-   if($existingReader){Set-Item Function:\Get-ItemProperty $existingReader.ScriptBlock}
+   if($existingReaderScript){Set-Item Function:\Get-ItemProperty $existingReaderScript}
    Remove-Variable fixtureSystemLight -Scope Script -ErrorAction SilentlyContinue
+  }
+ }
+
+ Test-Case 'an unchanged unavailable quota still refreshes taskbar-only theme changes' {
+  $oldTray=$script:tray;$oldRemaining=$script:remaining;$oldKey=$script:trayIconKey;$oldIcon=$script:ownedTrayIcon;$oldColors=$script:colors
+  $oldData=$script:data;$oldMessage=$script:message
+  $existingReader=Get-Item Function:\Get-ItemProperty -ErrorAction SilentlyContinue
+  $existingReaderScript=if($existingReader){$existingReader.ScriptBlock}else{$null}
+  function script:Get-ItemProperty {
+   [CmdletBinding()]param([string]$Path,[string]$Name)
+   if($Path -ne 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -or $Name -ne 'SystemUsesLightTheme'){throw 'Unexpected theme registry query'}
+   [pscustomobject]@{SystemUsesLightTheme=$script:fixtureSystemLight}
+  }
+  $script:tray=[Windows.Forms.NotifyIcon]::new();$script:ownedTrayIcon=$null
+  try {
+   $script:colors=@{text=[Drawing.Color]::FromArgb(243,245,247);accent=[Drawing.Color]::FromArgb(28,168,135)}
+   $script:data=[pscustomobject]@{status='unavailable'};$script:message='FABRICATED unavailable quota'
+   $script:fixtureSystemLight=0;$script:trayIconKey='';$script:quotaRenderKey=''
+   Show-Quota;Show-Quota
+   $key=$script:quotaRenderKey;$darkIcon=$script:ownedTrayIcon
+   $script:fixtureSystemLight=1;Show-Quota
+   Assert-Equal $script:quotaRenderKey $key 'The displayed quota remains unchanged'
+   if([object]::ReferenceEquals($darkIcon,$script:ownedTrayIcon)){throw 'Taskbar-only theme change left the cached unavailable tray icon unchanged'}
+  }finally{
+   if($script:ownedTrayIcon){$script:ownedTrayIcon.Dispose()};$script:tray.Dispose()
+   $script:tray=$oldTray;$script:remaining=$oldRemaining;$script:trayIconKey=$oldKey;$script:ownedTrayIcon=$oldIcon;$script:colors=$oldColors
+   $script:data=$oldData;$script:message=$oldMessage;$script:quotaRenderKey=''
+   Remove-Item Function:\Get-ItemProperty -ErrorAction SilentlyContinue
+   if($existingReaderScript){Set-Item Function:\Get-ItemProperty $existingReaderScript}
+   Remove-Variable fixtureSystemLight -Scope Script -ErrorAction SilentlyContinue
+   Show-Quota
   }
  }
 
