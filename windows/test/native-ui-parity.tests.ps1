@@ -279,19 +279,21 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
  }
  Test-Case 'detail transition lands on the final hero geometry without a jump' {
   $oldBorder=$form.FormBorderStyle;$oldSize=$form.ClientSize
-  $script:animationTimer=[Windows.Forms.Timer]::new()
   try {
    $form.FormBorderStyle=[Windows.Forms.FormBorderStyle]::None
    foreach($width in @(404,606,720)) {
     $script:mode='Compact';$script:animating=$false;$script:detailSize=[Drawing.Size]::new($width,640);$script:layoutPlus=$false
     $script:modePositions=@{Compact=$null;Detail=$null}
-    Start-ModeTransition 'Detail';$script:animationTimer.Stop();$target=$script:ringTo
-    $form.Bounds=$script:animationTo;$script:mode='Detail';$script:animating=$false;Update-ResponsiveLayout
+    Start-ModeTransition 'Detail'
     $point=$form.PointToClient($ring.Parent.PointToScreen($ring.Location))
-    $actual=[Drawing.Rectangle]::new($point,$ring.Size)
-    Assert-Equal $target $actual 'Animated ring must land exactly on the settled layout'
+    $ringSize=if($width -le 420){92}elseif($width -le 520){100}else{112}
+    $inset=if($width -le 420){14}elseif($width -le 520){16}else{24}
+    $header=$body.Top
+    Assert-Equal $point.X $inset 'Final hero keeps the accepted Mac inset'
+    Assert-Equal $point.Y ($header+10) 'Final hero follows the header'
+    Assert-Equal $ring.Width $ringSize 'Final hero ring stays responsive'
    }
-  }finally{$script:animationTimer.Dispose();foreach($control in $script:detailControls){$control.Visible=$true};$script:animating=$false;$script:mode='Detail';$form.FormBorderStyle=$oldBorder;$form.ClientSize=$oldSize;Update-ResponsiveLayout}
+  }finally{foreach($control in $script:detailControls){$control.Visible=$true};$script:animating=$false;$script:mode='Detail';$form.FormBorderStyle=$oldBorder;$form.ClientSize=$oldSize;Update-ResponsiveLayout}
  }
  Test-Case 'Plus five-hour content stays readable at narrow and wide widths in both languages' {
   $old=$script:data
@@ -463,6 +465,97 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
    Assert-Equal $script:modePositions.Detail.y ($beforeMove+24) 'A real move records the new anchor'
    Assert-Equal $script:detailDragging $false 'Native move-loop guard resets after dragging'
   }finally{$script:modePositions=$oldPositions;$script:automaticDetailHeight=$oldAuto;$form.Bounds=$oldBounds}
+ }
+ Test-Case 'unchanged quota refresh does not repaint the unchanged detail title' {
+  $script:mode='Detail';$script:animating=$false;Show-Quota;[Windows.Forms.Application]::DoEvents()
+  $script:refreshTitlePaints=0
+  $paint=[Windows.Forms.PaintEventHandler]{param($sender,$e);$script:refreshTitlePaints++}
+  $title.Add_Paint($paint)
+  try {Show-Quota;[Windows.Forms.Application]::DoEvents();Assert-Equal $script:refreshTitlePaints 0 'Unchanged reads need no full-window repaint'}
+  finally {$title.Remove_Paint($paint)}
+ }
+ Test-Case 'native mode changes finish in one update without opacity or intermediate frames' {
+  $oldBounds=$form.Bounds;$oldSize=$script:detailSize;$oldMode=$script:mode;$oldAuto=$script:automaticDetailHeight
+  $script:animationTimer=[Windows.Forms.Timer]::new()
+  try {
+   $script:automaticDetailHeight=$false;$script:mode='Compact';$script:animating=$false;$script:detailSize=[Drawing.Size]::new(606,700);$script:layoutPlus=$false
+   Start-ModeTransition 'Detail'
+   Assert-Equal $script:mode 'Detail' 'The first click completes the native detail state'
+   Assert-Equal $script:animating $false 'No per-frame PowerShell layout remains pending'
+   Assert-Equal $form.Opacity 1 'Native text stays opaque during mode changes'
+   Start-ModeTransition 'Compact'
+   Assert-Equal $script:mode 'Compact' 'Collapsing completes in the same update'
+   Assert-Equal $body.Visible $false 'Collapsed content is hidden'
+  }finally{$script:animationTimer.Stop();$script:animationTimer.Dispose();$script:detailSize=$oldSize;$script:mode=$oldMode;$script:animating=$false;$script:automaticDetailHeight=$oldAuto;$form.Bounds=$oldBounds;Set-ModeVisual ($script:mode -eq 'Compact')}
+ }
+ Test-Case 'long inline history retains all records and realizes only rows in the scroll viewport' {
+  $oldExternal=$script:externalData;$oldBounds=$form.Bounds;$oldAuto=$script:automaticDetailHeight
+  $oldClient=$script:client;$oldNotice=$script:noticeView;$oldReadTask=$script:announcementReadTask;$oldReadContent=$script:announcementReadContent
+  try {
+   $script:automaticDetailHeight=$false;$script:historyExpanded=$true;$script:creditsExpanded=$false;$script:earlierExpanded=$false;$script:announcementRenderKey=''
+   $form.ClientSize=[Drawing.Size]::new(606,500)
+   $script:externalData=[pscustomobject]@{status='ok';announcements=[pscustomobject]@{status='ok';stale=$false;sourceUpdatedAt=$now.ToString('o');items=@();history=@()}}
+   foreach($i in 1..50){$script:externalData.announcements.history+=,[pscustomobject]@{id=('https://example.invalid/FABRICATED-viewport-'+$i+'#regular');kind='regular';sourceUrl='https://example.invalid/FABRICATED';certainty='announced';announcedAt=$now.AddDays(-$i).ToString('o');deliveredAt=$now.AddDays(-$i).ToString('o')}}
+   Show-External;$body.AutoScrollPosition=[Drawing.Point]::Empty
+   $node=$ast.Find({param($n) $n -is [Management.Automation.Language.InvokeMemberExpressionAst] -and $n.Expression.Extent.Text -eq '$body' -and $n.Member.Value -eq 'Add_Scroll'},$true)
+   if(-not $node){throw 'Native scroll does not update the activity viewport'}
+   & $node.Arguments[0].ScriptBlock.GetScriptBlock()
+   Assert-Equal $script:historyRows.Count 50 'All fabricated records remain available'
+   Assert-Equal $script:historyRows[-1].IsHandleCreated $false 'Offscreen history does not allocate hundreds of HWNDs on first expansion'
+   if($body.AutoScrollMinSize.Height -le 6000){throw 'The full history scroll extent was truncated'}
+   Add-Type -AssemblyName System.Net.Http
+   $script:client=[pscustomobject]@{captured=@()}
+   $script:client | Add-Member ScriptMethod PostAsync {param($url,$content);$this.captured=@(($content.ReadAsStringAsync().GetAwaiter().GetResult() | ConvertFrom-Json).ids);[Threading.Tasks.Task]::FromResult(0)}
+   $script:noticeView=[pscustomobject]@{ids=@($script:visibleActivityView.history | ForEach-Object {$_.id});hasUnread=$true}
+   $script:announcementReadTask=$null
+   $nativeRead=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Start-AnnouncementRead'},$true)
+   & $nativeRead.Body.GetScriptBlock()
+   $lastId=$script:visibleActivityView.history[-1].id
+   if($lastId -in $script:client.captured){throw 'An unshown final record was acknowledged before scrolling'}
+   $body.AutoScrollPosition=[Drawing.Point]::new(0,$body.AutoScrollMinSize.Height)
+   & $node.Arguments[0].ScriptBlock.GetScriptBlock()
+   Assert-Equal $script:historyRows[-1].Visible $true 'The last record appears when scrolled into view'
+   Assert-Equal $script:historyRows[0].Visible $false 'Rows scrolled out of view stop painting'
+   $script:announcementReadTask=$null
+   if($script:announcementReadContent){$script:announcementReadContent.Dispose();$script:announcementReadContent=$null}
+   & $nativeRead.Body.GetScriptBlock()
+   if($lastId -notin $script:client.captured){throw 'The shown final record was not acknowledged after scrolling'}
+   $body.AutoScrollPosition=[Drawing.Point]::Empty;Update-ActivityViewport
+   $wheel=$body.GetType().GetMethod('OnMouseWheel',[Reflection.BindingFlags]'Instance,NonPublic')
+   $event=$ast.Find({param($n) $n -is [Management.Automation.Language.InvokeMemberExpressionAst] -and $n.Expression.Extent.Text -eq '$body' -and $n.Member.Value -eq 'Add_MouseWheel'},$true)
+   if($event){$handler=$event.Arguments[0].ScriptBlock.GetScriptBlock();$body.Add_MouseWheel($handler)}
+   try {
+    for($i=0;$i -lt 180;$i++){$wheel.Invoke($body,@([Windows.Forms.MouseEventArgs]::new([Windows.Forms.MouseButtons]::None,0,20,20,-120)))}
+    Assert-Equal $script:historyRows[-1].Visible $true 'Actual mouse-wheel scrolling realizes the final record'
+   }finally{if($event){$body.Remove_MouseWheel($handler)}}
+  }finally{if($script:announcementReadContent -and $script:announcementReadContent -ne $oldReadContent){$script:announcementReadContent.Dispose()};$script:client=$oldClient;$script:noticeView=$oldNotice;$script:announcementReadTask=$oldReadTask;$script:announcementReadContent=$oldReadContent;$script:externalData=$oldExternal;$script:historyExpanded=$false;$script:announcementRenderKey='';$script:automaticDetailHeight=$oldAuto;$form.Bounds=$oldBounds;$body.AutoScrollPosition=[Drawing.Point]::Empty;Show-External}
+ }
+ Test-Case 'a fast repeated public retry failure restores the retry action' {
+  Add-Type -AssemblyName System.Net.Http
+  $oldClient=$script:client;$oldTask=$script:externalTask;$oldExternal=$script:externalData;$oldContent=$script:externalRequestContent
+  try {
+   $script:client=[pscustomobject]@{};$script:client | Add-Member ScriptMethod PostAsync {param($url,$body);[Threading.Tasks.Task]::FromResult(0)}
+   $script:externalTask=$null;$script:externalData=[pscustomobject]@{status='unavailable';announcements=[pscustomobject]@{status='unavailable';stale=$true;sourceUpdatedAt=$null;items=@();history=@()}}
+   Show-External;Assert-Equal $publicRetry.Enabled $true 'Failed public data can be retried'
+   Start-PublicRetry
+   Assert-Equal $publicRetry.Enabled $false 'The action waits for response consumption'
+   Show-External
+   Assert-Equal $publicRetry.Enabled $false 'A completed response still waits for consumption'
+   $script:externalTask=$null;Show-External
+   Assert-Equal $publicRetry.Enabled $true 'A same-state fast failure must re-enable retry'
+   Assert-Equal $publicRetry.Text (T 'publicRetry') 'The retry label cannot remain stuck'
+  }finally{if($script:externalRequestContent -and $script:externalRequestContent -ne $oldContent){$script:externalRequestContent.Dispose()};$script:client=$oldClient;$script:externalTask=$oldTask;$script:externalRequestContent=$oldContent;$script:externalData=$oldExternal;$script:announcementRenderKey='';Show-External}
+ }
+ Test-Case 'a repeated empty quota failure cannot leave the status stuck refreshing' {
+  $oldClient=$script:client;$oldTask=$script:requestTask;$oldSettings=$script:settingsTask;$oldData=$script:data;$oldMessage=$script:message
+  try {
+   $script:client=[pscustomobject]@{};$script:client | Add-Member ScriptMethod GetAsync {param($url);[Threading.Tasks.Task]::FromResult(0)}
+   $script:requestTask=$null;$script:settingsTask=$null;$script:data=$null;$script:message=T 'service_unavailable'
+   Show-Quota;Start-Request $false
+   Assert-Equal $status.Text (T 'refreshing') 'Empty reads can show the in-flight status'
+   $script:requestTask=$null;Show-Quota
+   Assert-Equal $status.Text (T 'unavailable') 'Same failure returns to unavailable'
+  }finally{$script:client=$oldClient;$script:requestTask=$oldTask;$script:settingsTask=$oldSettings;$script:data=$oldData;$script:message=$oldMessage;$script:quotaRenderKey='';Show-Quota}
  }
  Test-Case 'inline disclosure draws crisp GDI text and supports keyboard activation' {
   if($cards.GetType().Name -ne 'WidgetDisclosureButton' -or $cards.UseCompatibleTextRendering){throw 'Summary is not the direct GDI disclosure control'}

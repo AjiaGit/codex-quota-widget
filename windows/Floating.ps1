@@ -66,6 +66,12 @@ public static class WidgetRenderBatch {
     }
 }
 public class WidgetLabel : System.Windows.Forms.Label {
+    public static WidgetLabel Create(string text,int x,int y,int width,int height,float size,bool bold) {
+        var label=new WidgetLabel();label.Text=text;
+        label.Bounds=new System.Drawing.Rectangle(x,y,width,height);
+        label.Font=new System.Drawing.Font("Segoe UI",size,bold?System.Drawing.FontStyle.Bold:System.Drawing.FontStyle.Regular);
+        label.AutoEllipsis=true;label.UseMnemonic=false;return label;
+    }
     public WidgetLabel() {
         // Match the GDI TextRenderer used to measure wrapped label layout.
         UseCompatibleTextRendering = false;
@@ -73,6 +79,26 @@ public class WidgetLabel : System.Windows.Forms.Label {
         // Paint to the window DC while preserving label layout and mouse events.
         SetStyle(System.Windows.Forms.ControlStyles.OptimizedDoubleBuffer |
                  System.Windows.Forms.ControlStyles.DoubleBuffer, false);
+    }
+}
+public static class WidgetNativeLayout {
+    public static int Wrap(System.Windows.Forms.Control control,int x,int y,int width,int minimum) {
+        var label=control as System.Windows.Forms.Label;if(label!=null)label.AutoEllipsis=false;
+        var measured=System.Windows.Forms.TextRenderer.MeasureText(control.Text,control.Font,new System.Drawing.Size(Math.Max(1,width),32767),System.Windows.Forms.TextFormatFlags.WordBreak|System.Windows.Forms.TextFormatFlags.NoPrefix);
+        int height=Math.Max(minimum,measured.Height+4);
+        control.Bounds=new System.Drawing.Rectangle(x,y,Math.Max(1,width),Math.Max(1,height));return height;
+    }
+    public static void Theme(System.Windows.Forms.Control control,System.Drawing.Color back,System.Drawing.Color text,System.Drawing.Color muted,System.Drawing.Color warning,System.Drawing.Color line,System.Drawing.Color link,System.Drawing.Color accent,System.Drawing.Color hover,System.Drawing.Color pressed) {
+        string role=control.Tag as string;control.BackColor=role=="line"?line:back;
+        control.ForeColor=role=="strong"?text:role=="warning"?warning:muted;
+        var disclosure=control as WidgetDisclosureButton;
+        if(disclosure!=null){disclosure.MutedColor=muted;disclosure.HoverColor=hover;}
+        var hyperlink=control as System.Windows.Forms.LinkLabel;
+        if(hyperlink!=null){hyperlink.LinkColor=link;hyperlink.ActiveLinkColor=accent;hyperlink.VisitedLinkColor=link;}
+        var button=control as System.Windows.Forms.Button;
+        if(button!=null){button.FlatAppearance.MouseOverBackColor=hover;button.FlatAppearance.MouseDownBackColor=pressed;}
+        foreach(System.Windows.Forms.Control child in control.Controls)Theme(child,back,text,muted,warning,line,link,accent,hover,pressed);
+        control.Invalidate();
     }
 }
 public class WidgetLinkLabel : System.Windows.Forms.LinkLabel {
@@ -252,6 +278,8 @@ $script:historyExpanded = $false
 $script:visibleActivityView = $null
 $script:announcementRenderKey = ''
 $script:activityRenderKeys = @{}
+$script:quotaRenderKey = ''
+$script:externalRenderKey = ''
 $script:themeIsLight = $null
 $script:announcementRows = @()
 $script:historyRows = @()
@@ -274,15 +302,7 @@ function New-Color([string]$html) {
 }
 
 function New-Label([string]$text, [int]$x, [int]$y, [int]$width, [int]$height, [float]$size, [bool]$bold = $false) {
-    $label = New-Object WidgetLabel
-    $label.Text = $text
-    $label.Location = New-Object System.Drawing.Point($x, $y)
-    $label.Size = New-Object System.Drawing.Size($width, $height)
-    $style = if ($bold) { [System.Drawing.FontStyle]::Bold } else { [System.Drawing.FontStyle]::Regular }
-    $label.Font = New-Object System.Drawing.Font('Segoe UI', $size, $style)
-    $label.AutoEllipsis = $true
-    $label.UseMnemonic = $false
-    return $label
+    [WidgetLabel]::Create($text,$x,$y,$width,$height,$size,$bold)
 }
 
 $script:form = New-Object System.Windows.Forms.Form
@@ -393,10 +413,10 @@ function New-ToolbarButton([string]$kind) {
     return $button
 }
 function New-SectionIcon([string]$kind) {
-    $icon=New-Object WidgetSectionIcon;$icon.IconKind=$kind;$icon.Size=[Drawing.Size]::new(24,24);$icon.Tag='strong';return $icon
+    $icon=[WidgetSectionIcon]::new();$icon.IconKind=$kind;$icon.Size=[Drawing.Size]::new(24,24);$icon.Tag='strong';return $icon
 }
 function New-DisclosureButton([string]$kind, [string]$name) {
-    $button=New-Object WidgetDisclosureButton;$button.Name=$name;$button.IconKind=$kind;$button.Font=[Drawing.Font]::new('Segoe UI',10.5,[Drawing.FontStyle]::Bold)
+    $button=[WidgetDisclosureButton]::new();$button.Name=$name;$button.IconKind=$kind;$button.Font=[Drawing.Font]::new('Segoe UI',10.5,[Drawing.FontStyle]::Bold)
     $button.UseMnemonic=$false;$button.Cursor=[Windows.Forms.Cursors]::Hand;$button.Tag='strong';return $button
 }
 $title = New-Label (T 'app') 18 10 132 30 15 $true
@@ -412,7 +432,7 @@ $content = New-Object Windows.Forms.Panel
 $content.Name='detail-content'; [void]$body.Controls.Add($content)
 $script:sectionPanels=@{}
 foreach ($section in @('hero','fiveHour','credits','announcements','history','sources','footer')) {
-    $panel=New-Object Windows.Forms.Panel; $panel.Name='section-'+$section
+    $panel=[Windows.Forms.Panel]::new(); $panel.Name='section-'+$section
     $script:sectionPanels[$section]=$panel; [void]$content.Controls.Add($panel)
     if ($section -ne 'footer') {$panel.Add_Paint({param($sender,$e);if ($script:colors.line) {$pen=[Drawing.Pen]::new($script:colors.line,1);try {$e.Graphics.DrawLine($pen,0,$sender.Height-1,$sender.Width,$sender.Height-1)}finally{$pen.Dispose()}}})}
 }
@@ -500,7 +520,7 @@ $historyButton=New-DisclosureButton 'history' 'announcement-history-toggle';$his
 $historyRowsPanel=New-Object Windows.Forms.Panel
 $historyAttribution=New-Object Windows.Forms.FlowLayoutPanel;$historyAttribution.WrapContents=$true
 $historyLabel=New-Label (T 'historyAttribution') 0 0 200 24 9.75;$historyLabel.AutoSize=$true
-$historyLink=New-Object WidgetLinkLabel;$historyLink.Text='codex-resets.com';$historyLink.Font=[Drawing.Font]::new('Segoe UI',9.75);$historyLink.AutoSize=$true;$historyLink.UseMnemonic=$false
+$historyLink=[WidgetLinkLabel]::new();$historyLink.Text='codex-resets.com';$historyLink.Font=[Drawing.Font]::new('Segoe UI',9.75);$historyLink.AutoSize=$true;$historyLink.UseMnemonic=$false
 [void]$historyLink.Links.Add(0,$historyLink.Text.Length,'https://codex-resets.com/');$historyLink.Add_LinkClicked({try{Start-Process -FilePath 'https://codex-resets.com/'}catch{}})
 [void]$historyAttribution.Controls.Add($historyLabel);[void]$historyAttribution.Controls.Add($historyLink)
 foreach ($control in @($historyButton,$historyRowsPanel,$historyAttribution)){[void]$historyPanel.Controls.Add($control)}
@@ -516,7 +536,7 @@ foreach ($site in @('codex-reset.com','codexreset.dev')) {
         [void]$attribution.Controls.Add($separator)
     }
     # A complete single link uses GDI; partial/multiple links force GDI+.
-    $siteLink=New-Object WidgetLinkLabel
+    $siteLink=[WidgetLinkLabel]::new()
     $siteLink.Text=$site; $siteLink.Font=[Drawing.Font]::new('Segoe UI',9)
     $siteLink.AutoSize=$true; $siteLink.Margin=[Windows.Forms.Padding]::Empty
     $siteLink.LinkBehavior=[Windows.Forms.LinkBehavior]::AlwaysUnderline; $siteLink.UseMnemonic=$false
@@ -568,16 +588,19 @@ function Update-ResizeEdges([int]$width, [int]$height, [bool]$compact, [double]$
 }
 
 function Set-WrappedBox($control, [int]$x, [int]$y, [int]$width, [int]$minimumHeight = 22) {
-    $control.AutoEllipsis=$false
-    $measured=[Windows.Forms.TextRenderer]::MeasureText($control.Text,$control.Font,[Drawing.Size]::new([Math]::Max(1,$width),32767),([Windows.Forms.TextFormatFlags]::WordBreak -bor [Windows.Forms.TextFormatFlags]::NoPrefix))
-    $height=[Math]::Max($minimumHeight,$measured.Height+4)
-    Set-ControlBox $control $x $y $width $height
-    return $height
+    [WidgetNativeLayout]::Wrap($control,$x,$y,$width,$minimumHeight)
 }
 function Layout-AnnouncementRows($parent, $rows, [int]$width, [int]$startY=0) {
     $y=$startY
+    $parent.SuspendLayout()
+    try {
     foreach ($row in $rows) {
-        $row.Width=$width;$row.Location=[Drawing.Point]::new(0,$y);$parts=$row.Tag
+        $parts=$row.Tag;$row.Location=[Drawing.Point]::new(0,$y)
+        $layoutKey="$width/$($form.Width)/$([bool]$script:recordExpanded[$parts.key])"
+        if ($parts.layoutKey -ceq $layoutKey) {$y+=$row.Height;continue}
+        $row.SuspendLayout()
+        try {
+        $row.Width=$width
         $left=if ($form.Width -le 420) {32} else {36};$mainWidth=$width-$left;$insideY=10
         Set-ControlBox $parts.icon 0 12 24 24
         $insideY+=(Set-WrappedBox $parts.label $left $insideY $mainWidth 20)
@@ -598,9 +621,31 @@ function Layout-AnnouncementRows($parent, $rows, [int]$width, [int]$startY=0) {
                 Set-ControlBox $parts.extraPanel $left $insideY $mainWidth $extraY;$insideY+=$extraY
             }
         }
-        $row.Height=$insideY+10;$y+=$row.Height
+        $row.Height=$insideY+10;$y+=$row.Height;$parts.layoutKey=$layoutKey
+        } finally {$row.ResumeLayout($false)}
     }
     $parent.Height=[Math]::Max(1,$y);return $y
+    } finally {$parent.ResumeLayout($false)}
+}
+function Update-ActivityViewport {
+    # Keep every logical record and the full scroll extent, but avoid creating
+    # hundreds of offscreen HWNDs when a long inline disclosure first opens.
+    foreach ($group in @(@{panel=$earlierRowsPanel;rows=$script:earlierRows},@{panel=$historyRowsPanel;rows=$script:historyRows})) {
+        if (-not $group.panel.Visible) {continue}
+        $offset=$body.PointToClient($group.panel.PointToScreen([Drawing.Point]::Empty)).Y
+        foreach ($row in $group.rows) {$row.Visible=$row.Top+$offset -lt $body.ClientSize.Height+80 -and $row.Bottom+$offset -gt -80}
+    }
+}
+function Get-ActivityReadView {
+    $shown=@{}
+    foreach ($row in @($script:announcementRows)+@($script:earlierRows)+@($script:historyRows)) {
+        if (-not $row -or -not $row.Visible) {continue}
+        $top=$body.PointToClient($row.Parent.PointToScreen($row.Location)).Y
+        if ($top -lt $body.ClientSize.Height -and $top+$row.Height -gt 0) {$shown[[string]$row.Tag.key]=$true}
+    }
+    $active=@($script:visibleActivityView.active | Where-Object {$key=if($_.key){[string]$_.key}else{[string]$_.sortAt+'/'+[string]$_.title};$shown.ContainsKey($key)})
+    $history=@($script:visibleActivityView.history | Where-Object {$key=if($_.key){[string]$_.key}else{[string]$_.sortAt+'/'+[string]$_.title};$shown.ContainsKey($key)})
+    [pscustomobject]@{active=$active;history=$history}
 }
 function Layout-ResetCreditRows([int]$width) {
     $y=0
@@ -700,7 +745,7 @@ function Update-ResponsiveLayout {
             $body.AutoScrollMinSize=[Drawing.Size]::new(0,$y+8);Update-ResizeEdges $width $height $false
         }
         Set-RoundedRegion;$ring.Invalidate()
-    } finally {$content.ResumeLayout($false);$body.ResumeLayout($true);$form.ResumeLayout($true);$paintBatch.Dispose();$script:layoutBusy=$false}
+    } finally {$content.ResumeLayout($false);$body.ResumeLayout($true);$form.ResumeLayout($true);Update-ActivityViewport;$paintBatch.Dispose();$script:layoutBusy=$false}
 }
 function Update-DetailFonts {
     # Text stays readable at the minimum width. Wrapped section heights, rather
@@ -720,19 +765,7 @@ function Set-Layout([bool]$plus) {
     Update-ResponsiveLayout
 }
 function Set-ControlTheme($control) {
-    $control.BackColor=$script:colors.back
-    $control.ForeColor=if ($control.Tag -eq 'strong') {$script:colors.text} elseif ($control.Tag -eq 'warning') {$script:colors.warning} else {$script:colors.muted}
-    if ($control -is [WidgetDisclosureButton]) {$control.MutedColor=$script:colors.muted;$control.HoverColor=$script:colors.hover}
-    if ($control.Tag -eq 'line') { $control.BackColor=$script:colors.line }
-    if ($control -is [Windows.Forms.LinkLabel]) {
-        $control.LinkColor=$script:colors.link; $control.ActiveLinkColor=$script:colors.accent; $control.VisitedLinkColor=$script:colors.link
-    }
-    if ($control -is [Windows.Forms.Button]) {
-        $control.FlatAppearance.MouseOverBackColor=$script:colors.hover
-        $control.FlatAppearance.MouseDownBackColor=$script:colors.pressed
-    }
-    foreach ($child in $control.Controls) { Set-ControlTheme $child }
-    $control.Invalidate()
+    [WidgetNativeLayout]::Theme($control,$script:colors.back,$script:colors.text,$script:colors.muted,$script:colors.warning,$script:colors.line,$script:colors.link,$script:colors.accent,$script:colors.hover,$script:colors.pressed)
 }
 
 function Set-Theme {
@@ -760,13 +793,9 @@ function Set-Theme {
 }
 
 function Show-Quota {
-    $paintBatch=[WidgetRenderBatch]::Pause($form)
-    try {
     $now = [DateTimeOffset]::UtcNow
     $value = $script:data
     $fiveView=Get-WidgetFiveHourView $value $script:language $now
-    Set-Layout $fiveView.visible
-    $fiveValue.Text=$fiveView.percentText; $fiveReset.Text=$fiveView.compactResetText
     $valid = $false
     if ($value -and $value.status -eq 'ok') {
         try {
@@ -776,6 +805,15 @@ function Show-Quota {
                 [double]$value.remainingPercent -ge 0 -and [double]$value.remainingPercent -le 100
         } catch { $valid = $false }
     }
+    # Compare displayed state rather than the raw polling timestamp. Freshness
+    # and public activity still update when an unchanged read skips repainting.
+    $renderKey=@{language=$script:language;mode=$script:mode;valid=$valid;five=$fiveView;localDay=$now.ToLocalTime().ToString('yyyy-MM-dd');data=($value | Select-Object * -ExcludeProperty updatedAt);message=$script:message;size=$form.ClientSize;credits=$script:creditsExpanded;sources=$script:sourcesExpanded;
+        relative=$(if($value -and $null -ne $value.updatedAt){Format-WidgetRelativeUpdate $value.updatedAt $script:language $now});countdown=$(if($valid){Format-WidgetCountdown ($resetAt-$now) $script:language})} | ConvertTo-Json -Depth 12 -Compress
+    if ($renderKey -ceq $script:quotaRenderKey) {Show-External;return}
+    $paintBatch=[WidgetRenderBatch]::Pause($form)
+    try {
+    Set-Layout $fiveView.visible
+    $fiveValue.Text=$fiveView.percentText; $fiveReset.Text=$fiveView.compactResetText
     if ($valid) {
         $script:remaining = [int]$value.remainingPercent
         $span = $resetAt - $now
@@ -813,12 +851,14 @@ function Show-Quota {
     $ring.Invalidate()
     Set-Tray-QuotaIcon
     Show-External
+    if (-not $script:externalLayoutChanged) {Update-ResponsiveLayout}
+    $script:quotaRenderKey=$renderKey
 
     } finally {$paintBatch.Dispose()}
 }
 
 function New-ResetCreditControl($record) {
-    $panel=New-Object Windows.Forms.Panel;$rule=New-Object Windows.Forms.Panel;$rule.Tag='line'
+    $panel=[Windows.Forms.Panel]::new();$rule=New-Object Windows.Forms.Panel;$rule.Tag='line'
     $label=New-Label $record.title 0 10 346 22 10.5 $true;$label.Tag='strong'
     $description=New-Label $record.description 0 36 346 22 9.75;$description.Visible=[bool]$record.description
     $granted=New-Label $record.granted 0 62 346 22 9.75;$expires=New-Label $record.expires 0 88 346 22 9.75
@@ -834,12 +874,12 @@ function Update-ResetCreditDetails {
     }
 }
 function New-ActivityLink([string]$label, [string]$url) {
-    $link=New-Object WidgetLinkLabel;$link.Text=$label;$link.Font=[Drawing.Font]::new('Segoe UI',9.75);$link.UseMnemonic=$false;$link.TabStop=$true;$link.LinkBehavior=[Windows.Forms.LinkBehavior]::AlwaysUnderline
+    $link=[WidgetLinkLabel]::new();$link.Text=$label;$link.Font=[Drawing.Font]::new('Segoe UI',9.75);$link.UseMnemonic=$false;$link.TabStop=$true;$link.LinkBehavior=[Windows.Forms.LinkBehavior]::AlwaysUnderline
     [void]$link.Links.Add(0,$label.Length,$url)
     $link.Add_LinkClicked({param($sender,$e);$target=[string]$e.Link.LinkData;if (Test-WidgetHttpsUrl $target){try{Start-Process -FilePath $target | Out-Null}catch{}}});return $link
 }
 function New-AnnouncementControl($row) {
-    $view=Get-WidgetActivityPresentation $row $script:language;$panel=New-Object Windows.Forms.Panel
+    $view=Get-WidgetActivityPresentation $row $script:language;$panel=[Windows.Forms.Panel]::new()
     $icon=New-SectionIcon $row.kind;$label=New-Label $view.label 36 10 346 20 9
     $heading=New-Label $view.title 36 30 346 22 11.25 $true;$heading.Tag='strong'
     $fact=New-Label $view.fact 36 54 346 22 10.5;$fact.Visible=[bool]$view.fact;$statusLine=New-Label $view.status 36 80 346 22 9.75;$statusLine.Visible=[bool]$view.status
@@ -849,13 +889,13 @@ function New-AnnouncementControl($row) {
     if ($view.extra -or $row.deliverySourceUrl) {
         $more=New-DisclosureButton '' 'record-details-toggle';$more.Text=T $(if ($row.kind -eq 'recovery') {'recoveryMore'} else {'moreMessage'});$oldFont=$more.Font;$more.Font=[Drawing.Font]::new('Segoe UI',9.75,[Drawing.FontStyle]::Underline);$oldFont.Dispose();$more.ShowChevron=$false;$more.Tag=@{key=$key}
         $more.Add_Click({param($sender,$e);$key=$sender.Tag.key;$script:recordExpanded[$key]=-not [bool]$script:recordExpanded[$key];Update-ResponsiveLayout})
-        $extraPanel=New-Object Windows.Forms.Panel
+        $extraPanel=[Windows.Forms.Panel]::new()
         if ($view.extra){$extra=New-Label $view.extra 0 0 346 24 9.75;[void]$extraPanel.Controls.Add($extra)}
         if ($row.deliverySourceUrl){[void]$extraPanel.Controls.Add((New-ActivityLink (T 'deliverySource') $row.deliverySourceUrl))}
     }
     foreach ($control in @($icon,$label,$heading,$fact,$statusLine,$missing,$sourceLink,$more,$extraPanel) | Where-Object {$_}){[void]$panel.Controls.Add($control)}
     $panel.Add_Paint({param($sender,$e);$pen=[Drawing.Pen]::new($script:colors.line,1);try{$e.Graphics.DrawLine($pen,0,$sender.Height-1,$sender.Width,$sender.Height-1)}finally{$pen.Dispose()}})
-    $panel.Tag=@{key=$key;icon=$icon;label=$label;title=$heading;fact=$fact;status=$statusLine;missing=$missing;source=$sourceLink;more=$more;extraPanel=$extraPanel};Set-ControlTheme $panel;return $panel
+    $panel.Tag=@{key=$key;icon=$icon;label=$label;title=$heading;fact=$fact;status=$statusLine;missing=$missing;source=$sourceLink;more=$more;extraPanel=$extraPanel};return $panel
 }
 function Get-ControlOwnedFonts($control) {
     if ($control -is [Windows.Forms.Label] -or $control -is [Windows.Forms.Button]) {$control.Font}
@@ -867,9 +907,20 @@ function Clear-PanelControls($panel) {
     }
 }
 function Show-External {
+    $script:externalLayoutChanged=$false
+    $now=[DateTimeOffset]::UtcNow
+    $activityInputKey=@{language=$script:language;status=$script:data.status;recovery=$script:data.recoveryHistory;feed=$script:externalData.announcements;time=[Math]::Floor($now.ToUnixTimeMilliseconds()/30000)} | ConvertTo-Json -Depth 12 -Compress
+    if ($activityInputKey -cne $script:activityInputKey -or -not $script:cachedActivityView) {
+        $script:cachedActivityView=Get-WidgetResetActivityView $script:data $script:externalData $script:language $now
+        $script:activityInputKey=$activityInputKey
+    }
+    $view=$script:cachedActivityView
+    $notice=Get-WidgetPublicNoticeView $script:externalData $script:language $now
+    $renderKey=@{language=$script:language;view=$view;notice=$notice;earlier=$script:earlierExpanded;history=$script:historyExpanded;
+        recoveryStatus=$script:data.recoveryHistory.status;pending=[bool]$script:externalTask;retrying=[bool]($script:externalTask -and -not $script:externalTask.IsCompleted)} | ConvertTo-Json -Depth 12 -Compress
+    if ($script:announcementRenderKey -ne '' -and $renderKey -ceq $script:externalRenderKey) {Update-AnnouncementIndicator;Start-AnnouncementRead;return}
     $paintBatch=[WidgetRenderBatch]::Pause($form)
     try {
-    $view=Get-WidgetResetActivityView $script:data $script:externalData $script:language ([DateTimeOffset]::UtcNow)
     $partition=Get-WidgetActivityPartition $view.active
     $script:activityView=[pscustomobject]@{featured=$partition.featured;earlier=$partition.earlier;history=$view.history}
     $script:visibleActivityView=Get-WidgetVisibleActivityView $script:activityView $script:earlierExpanded $script:historyExpanded
@@ -891,10 +942,16 @@ function Show-External {
         if (-not $group.enabled) {continue}
         $rowKey=@{language=$script:language;rows=@($group.records)} | ConvertTo-Json -Depth 8 -Compress
         if ($rowKey -ceq $script:activityRenderKeys[$group.slot]) {continue}
-        Clear-PanelControls $group.panel;$rows=@()
-        foreach ($row in $group.records) {
-            $panel=New-AnnouncementControl $row;[void]$group.panel.Controls.Add($panel);$rows+=,$panel
-        }
+        $group.panel.SuspendLayout()
+        try {
+            Clear-PanelControls $group.panel;$rows=@()
+            foreach ($row in $group.records) {
+                $panel=New-AnnouncementControl $row
+                if ($group.slot -ne 'announcementRows') {$panel.Visible=$false}
+                $rows+=,$panel
+            }
+            $group.panel.Controls.AddRange([Windows.Forms.Control[]]$rows)
+        } finally {$group.panel.ResumeLayout($false)}
         Set-Variable -Scope Script -Name $group.slot -Value $rows
         if ($group.slot -eq 'historyRows') {
             $script:historyEmpty=$null
@@ -906,7 +963,6 @@ function Show-External {
     $script:activityIsEmpty=$view.active.Count -eq 0
     $activityHeading.Text=T 'activityHeading';$localTimeNote.Text=Get-WidgetLocalTimeNote $script:language
     $activityEmpty.Text=T 'activityEmpty';$activityEmptyHelp.Text=T 'activityEmptyHelp'
-    $notice=Get-WidgetPublicNoticeView $script:externalData $script:language
     $publicStatusPanel.Visible=$notice.visible;$publicStatusTitle.Text=$notice.title
     $publicStatusText.Text=(@($notice.help,(T $(if ($notice.hasCache){'publicCache'}else{'publicNoCache'}))) | Where-Object {$_}) -join ' · '
     $publicStatusFetched.Text=(@($notice.sourceUpdatedText,$notice.lastFetchedText) | Where-Object {$_}) -join ' · ';$publicStatusFetched.Visible=[bool]$publicStatusFetched.Text;$sourceChecked.Text=$notice.lastFetchedText
@@ -916,6 +972,8 @@ function Show-External {
     $historyButton.Text=T 'announcementHistory';$historyButton.AccessibleName=T $(if ($script:historyExpanded){'collapseHistory'}else{'expandHistory'});$historyLabel.Text=T 'historyAttribution'
     $sourcesButton.Text=T 'dataSources';$sourcesButton.AccessibleName=$sourcesButton.Text;Set-AttributionLinks (T 'sourceLinks');$cadence.Text=T 'refreshCadence'
     Update-ResponsiveLayout;Update-AnnouncementIndicator;Start-AnnouncementRead
+    $script:externalLayoutChanged=$true
+    $script:externalRenderKey=$renderKey
 
     } finally {$paintBatch.Dispose()}
 }
@@ -925,6 +983,7 @@ function Toggle-ResetDetails {$script:creditsExpanded=-not $script:creditsExpand
 function Toggle-DataSources {$script:sourcesExpanded=-not $script:sourcesExpanded;Update-ResponsiveLayout}
 function Start-PublicRetry {
     if ($script:externalTask){return}
+    $script:externalRenderKey=''
     try {$script:externalRequestContent=[Net.Http.StringContent]::new('');$script:externalTask=$script:client.PostAsync(($script:baseUrl+'/api/external/refresh'),$script:externalRequestContent);$script:nextExternalPoll=[DateTime]::UtcNow.AddSeconds(60);$publicRetry.Enabled=$false;$publicRetry.Text=T 'publicRetrying'}catch{if($script:externalRequestContent){$script:externalRequestContent.Dispose();$script:externalRequestContent=$null};$script:externalTask=$null;Show-External}
 }
 
@@ -979,8 +1038,8 @@ function Update-AnnouncementIndicator {
     $ring.Invalidate()
 }
 function Start-AnnouncementRead {
-    if ($script:announcementReadTask -or $script:animating -or $script:mode -ne 'Detail' -or -not $form.Visible) {return}
-    $ids=Get-WidgetAnnouncementReadIds $script:noticeView $script:visibleActivityView $true
+    if ($script:announcementReadTask -or $script:animating -or $script:layoutBusy -or $script:mode -ne 'Detail' -or -not $form.Visible) {return}
+    $ids=Get-WidgetAnnouncementReadIds $script:noticeView (Get-ActivityReadView) $true
     if (-not $ids.Count) {return}
     try {
         $json=@{ids=@($ids)} | ConvertTo-Json -Compress
@@ -1017,7 +1076,7 @@ function Start-Request([bool]$manual) {
         }
         $script:nextPoll = [DateTime]::UtcNow.AddSeconds(60)
         Start-SettingsRequest
-        $status.Text = if ($script:data -and $null -ne $script:data.updatedAt) { Format-WidgetRelativeUpdate $script:data.updatedAt $script:language } else { T 'refreshing' }
+        $status.Text = if ($script:data -and $null -ne $script:data.updatedAt) { Format-WidgetRelativeUpdate $script:data.updatedAt $script:language } else { $script:quotaRenderKey='';T 'refreshing' }
     } catch {
         $script:requestTask = $null
         $script:data = $null
@@ -1100,57 +1159,21 @@ function Start-ModeTransition([string]$nextMode) {
         }
     }
     $placement = Get-WidgetTransitionPosition $form $remembered $size $screen
-    $script:animationFrom = $form.Bounds
-    $script:animationTo = [System.Drawing.Rectangle]::new($placement.x, $placement.y, $size.Width, $size.Height)
-    $ringOrigin=$form.PointToClient($ring.Parent.PointToScreen($ring.Location))
-    $ring.Parent=$form; $ring.Location=$ringOrigin; $ring.BringToFront()
-    $script:ringFrom = $ring.Bounds
-    if ($compact) {
-        $targetRingSize = [Math]::Max(38, [Math]::Min($size.Width - 10, $size.Height - 20))
-        $script:ringTo = [System.Drawing.Rectangle]::new([int](($size.Width - $targetRingSize) / 2), [int](($size.Height - $targetRingSize) / 2), [int]$targetRingSize, [int]$targetRingSize)
-    } else {
-        $targetHeader=Get-WidgetHeaderLayout $size.Width ([Windows.Forms.TextRenderer]::MeasureText($title.Text,$title.Font).Width+6) ([Windows.Forms.TextRenderer]::MeasureText($status.Text,$status.Font).Width+6)
-        $targetMetrics=Get-WidgetDetailMetrics $size.Width
-        $script:ringTo=[Drawing.Rectangle]::new($targetMetrics.inset,$targetHeader.height+10,$targetMetrics.ring,$targetMetrics.ring)
-    }
-    if (-not $compact) { $body.AutoScrollPosition=[Drawing.Point]::Empty }
-    $script:targetMode = $nextMode
-    $script:animationStart = [DateTime]::UtcNow
-    $script:animating = $true
-    foreach ($control in $script:detailControls) { $control.Visible = $false }
-    foreach ($zone in $script:resizeEdges.Values) { $zone.Visible = $false }
-    $script:animationTimer.Start()
+    # Native child windows repaint sequentially during a size/opacity tween.
+    # Apply the final geometry and content in one batch instead.
+    $paintBatch=[WidgetRenderBatch]::Pause($form)
+    try {
+        $script:animating=$true
+        if (-not $compact) {$body.AutoScrollPosition=[Drawing.Point]::Empty}
+        foreach ($control in $script:detailControls) {$control.Visible=$false}
+        $script:mode=$nextMode
+        $form.Bounds=[Drawing.Rectangle]::new($placement.x,$placement.y,$size.Width,$size.Height)
+        $form.Opacity=1
+        $script:animating=$false
+        Set-ModeVisual $compact
+        $script:positionDirty=$true
+    } finally {$script:animating=$false;$paintBatch.Dispose()}
 }
-
-$script:animationTimer = New-Object System.Windows.Forms.Timer
-$script:animationTimer.Interval = 16
-$script:animationTimer.Add_Tick({
-    $t = [Math]::Min(1, ([DateTime]::UtcNow - $script:animationStart).TotalMilliseconds / 260)
-    $ease = 1 - [Math]::Pow((1 - $t), 3)
-    $from = $script:animationFrom; $to = $script:animationTo
-    $form.Bounds = [System.Drawing.Rectangle]::new(
-        [int][Math]::Round($from.X + ($to.X - $from.X) * $ease),
-        [int][Math]::Round($from.Y + ($to.Y - $from.Y) * $ease),
-        [int][Math]::Round($from.Width + ($to.Width - $from.Width) * $ease),
-        [int][Math]::Round($from.Height + ($to.Height - $from.Height) * $ease))
-    $ringFrom = $script:ringFrom; $ringTo = $script:ringTo
-    $ring.Bounds = [System.Drawing.Rectangle]::new(
-        [int][Math]::Round($ringFrom.X + ($ringTo.X - $ringFrom.X) * $ease),
-        [int][Math]::Round($ringFrom.Y + ($ringTo.Y - $ringFrom.Y) * $ease),
-        [int][Math]::Round($ringFrom.Width + ($ringTo.Width - $ringFrom.Width) * $ease),
-        [int][Math]::Round($ringFrom.Height + ($ringTo.Height - $ringFrom.Height) * $ease))
-    $form.Opacity = 0.92 + 0.08 * $ease
-    Set-RoundedRegion
-    $ring.Invalidate()
-    if ($t -ge 1) {
-        $script:animationTimer.Stop()
-        $script:mode = $script:targetMode
-        $script:animating = $false
-        $form.Opacity = 1
-        Set-ModeVisual ($script:mode -eq 'Compact')
-        $script:positionDirty = $true
-    }
-})
 
 $refresh.Add_Click({ Start-Request $true })
 $compactButton.Add_Click({ Start-ModeTransition 'Compact' })
@@ -1288,6 +1311,9 @@ foreach ($zone in $script:resizeEdges.Values) {
     $zone.Add_MouseCaptureChanged($resizeCaptureChanged)
 }
 $form.Add_SizeChanged({ Update-ResponsiveLayout })
+$body.Add_Scroll({Update-ActivityViewport;Start-AnnouncementRead})
+$body.Add_MouseWheel({Update-ActivityViewport;Start-AnnouncementRead})
+$content.Add_LocationChanged({if(-not $script:layoutBusy){Update-ActivityViewport;Start-AnnouncementRead}})
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
 $showItem = $menu.Items.Add((T 'show'))
@@ -1469,7 +1495,6 @@ $form.Add_Shown({
 $form.Add_FormClosed({
     [WidgetOutsideClick]::Disable()
     $timer.Stop()
-    $script:animationTimer.Stop()
     $script:tray.Visible = $false
     $script:tray.Dispose()
     if ($script:ownedTrayIcon) { $script:ownedTrayIcon.Dispose() }
