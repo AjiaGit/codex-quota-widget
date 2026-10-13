@@ -20,4 +20,4 @@
 
 ## Development and privacy
 
-Follow [CONTRIBUTING.md](CONTRIBUTING.md) for checks, builds, script encoding, and reports. Keep the repository private and do not publish GitHub Releases. Store screenshots, logs, generated packages, and development checklists outside the repository; do not commit real account information. Use the project stop scripts and isolated installer tests, and preserve user preferences.
+Follow [CONTRIBUTING.md](CONTRIBUTING.md) for checks, builds, script encoding, and reports. The repository is public. Publish GitHub Releases only when the user explicitly requests it. Keep credentials, real account information, personal screenshots, local logs, and private acceptance evidence outside the repository. CI logs and artifacts are publicly accessible; use only fabricated data for test previews and traces. Store local generated packages and development checklists outside the repository. Use the project stop scripts and isolated installer tests, and preserve user preferences.

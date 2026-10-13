@@ -16,7 +16,7 @@ Version **0.1.0** packages include Node.js **24.19.0** and its license. You do n
 | macOS 13.5+, Intel | `CodexQuotaWidget-0.1.0-macos-x64.zip` | [macOS](macos/README.md) |
 | Windows x64 | `CodexQuotaWidget-0.1.0-windows-x64.exe` | [Windows](windows/README.md) |
 
-Use the package and `SHA256SUMS` supplied for the same build. Private build artifacts are available to repository collaborators under **Actions → Build packages → a successful run → Artifacts**. The workflow does not publish a GitHub release.
+Use the package and `SHA256SUMS` supplied for the same build. Build artifacts are available under **Actions → Build packages → a successful run → Artifacts**; sign in to GitHub to download them. The repository is public. The workflow does not publish a GitHub release.
 
 Install the official [Codex desktop app](https://learn.chatgpt.com/docs/app) or [Codex CLI](https://learn.chatgpt.com/docs/codex/cli), then sign in with the ChatGPT account to monitor. The widget needs a discoverable Codex CLI/App Server. If your desktop installation is not detected, install the official CLI and run `codex login`. No Codex executable or login credentials are redistributed.
 

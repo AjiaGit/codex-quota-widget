@@ -16,7 +16,7 @@
 | macOS 13.5+，Intel | `CodexQuotaWidget-0.1.0-macos-x64.zip` | [macOS](macos/README.zh-CN.md) |
 | Windows x64 | `CodexQuotaWidget-0.1.0-windows-x64.exe` | [Windows](windows/README.zh-CN.md) |
 
-请使用同一次构建提供的安装包与 `SHA256SUMS`。仓库协作者可在 **Actions → Build packages → 成功的运行 → Artifacts** 下载私有构建产物；工作流不会发布 GitHub Release。
+请使用同一次构建提供的安装包与 `SHA256SUMS`。构建产物位于 **Actions → Build packages → 成功的运行 → Artifacts**，下载时需要登录 GitHub。仓库已公开；工作流不会发布 GitHub Release。
 
 先安装官方 [Codex 桌面应用](https://learn.chatgpt.com/docs/app)或 [Codex CLI](https://learn.chatgpt.com/docs/codex/cli)，并用要监控的 ChatGPT 账号登录。工具需要找到 Codex CLI／App Server；若未识别桌面安装，请按官方说明安装 CLI 后运行 `codex login`。安装包不包含 Codex 程序或任何登录凭据。
 
