@@ -66,6 +66,64 @@ test('combines the preannouncement and completion statement once across mirrored
   assert.equal(result.lastGlobal.sourceUrl, preUrl);
 });
 
+const resetQuestion = 'What would you like with your side of reset?';
+test('adjacent affirmative completion resolves the reset named in a rhetorical question', async () => {
+  // FABRICATED times/URLs and archive; the wording reproduces the missed public statement.
+  for (const ending of ["It's done.", 'It’s done.', 'It is complete.']) {
+    const completion = { ...done, text: `${resetQuestion} ${ending}`, kind: 'candidate', explicit_reset_claim: false };
+    const result = await query(feed([completion, pre]), history([record({ evidence_text: resetQuestion })]));
+    assert.equal(result.announcements.items.length, 1);
+    const item = result.announcements.items[0];
+    assert.equal(item.sourceUrl, preUrl);
+    assert.equal(item.deliverySourceUrl, doneUrl);
+    assert.equal(item.deliveredAt, '2026-10-11T04:01:09.000Z');
+    assert.equal(item.completionTimeBasis, 'announcement');
+    assert.equal(item.scheduledAt, null, 'The statement is not an exact scheduled or account delivery time');
+  }
+});
+
+test('pronoun completion cannot borrow uncertain or unrelated reset context', async () => {
+  const phrases = [
+    "It's done.",
+    `${resetQuestion} It's done?`,
+    `${resetQuestion} It is not done.`,
+    `${resetQuestion} It's done tomorrow.`,
+    `${resetQuestion} When it's done, we will announce it.`,
+    `${resetQuestion} The code review is ready. It's done.`,
+    "If we issue a global reset, everyone benefits. It's done.",
+    "We will issue a global reset. It's done.",
+    "Would you like us to issue a reset? It's done.",
+    "The reset UI patch is ready. It's done.",
+  ];
+  for (const phrase of phrases) {
+    const result = await query(feed([{ ...done, text: phrase, kind: 'reset', explicit_reset_claim: true }]));
+    assert.equal(result.announcements.history.some(item => item.deliveredAt), false, phrase);
+  }
+});
+
+test('full completion repairs a cached cropped archive without duplicate or retroactive notice', async () => {
+  let clock = now;
+  const store = await createAnnouncementStore({ now: () => clock });
+  const cropped = history([record({ evidence_text: resetQuestion })]);
+  await store.update((await query(feed([pre]), cropped)).announcements);
+  assert.equal(store.state.items[0].deliveredAt, null);
+  const completion = { ...done, text: `${resetQuestion} It's done.`, kind: 'candidate' };
+  await store.update((await query(feed([pre, completion]), cropped)).announcements);
+  assert.equal(store.state.items.length, 1);
+  assert.equal(store.state.items[0].sourceUrl, preUrl);
+  assert.equal(store.state.items[0].deliverySourceUrl, doneUrl);
+  assert.equal(store.state.items[0].deliveredAt, '2026-10-11T04:01:09.000Z');
+  assert.deepEqual(store.alerts.unread, [], 'Repairing an old completion does not create a new notice');
+  clock = Date.parse('2026-10-12T12:00:00Z');
+  assert.deepEqual(store.state.items, []);
+  assert.equal(store.state.history.length, 1);
+  const view = deriveAnnouncementsView(store.state, clock, 'Asia/Shanghai', 'zh-CN');
+  assert.equal(view.rows.length, 0);
+  assert.equal(view.history.length, 1);
+  assert.match(view.history[0].completedText, /完成声明发布.*10\/11.*12:01/);
+  assert.deepEqual(store.alerts.unread, []);
+});
+
 test('a reset category or conditional wording cannot create a confirmed alert', async () => {
   const store = await createAnnouncementStore({ now: () => now });
   await store.update((await query(feed())).announcements);

@@ -127,8 +127,13 @@ function postClaim(value) {
   const sentences = ((text(value) || '').match(/[^.!?\n]+[.!?]?/g) || []).map(sentence => sentence.trim().toLowerCase());
   const usable = sentences.filter(sentence => !/\?\s*$/.test(sentence) &&
     !/\b(if|would|could|might|maybe|when|once|unless|until|assuming|provided|whether|not|never|no)\b|as long as|n't\b/.test(sentence));
+  // A short affirmative follow-up can resolve this reset-specific rhetorical
+  // question. Require adjacent clauses; an unrelated or hypothetical "it" is not evidence.
+  const contextualComplete = sentences.some((sentence, i) => i > 0 &&
+    /^it(?:['’]s| is) (?:done|complete|completed)[.!]?$/.test(sentence) &&
+    /^what would you like with your side of (?:a |the )?(?:(?:global|banked) )?reset\?$/.test(sentences[i - 1]));
   // Match affirmative completion clauses, not mentions inside questions or hypotheticals.
-  const complete = usable.some(sentence => !/\b(will|going to|should|plan|planning|expect|tomorrow|tonight|soon|later|by)\b/.test(sentence) &&
+  const complete = contextualComplete || usable.some(sentence => !/\b(will|going to|should|plan|planning|expect|tomorrow|tonight|soon|later|by)\b/.test(sentence) &&
     /^(?:all propagated|confirmed (?:landed|delivered)|all reset for everyone|(?:(?:the|this) )?(?:global |codex |quota )?resets? (?:(?:has|have) been processed|(?:is|are) (?:complete|done|live)|(?:all )?propagated))\b/.test(sentence));
   // Require an actual action or an explicit promise, rather than a modal suggestion or request.
   const announced = usable.some(sentence => /^global reset (?:by|at|today|tomorrow|tonight|landing)\b|^global reset will (?:happen|occur|take place|be (?:issued|applied|performed|rolled out))\b/.test(sentence) ||
