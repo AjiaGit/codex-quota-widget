@@ -54,3 +54,42 @@ test('Windows rejects desktop GUI hosts on PATH and explicit overrides',async()=
     }
   }finally{await rm(directory,{recursive:true,force:true});}
 });
+
+test('a running Windows service rediscovers Codex after both inherited CLI paths vanish',async()=>{
+  // FABRICATED PE DATA: the native discovery boundary is substituted; nothing runs.
+  const directory=await mkdtemp(join(tmpdir(),'quota-cli-update-'));
+  try{
+    const stale=join(directory,'removed-version','codex.exe');
+    const current=join(directory,'current-version','codex.exe');
+    await mkdir(join(current,'..'),{recursive:true});await writeFile(current,consolePE());
+    const result=resolveCodex({platform:'win32',arch:'x64',home:directory,
+      env:{CODEX_CLI_PATH:stale,PATH:join(directory,'removed-version'),LOCALAPPDATA:directory},
+      discoverWindows:()=>current});
+    assert.deepEqual(result,{command:current,args:['app-server']});
+  }finally{await rm(directory,{recursive:true,force:true});}
+});
+
+test('rediscovery cannot launch a GUI executable or arbitrary script as Codex',async()=>{
+  const directory=await mkdtemp(join(tmpdir(),'quota-cli-update-invalid-'));
+  try{
+    const gui=join(directory,'Codex.exe'),script=join(directory,'codex.ps1');
+    const bytes=consolePE();bytes.writeUInt16LE(2,156);
+    await writeFile(gui,bytes);await writeFile(script,'FABRICATED TEST DATA - never executed');
+    for(const discovered of [gui,script,join(directory,'missing.exe'),null]){
+      assert.throws(()=>resolveCodex({platform:'win32',arch:'x64',env:{PATH:''},home:directory,
+        discoverWindows:()=>discovered}),{code:'cli_missing'});
+    }
+  }finally{await rm(directory,{recursive:true,force:true});}
+});
+
+test('a valid Windows override avoids native rediscovery and failed discovery remains unavailable',async()=>{
+  const directory=await mkdtemp(join(tmpdir(),'quota-cli-update-existing-'));
+  try{
+    const binary=join(directory,'codex.exe');await writeFile(binary,consolePE());let lookups=0;
+    const result=resolveCodex({platform:'win32',arch:'x64',env:{CODEX_CLI_PATH:binary,PATH:''},home:directory,
+      discoverWindows:()=>{lookups++;return null;}});
+    assert.equal(result.command,binary);assert.equal(lookups,0);
+    assert.throws(()=>resolveCodex({platform:'win32',arch:'x64',env:{PATH:''},home:directory,
+      discoverWindows:()=>{throw new Error('FABRICATED discovery failure');}}),{code:'cli_missing'});
+  }finally{await rm(directory,{recursive:true,force:true});}
+});
