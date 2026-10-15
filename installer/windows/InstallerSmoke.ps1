@@ -282,6 +282,19 @@ function Invoke-UiButton([IntPtr]$window, [IntPtr]$parent, [int]$processId, [str
     $button=Find-ScrolledControl $window $parent $processId $caption
     [QuotaSmokeWindows]::ClickOwnedButton($parent,$button.Handle,$processId)
 }
+# Async source refreshes may rebuild record HWNDs while retaining the same record.
+# Resolve by its unique fact before each action; never treat a destroyed row as
+# proof that its details collapsed. Native ownership/visibility guards still apply.
+function Get-ActivityRecordText([IntPtr]$window, [int]$processId, [string]$fact) {
+    $panel=(Find-ScrolledControl $window $window $processId $fact).ParentHandle
+    $text=Get-VisibleText $panel $processId
+    Assert-True ($text.Contains($fact)) 'Activity record changed while reading its current owned subtree.'
+    return $text
+}
+function Invoke-ActivityRecordButton([IntPtr]$window, [int]$processId, [string]$fact, [string]$caption) {
+    $panel=(Find-ScrolledControl $window $window $processId $fact).ParentHandle
+    Invoke-UiButton $window $panel $processId $caption
+}
 function Assert-ActivityPage([IntPtr]$window, [int]$processId, $allRecords, $expectedRecords, [string]$language, [string]$phase) {
     $scroll=[QuotaSmokeWindows]::ScrollBody($window,$processId)
     [void][QuotaSmokeWindows]::ScrollOwnedBody($window,$scroll,$processId,6)
@@ -613,18 +626,17 @@ http.createServer(async(req,res)=>{
         [void](Find-VisibleControl $handle $ui.Id $creditText)
 
         # The recent record exposes its original plan and delivery link on demand.
-        $recentPanel=(Find-ScrolledControl $handle $handle $ui.Id $completedFact).ParentHandle
-        Assert-True (-not (Get-VisibleText $recentPanel $ui.Id).Contains((Get-WidgetText 'deliverySource' $language))) 'Delivery link was expanded by default.'
-        Invoke-UiButton $handle $recentPanel $ui.Id $moreText
+        Assert-True (-not (Get-ActivityRecordText $handle $ui.Id $completedFact).Contains((Get-WidgetText 'deliverySource' $language))) 'Delivery link was expanded by default.'
+        Invoke-ActivityRecordButton $handle $ui.Id $completedFact $moreText
         $summary=if ($language -eq 'en') {'Confirmed public reset delivery record'} else {'已确认全局额度重置送达记录'}
-        Wait-Until {(Get-VisibleText $recentPanel $ui.Id).Contains($summary)} 'Message details did not expand in their record.'
+        Wait-Until {(Get-ActivityRecordText $handle $ui.Id $completedFact).Contains($summary)} 'Message details did not expand in their record.'
         $plannedText=Get-WidgetText 'originalReset' $language @((Format-WidgetCompactDate ([DateTimeOffset]$completedExpected.scheduledAt) $language))
-        $recentText=Get-VisibleText $recentPanel $ui.Id
+        $recentText=Get-ActivityRecordText $handle $ui.Id $completedFact
         Assert-True ($recentText.Contains($plannedText) -and $recentText.Contains($completedFact) -and $recentText.Contains((Get-WidgetText 'announcementSource' $language)) -and $recentText.Contains((Get-WidgetText 'deliverySource' $language))) 'Expanded message omitted original plan, completion, scope or source links.'
         Assert-InlineWindow $handle $ui.Id $language
         Save-UiEvidence $element $language 'message-details-inline'
-        Invoke-UiButton $handle $recentPanel $ui.Id $moreText
-        Wait-Until {-not (Get-VisibleText $recentPanel $ui.Id).Contains($summary)} 'Message details did not collapse.'
+        Invoke-ActivityRecordButton $handle $ui.Id $completedFact $moreText
+        Wait-Until {-not (Get-ActivityRecordText $handle $ui.Id $completedFact).Contains($summary)} 'Message details did not collapse.'
 
         # Current and historical rows form one chronological list. Each scan
         # walks the actual viewport so offscreen virtualization cannot hide a
