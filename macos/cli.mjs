@@ -2,6 +2,8 @@ import { existsSync, accessSync, constants, openSync, closeSync, readSync, fstat
 import { dirname, join, delimiter } from 'node:path';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 // Windows desktop GUI hosts also use Codex.exe; only console PE files can run app-server.
 function windowsConsoleBinary(path) {
@@ -29,7 +31,26 @@ function npmBinary(shim,arch) {
   }
   return null;
 }
-export function resolveCodex({ platform=process.platform, arch=process.arch, env=process.env, home=homedir() }={}) {
+// A running service keeps its old environment when the desktop app updates.
+// Reuse native Store discovery only after those inherited paths stop working.
+function discoverWindowsCodex() {
+  if(process.platform!=='win32')return null;
+  const native=join(dirname(fileURLToPath(import.meta.url)),'Native.ps1');
+  if(!existsSync(native))return null;
+  const powershell=join(process.env.SystemRoot||'C:\\Windows','System32','WindowsPowerShell','v1.0','powershell.exe');
+  // The service may inherit PowerShell 7's module path. Use WinPS's own modules
+  // so Get-FileHash can validate the extracted Store copy. Pass the script path
+  // as data: PowerShell treats smart quotes in interpolated paths as syntax.
+  const env=Object.fromEntries(Object.entries(process.env).filter(([key])=>!['PSMODULEPATH','CODEX_WIDGET_NATIVE_HELPER_PATH'].includes(key.toUpperCase())));
+  env.PSModulePath=join(dirname(powershell),'Modules');env.CODEX_WIDGET_NATIVE_HELPER_PATH=native;
+  const command='[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); . $env:CODEX_WIDGET_NATIVE_HELPER_PATH; $env:CODEX_CLI_PATH=$null; Find-WidgetCodex -ConsoleOnly';
+  try {
+    return execFileSync(powershell,['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command',command],
+      {env,encoding:'utf8',windowsHide:true,timeout:5000,maxBuffer:8192,stdio:['ignore','pipe','ignore']}).trim();
+  }catch{return null;}
+}
+export function resolveCodex({ platform=process.platform, arch=process.arch, env=process.env, home=homedir(),
+  discoverWindows=env===process.env?discoverWindowsCodex:null }={}) {
   const explicit=env.CODEX_CLI_PATH;
   const pathEntries=(env.PATH||'').split(delimiter).filter(Boolean);
   const defaults=platform==='darwin'?[
@@ -54,6 +75,15 @@ export function resolveCodex({ platform=process.platform, arch=process.arch, env
     }
     if(platform==='win32'&&!windowsConsoleBinary(path))continue;
     try{accessSync(path,platform==='win32'?constants.F_OK:constants.X_OK);return {command:path,args:['app-server']};}catch{}
+  }
+  if(platform==='win32'&&discoverWindows){
+    let discovered;try{discovered=discoverWindows();}catch{}
+    if(typeof discovered==='string'&&discovered.trim()){
+      // Apply the same console-PE/npm validation; never execute a GUI or shim.
+      const invocation=resolveCodex({platform,arch,home,env:{...env,CODEX_CLI_PATH:discovered.trim()},discoverWindows:null});
+      if(env===process.env)env.CODEX_CLI_PATH=invocation.command;
+      return invocation;
+    }
   }
   throw Object.assign(new Error('Codex CLI is not installed'),{code:'cli_missing'});
 }

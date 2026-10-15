@@ -45,6 +45,13 @@ try {
  $env:CODEX_CLI_PATH=$shim
  if((Find-WidgetCodex) -ne $shim){throw 'npm shim override not preserved'}
  Write-Output 'PASS npm shim override remains discoverable'
+ $brokenShim=Join-Path $env:APPDATA 'npm/codex.cmd'
+ [void][IO.Directory]::CreateDirectory((Split-Path $brokenShim -Parent))
+ [IO.File]::WriteAllText($brokenShim,'FABRICATED incomplete npm install - never executed')
+ $env:CODEX_CLI_PATH=$null
+ if((Find-WidgetCodex -ConsoleOnly) -ne $cli){throw 'An already rejected npm shim blocked native Store rediscovery'}
+ Write-Output 'PASS native rediscovery skips incomplete npm shims already rejected by Node'
+ Remove-Item -LiteralPath $brokenShim -Force
  $invalid=Join-Path $root 'invalid.exe'; [IO.File]::WriteAllBytes($invalid,(New-Object byte[] 3))
  $env:CODEX_CLI_PATH=$invalid
  if((Find-WidgetCodex) -ne $cli -or (Test-WidgetCodexCandidate $invalid)){throw 'Malformed PE was accepted'}

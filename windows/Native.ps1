@@ -824,14 +824,15 @@ function Find-WidgetExtractedCodex([string]$packageBinary) {
     } catch { }
     return $null
 }
-function Find-WidgetCodex {
-    if (Test-WidgetCodexCandidate $env:CODEX_CLI_PATH) { return $env:CODEX_CLI_PATH }
+function Find-WidgetCodex([switch]$ConsoleOnly) {
+    if ((-not $ConsoleOnly -or [IO.Path]::GetExtension($env:CODEX_CLI_PATH) -ne '.cmd') -and (Test-WidgetCodexCandidate $env:CODEX_CLI_PATH)) { return $env:CODEX_CLI_PATH }
     foreach ($name in @('codex.exe','codex.cmd')) {
+        if ($ConsoleOnly -and $name -eq 'codex.cmd') { continue }
         $command = Get-Command $name -ErrorAction SilentlyContinue
         if ($command -and (Test-WidgetCodexCandidate $command.Source)) { return $command.Source }
     }
     $candidates = @()
-    if ($env:APPDATA) { $candidates += Join-Path $env:APPDATA 'npm/codex.cmd' }
+    if ($env:APPDATA -and -not $ConsoleOnly) { $candidates += Join-Path $env:APPDATA 'npm/codex.cmd' }
     if ($env:LOCALAPPDATA) {
         $candidates += Join-Path $env:LOCALAPPDATA 'Programs/Codex/resources/codex.exe'
         $candidates += Join-Path $env:LOCALAPPDATA 'Programs/Codex/resources/app.asar.unpacked/node_modules/@openai/codex/vendor/x86_64-pc-windows-msvc/codex/codex.exe'
