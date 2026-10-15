@@ -295,26 +295,37 @@ function Invoke-ActivityRecordButton([IntPtr]$window, [int]$processId, [string]$
     $panel=(Find-ScrolledControl $window $window $processId $fact).ParentHandle
     Invoke-UiButton $window $panel $processId $caption
 }
+# A viewport walk realizes lazy native controls. Count the final current tree,
+# never HWND identities accumulated across refreshes. Accept only a stable tree;
+# count/order failures are asserted afterwards, not retried until they pass.
+function Get-ActivityTreeSnapshot([IntPtr]$window, [IntPtr]$scroll, [int]$processId, $allRecords) {
+    $deadline=[DateTime]::UtcNow.AddSeconds(5);$previous=$null
+    do {
+        $position=[QuotaSmokeWindows]::OwnedScrollPosition($window,$scroll,$processId)
+        $viewport=[QuotaSmokeWindows]::OwnedBounds($scroll,$processId)
+        $controls=@([QuotaSmokeWindows]::ReadOwnedControls($window,$processId))
+        $facts=@($controls | Where-Object {$_.Text -cin $allRecords.fact} | Sort-Object {$_.Bounds.Top})
+        $signature=@{position=$position;viewport=$viewport;facts=@($facts | ForEach-Object {
+            @{text=$_.Text;handle=$_.Handle.ToInt64();parent=$_.ParentHandle.ToInt64();bounds=$_.Bounds}
+        })} | ConvertTo-Json -Depth 8 -Compress
+        if ([QuotaSmokeWindows]::OwnedScrollPosition($window,$scroll,$processId) -eq $position) {
+            if ($null -ne $previous -and $signature -ceq $previous) {
+                return [pscustomobject]@{position=$position;viewport=$viewport;controls=$controls;facts=$facts}
+            }
+            $previous=$signature
+        } else {$previous=$null}
+        Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw 'Fixture activity tree did not stabilize within five seconds.'
+}
 function Assert-ActivityPage([IntPtr]$window, [int]$processId, $allRecords, $expectedRecords, [string]$language, [string]$phase) {
     $scroll=[QuotaSmokeWindows]::ScrollBody($window,$processId)
     [void][QuotaSmokeWindows]::ScrollOwnedBody($window,$scroll,$processId,6)
-    $seen=@{};$records=New-Object 'System.Collections.Generic.List[object]';$atBottom=$false
+    $atBottom=$false
     for ($page=0; $page -lt 40; $page++) {
         Start-Sleep -Milliseconds 60
         $position=[QuotaSmokeWindows]::OwnedScrollPosition($window,$scroll,$processId)
-        $viewport=[QuotaSmokeWindows]::OwnedBounds($scroll,$processId)
-        $controls=@(Get-VisibleControls $window $processId)
-        foreach ($control in @($controls | Where-Object {$_.Text -cin $allRecords.fact -and $_.Bounds.Bottom -gt $viewport.Top -and $_.Bounds.Top -lt $viewport.Bottom} | Sort-Object {$_.Bounds.Top})) {
-            $key=[string]$control.ParentHandle.ToInt64()
-            if ($seen.ContainsKey($key)) {continue}
-            $seen[$key]=$true
-            $expected=@($allRecords | Where-Object {$_.fact -ceq $control.Text})
-            Assert-True ($expected.Count -eq 1) 'Fixture record facts were not unique.'
-            $rowText=Get-VisibleText $control.ParentHandle $processId
-            Assert-True ($rowText.Contains($expected[0].title) -and $rowText.Contains($expected[0].label) -and $rowText.Contains((Get-WidgetText 'announcementSource' $language))) 'Activity record lost its localized title, attribution or announcement source.'
-            $records.Add([pscustomobject]@{fact=$control.Text;parentHandle=$key;documentTop=$control.Bounds.Top-$viewport.Top+$position})
-        }
-        foreach ($control in $controls) {
+        foreach ($control in @(Get-VisibleControls $window $processId)) {
             Assert-True ($control.Text -notmatch 'fixture-(?:id|announcement|earlier|history)') 'Native UI leaked a fixture ID.'
         }
         Save-UiEvidence ([Windows.Automation.AutomationElement]::FromHandle($window)) $language ($phase+'-viewport-'+$page.ToString('00'))
@@ -322,11 +333,34 @@ function Assert-ActivityPage([IntPtr]$window, [int]$processId, $allRecords, $exp
         if ($after -eq $position) {$atBottom=$true;break}
     }
     Assert-True $atBottom 'Fixture activity scan did not reach the bottom of the owned viewport.'
-    $ordered=@($records.ToArray() | Sort-Object documentTop)
-    Write-WidgetJson (Join-Path $OutputDir ("activity-page-$phase-$language.json")) @{phase=$phase;language=$language;records=$ordered}
+    $snapshot=Get-ActivityTreeSnapshot $window $scroll $processId $allRecords
+    $ordered=@($snapshot.facts | ForEach-Object {
+        [pscustomobject]@{fact=$_.Text;parentHandle=$_.ParentHandle.ToInt64();documentTop=$_.Bounds.Top-$snapshot.viewport.Top+$snapshot.position}
+    } | Sort-Object documentTop)
+    # Save exactly the snapshot consumed by the count assertions, including hidden
+    # controls realized during the walk. The existing artifact glob includes it.
+    Write-WidgetJson (Join-Path $OutputDir ("ui-trace-activity-page-$phase-$language.json")) @{
+        phase=$phase;language=$language;records=$ordered;position=$snapshot.position;viewport=$snapshot.viewport
+        nativeControls=@($snapshot.controls | ForEach-Object {
+            @{nativeHandle=$_.Handle.ToInt64();parentHandle=$_.ParentHandle.ToInt64();actualText=$_.Text;visible=$_.Visible;bounds=$_.Bounds}
+        })
+    }
     Assert-True ($ordered.Count -eq @($expectedRecords).Count) "Loaded activity record count changed ($phase / $language): expected $(@($expectedRecords).Count), found $($ordered.Count)"
+    $seen=@{}
     for ($index=0; $index -lt $ordered.Count; $index++) {
-        Assert-True ($ordered[$index].fact -ceq $expectedRecords[$index].fact) "Unified activity order or deduplication changed ($phase / $language), record $index"
+        $fact=$ordered[$index].fact
+        Assert-True (-not $seen.ContainsKey($fact)) 'Fixture activity tree contained duplicate records.'
+        $seen[$fact]=$true
+        Assert-True ($fact -ceq $expectedRecords[$index].fact) "Unified activity order or deduplication changed ($phase / $language), record $index"
+    }
+    # Hidden controls establish the loaded count only. Every expected record
+    # must still be scrolled fully into view and checked in its current row.
+    foreach ($record in $ordered) {
+        $fact=$record.fact
+        $expected=@($allRecords | Where-Object {$_.fact -ceq $fact})
+        Assert-True ($expected.Count -eq 1) 'Fixture record facts were not unique.'
+        $rowText=Get-ActivityRecordText $window $processId $fact
+        Assert-True ($rowText.Contains($expected[0].title) -and $rowText.Contains($expected[0].label) -and $rowText.Contains((Get-WidgetText 'announcementSource' $language))) 'Activity record lost its localized title, attribution or announcement source.'
     }
 }
 function Assert-InlineWindow([IntPtr]$window, [int]$processId, [string]$language) {
