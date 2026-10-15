@@ -55,14 +55,14 @@ import CoreGraphics
     print(String(data: try JSONSerialization.data(withJSONObject: result), encoding: .utf8)!)
   }
 }`);
-  assert.match(output.grant, /新的重置次数赠送公告/);
-  assert.match(output.reset, /global reset/);
-  assert.match(output.both, /banked reset grant.*global reset/);
+  assert.match(output.grant, /新的重置卡消息/);
+  assert.match(output.reset, /quota-reset/);
+  assert.match(output.both, /reset credit.*quota-reset/);
   assert.equal(output.invalid, false);
   assert.equal(output.hintUnread, true);
   assert.match(output.hint, /monitoring-site hint/i);
   assert.match(output.hintZh, /监控网站提示/);
-  assert.match(output.mixed, /public updates/i);
+  assert.match(output.mixed, /reset updates/i);
   for (const [side,x,y,width,height] of output.frames) {
     assert.ok(width >= 5 && width <= 8 && width === height);
     assert.ok(x >= 5 && y >= 5 && x + width <= side - 5 && y + height <= side - 5);

@@ -88,8 +88,8 @@ test('a source headline displays a subjectless reply without confirming a reset 
   assert.equal(item.scheduledAt, null);
   assert.equal(result.lastGlobal, null, 'A site hint is not the latest confirmed public reset');
   for (const [language, title, status] of [
-    ['zh-CN', '监控网站提示', '网站信号，尚未确认为重置预告'],
-    ['en', 'Monitoring-site hint', 'Site signal; not a confirmed reset announcement'],
+    ['zh-CN', 'codex-reset.com 出现重置相关提示', '尚不明确是赠送重置卡还是重置额度，也未确认进展。'],
+    ['en', 'codex-reset.com flagged a reset-related hint', 'It is unclear whether this concerns reset credits or a quota reset, or what stage it has reached.'],
   ]) {
     const row = deriveAnnouncementsView(result.announcements, now, 'Asia/Shanghai', language).rows[0];
     assert.equal(row.display.title, title);
@@ -157,7 +157,7 @@ test('new hints notify once, survive restart unread, and stay read after viewing
   const restored = await createAnnouncementStore({ file, now: () => clock });
   await restored.update(incoming);
   assert.equal(restored.state.items.length, 1);
-  assert.equal(deriveAnnouncementsView(restored.state, clock, 'UTC', 'en').rows[0].display.title, 'Monitoring-site hint');
+  assert.equal(deriveAnnouncementsView(restored.state, clock, 'UTC', 'en').rows[0].display.title, 'codex-reset.com flagged a reset-related hint');
   assert.deepEqual(restored.alerts.unread, expected);
   assert.equal(restored.state.items[0].certainty, 'unconfirmed');
   assert.equal(restored.state.items[0].deliveredAt, null);
@@ -292,7 +292,7 @@ test('failed refresh keeps a stale hint and its original expiry instead of withd
   assert.equal(store.state.items.length, 0);
   assert.equal(store.state.history.length, 1);
   const row = deriveAnnouncementsView(store.state, clock, 'UTC', 'en').history[0];
-  assert.equal(row.display.status, 'Site hint expired; no reset confirmation inferred');
+  assert.equal(row.display.status, 'This site hint expired; this does not establish whether the event completed.');
   assert.equal(row.completedText, '');
   assert.deepEqual(store.alerts.unread, []);
 });
@@ -336,5 +336,5 @@ test('the displayed cache expires hints even when a failed server refresh leaves
   const view = deriveAnnouncementsView({ ...result.announcements, stale: true }, now + 24 * hour, 'UTC', 'en');
   assert.equal(view.rows.length, 0);
   assert.equal(view.history.length, 1);
-  assert.equal(view.history[0].display.status, 'Site hint expired; no reset confirmation inferred');
+  assert.equal(view.history[0].display.status, 'This site hint expired; this does not establish whether the event completed.');
 });

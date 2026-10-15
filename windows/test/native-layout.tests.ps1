@@ -105,10 +105,10 @@ Test-Case 'two kinds stay separate and empty/unavailable feeds use one muted sta
     $a=New-Event 'banked'; $b=New-Event 'regular' 'regular'
     $view=Get-WidgetAnnouncementView (New-External @($a,$b)) 'en' $now
     Assert-Equal $view.active.Count 2 'Both confirmed kinds'
-    Assert-Equal $view.active[0].title 'Confirmed banked reset grant' 'Banked title'
-    Assert-Equal $view.active[1].title 'Confirmed global reset' 'Regular title'
-    Assert-Equal (Get-WidgetAnnouncementView (New-External) 'zh-CN' $now).emptyText '监控来源暂无已确认的重置次数赠送或全局额度重置公告' 'Merged empty state'
-    Assert-Equal (Get-WidgetAnnouncementView (New-External @() @() 'unavailable') 'en' $now).emptyText 'Confirmed announcements unavailable' 'Unavailable state'
+    Assert-Equal $view.active[0].title 'Reset credit grant announced' 'Banked title'
+    Assert-Equal $view.active[1].title 'Quota reset announced' 'Regular title'
+    Assert-Equal (Get-WidgetAnnouncementView (New-External) 'zh-CN' $now).emptyText '监控网站暂无新的重置动态记录' 'Merged empty state'
+    Assert-Equal (Get-WidgetAnnouncementView (New-External @() @() 'unavailable') 'en' $now).emptyText 'Monitoring-site updates unavailable' 'Unavailable state'
 }
 Test-Case 'rendering archives delivered rows locally even without another fetch' {
     $row=New-Event 'completed'; $row.deliveredAt=$now.AddHours(-23).ToString('o')
@@ -127,7 +127,7 @@ Test-Case 'local transport failure and restart preserve announcements with pendi
         $restored=Read-WidgetJson (Join-Path $base 'native-public-cache.json')
         $view=Get-WidgetAnnouncementView $restored 'zh-CN' $now
         Assert-Equal $view.active.Count 1 'Known row survives restart'
-        Assert-Equal $view.staleText '信息待更新' 'Connection failure state'
+        Assert-Equal $view.staleText '监控网站数据待更新' 'Connection failure state'
         Assert-Equal $previous.announcements.stale $false 'Previous object not mutated'
     } finally { Remove-Item -LiteralPath $base -Recurse -Force -ErrorAction SilentlyContinue }
 }
@@ -195,7 +195,7 @@ Test-Case 'precise schedules show event-time local offsets and independent publi
     $zone=[TimeZoneInfo]::CreateCustomTimeZone('Test +08',[TimeSpan]::FromHours(8),'Test +08','Test +08')
     $event=New-Event 'timed-grant'; $event.scheduledAt='2026-10-01T20:30:00Z'; $event.announcedAt='2026-09-30T10:00:00Z'
     $row=ConvertTo-WidgetAnnouncementRow $event 'zh-CN' $now $false $zone
-    if ($row.scheduledText -notmatch '预定送达.*10月2日 04:30.*本地 UTC\+08:00') { throw 'Scheduled time did not convert across the local date boundary' }
+    if ($row.scheduledText -notmatch '预计发放.*10月2日 04:30.*本地 UTC\+08:00') { throw 'Scheduled time did not convert across the local date boundary' }
     if ($row.announcedText -notmatch '公告发布.*9月30日 18:00.*本地 UTC\+08:00') { throw 'Publication time omitted or confused with delivery' }
     $india=[TimeZoneInfo]::CreateCustomTimeZone('Test +0530',[TimeSpan]::FromMinutes(330),'Test +0530','Test +0530')
     if ((Format-WidgetAnnouncementDate ([DateTimeOffset]'2026-10-01T18:30:00Z') 'en' $india $now) -notmatch 'Oct 2 00:00.*UTC\+05:30') { throw 'Fractional offset or midnight conversion failed' }
@@ -207,7 +207,7 @@ Test-Case 'precise schedules show event-time local offsets and independent publi
     if ($row.scheduledText -notmatch 'Oct 1.*time not announced' -or $row.scheduledText -match 'UTC|00:00') { throw 'Date-only source invented a local clock or zone' }
     $event.scheduledDate=$null
     $row=ConvertTo-WidgetAnnouncementRow $event 'en' $now $false $zone
-    Assert-Equal $row.scheduledText 'Delivery time not announced' 'Missing delivery time remains unknown'
+    Assert-Equal $row.scheduledText 'Grant time not announced' 'Missing delivery time remains unknown'
 }
 Test-Case 'source-withdrawn records stay neutral in history after native cache reconciliation' {
     $event=New-Event 'withdrawn-source'
@@ -216,8 +216,8 @@ Test-Case 'source-withdrawn records stay neutral in history after native cache r
     $merged=Merge-WidgetExternalData (New-External @($event)) (New-External @() @($withdrawn)) $false
     $view=Get-WidgetAnnouncementView $merged 'zh-CN' $now
     Assert-Equal $view.active.Count 0 'Withdrawn event must leave active announcements'
-    Assert-Equal $view.history[0].title '来源已撤下的公告记录' 'Neutral withdrawn title'
-    if ($view.history[0].details -notmatch '监控来源已撤下此记录') { throw 'Source correction status omitted' }
+    Assert-Equal $view.history[0].title '监控网站已撤下此记录' 'Neutral withdrawn title'
+    if ($view.history[0].details -notmatch '监控网站已撤下此记录') { throw 'Source correction status omitted' }
     $event.scheduledAt=$now.AddHours(1).ToString('o')
     $event | Add-Member -NotePropertyName scheduledTimeZone -NotePropertyValue 'PT'
     $view=Get-WidgetAnnouncementView (New-External @($event)) 'en' $now
@@ -236,19 +236,19 @@ Test-Case 'Plus five-hour view preserves percent and reset time while other plan
 Test-Case 'source pending state is separate from quota age and appears only once' {
     $known=New-External @((New-Event 'known')); $known.announcements.stale=$true; $known.announcements.sourceUpdatedAt=$now.AddHours(-3).ToString('o')
     $view=Get-WidgetAnnouncementView $known 'en' $now
-    Assert-Equal $view.staleText 'Information pending update' 'Single announcement pending state'
+    Assert-Equal $view.staleText 'Monitoring-site data pending update' 'Single announcement pending state'
     $source=Format-WidgetPublicUpdate $known.announcements 'en' $now
     if (-not $source.Contains((Format-WidgetDate $now.AddHours(-3) 'en'))) { throw 'Public source timestamp not preserved' }
     Assert-Equal (Format-WidgetRelativeUpdate ($now.AddMinutes(-1).ToUnixTimeMilliseconds()) 'en' $now) 'Updated 1 minute ago' 'Quota freshness remains independent'
     $empty=New-External @() @() 'unavailable'; $empty.announcements.stale=$true
     $unavailable=Get-WidgetAnnouncementView $empty 'en' $now
     Assert-Equal $unavailable.staleText '' 'Unavailable line does not duplicate pending warning'
-    Assert-Equal $unavailable.emptyText 'Confirmed announcements unavailable' 'One unavailable line'
+    Assert-Equal $unavailable.emptyText 'Monitoring-site updates unavailable' 'One unavailable line'
 }
 Test-Case 'inventory and evidence link terminology match the approved bilingual layout' {
-    Assert-Equal (Get-WidgetText 'cards' 'en' @(2)) 'Banked resets 2' 'Inventory is not consumption count'
-    Assert-Equal (Get-WidgetText 'announcementSource' 'en') 'View announcement' 'Announcement link'
-    Assert-Equal (Get-WidgetText 'deliverySource' 'en') 'Delivery record' 'Evidence link'
+    Assert-Equal (Get-WidgetText 'cards' 'en' @(2)) 'Available resets: 2' 'Inventory is not consumption count'
+    Assert-Equal (Get-WidgetText 'announcementSource' 'en') 'View original post' 'Announcement link'
+    Assert-Equal (Get-WidgetText 'deliverySource' 'en') 'Completion evidence' 'Evidence link'
     foreach ($language in @('en','zh-CN')) {
         $cadence=Get-WidgetText 'refreshCadence' $language
         if (-not $cadence.Contains('1') -or -not $cadence.Contains('10')) { throw 'Quota/public cadence omitted' }
@@ -265,7 +265,7 @@ Test-Case 'expired announcement cache does not claim no confirmed announcements'
     $value=New-External
     $later=$now.AddHours(25)
     $view=Get-WidgetAnnouncementView $value 'en' $later
-    Assert-Equal $view.emptyText 'Confirmed announcements unavailable' 'Source cache expired'
+    Assert-Equal $view.emptyText 'Monitoring-site updates unavailable' 'Source cache expired'
 }
 Test-Case 'historical rows without delivery evidence do not imply an outstanding delivery' {
     $event=New-Event 'historical-grant'; $event.announcedAt=$now.AddDays(-7).ToString('o')
@@ -286,9 +286,9 @@ Test-Case 'compact announcement indicator validates sources and both localized a
     $alerts=[pscustomobject]@{unread=@([pscustomobject]@{id='https://example.org/grant#banked';kind='banked'},[pscustomobject]@{id='https://example.org/reset#regular';kind='regular'})}
     $view=Get-WidgetAnnouncementAlertView $alerts 'en'
     Assert-Equal $view.hasUnread $true 'Unread indicator'
-    if (-not $view.tooltip.Contains('banked reset grant and global reset')) {throw 'Kinds not explained'}
+    if (-not $view.tooltip.Contains('reset credit and quota-reset')) {throw 'Kinds not explained'}
     $zh=Get-WidgetAnnouncementAlertView $alerts 'zh-CN'
-    if (-not $zh.tooltip.Contains('重置次数赠送和全局额度重置')) {throw 'Chinese tooltip missing'}
+    if (-not $zh.tooltip.Contains('重置卡和额度重置')) {throw 'Chinese tooltip missing'}
     $bad=[pscustomobject]@{unread=@([pscustomobject]@{id='javascript:alert(1)#banked';kind='banked'},[pscustomobject]@{id='https://example.org/hint#hinted';kind='hinted'})}
     Assert-Equal (Get-WidgetAnnouncementAlertView $bad 'en').hasUnread $false 'Unsafe or unconfirmed notices ignored'
     foreach ($side in @(48,64,100)) {

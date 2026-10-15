@@ -6,6 +6,9 @@ import { setDefaultResultOrder } from 'node:dns';
 setDefaultResultOrder('ipv4first');
 const PROVIDERS = ['https://codex-reset.com/api/feed', 'https://codexreset.dev/api/history'];
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
+// Display provenance only: these fields never determine eligibility or completion.
+const sourceSites = value => [...new Set((Array.isArray(value) ? value : [])
+  .filter(site => ['codex-reset.com', 'codexreset.dev'].includes(site)))].sort();
 
 function recentTimestamp(value, now) {
   const timestamp = Date.parse(value);
@@ -61,6 +64,8 @@ function normalizedAnnouncement(raw, now, scheduled = false, persisted = false) 
     sourceWithdrawn: sourceHint === 'inactive' || persisted && raw.sourceWithdrawn === true,
     completionTimeBasis: persisted && raw.completionTimeBasis === 'announcement' ? 'announcement' : null,
     kindBasis: persisted && raw.kindBasis === 'original' ? 'original' : null,
+    sourceSites: persisted ? sourceSites(raw.sourceSites) : [],
+    announcementBasis: persisted && raw.announcementBasis === 'original' ? 'original' : null,
   };
 }
 function deduplicate(items, knownItems = []) {
@@ -95,6 +100,10 @@ function deduplicate(items, knownItems = []) {
       kindBasis: item.kindBasis || previous.kindBasis,
       completionTimeBasis: item.deliveredAt ? item.completionTimeBasis : previous.completionTimeBasis,
       deliverySourceUrl: item.deliverySourceUrl || previous.deliverySourceUrl } : item);
+    if (previous) {
+      map.get(item.id).sourceSites = sourceSites([...(previous.sourceSites || []), ...(item.sourceSites || [])]);
+      map.get(item.id).announcementBasis = item.announcementBasis || previous.announcementBasis;
+    }
     const merged = map.get(item.id);
     if (confirmedAnnouncement(merged)) merged.sourceHint = null;
   }
@@ -127,6 +136,7 @@ function linkCompletions(items) {
     item.deliveredAt = completion.deliveredAt;
     item.deliverySourceUrl = completion.deliverySourceUrl || completion.sourceUrl;
     item.completionTimeBasis = 'announcement';
+    item.sourceSites = sourceSites([...(item.sourceSites || []), ...(completion.sourceSites || [])]);
     item.sourceWithdrawn = false;
     records.splice(records.indexOf(completion), 1);
   }
@@ -160,7 +170,7 @@ function postClaim(value) {
   return complete ? 'complete' : announced ? 'announced' : 'unconfirmed';
 }
 
-function publicRecord({kind, url, at, summary, claim, scope = null, kindBasis = null}) {
+function publicRecord({kind, url, at, summary, claim, scope = null, kindBasis = null, sourceSite}) {
   if (!kind || !url) return null;
   const announcedAt = at;
   const deliveredAt = claim === 'complete' && at ? at : null;
@@ -168,7 +178,8 @@ function publicRecord({kind, url, at, summary, claim, scope = null, kindBasis = 
     deliverySourceUrl: deliveredAt ? url : null, completionTimeBasis: deliveredAt ? 'announcement' : null,
     certainty: claim === 'announced' || deliveredAt ? 'announced' : 'unconfirmed',
     scheduledAt: null, scheduledDate: null, scheduledTimeZone: null, scope, scopeLabel: null, kindBasis,
-    summary: text(summary), summaryZh: null, sourceHint: null, sourceWithdrawn: false };
+    summary: text(summary), summaryZh: null, sourceHint: null, sourceWithdrawn: false,
+    sourceSites: sourceSites([sourceSite]), announcementBasis: claim === 'announced' ? 'original' : null };
 }
 
 function providerView(records, sourceUpdatedAt, now, stale = false, keepPending = true) {
@@ -201,13 +212,13 @@ function normalizeCodexFeed(data, now, archiveKinds) {
         String(headline.tweet_id) === String(post.id);
       const sourceHint = matches && headline.active === false ? 'inactive' :
         matches && headline.active === true ? 'active' : 'recent';
-      const item = publicRecord({ kind, url, at, summary, claim });
+      const item = publicRecord({ kind, url, at, summary, claim, sourceSite: 'codex-reset.com' });
       records.push({ ...item, sourceHint, sourceWithdrawn: sourceHint === 'inactive' });
       continue;
     }
     const scope = /\bpaid accounts\b|\bplus,? pro(?:,? and)? business\b/i.test(summary) ? 'paid' : null;
     const kindBasis = /\b(?:banked|global) reset\b/i.test(summary) ? 'original' : null;
-    const item = publicRecord({kind, url, at, summary, claim, scope, kindBasis});
+    const item = publicRecord({kind, url, at, summary, claim, scope, kindBasis, sourceSite: 'codex-reset.com'});
     if (item) records.push(item);
   }
   const headline = data.signal, headlineUrl = officialPostUrl(headline?.url);
@@ -235,7 +246,7 @@ function normalizeCodexHistory(data, now) {
     // Neither is evidence of when this user's account received a reset.
     const at = event.time_basis === 'announcement' ? timestamp(event.announced_at, now) : null;
     const summary = event.evidence_text || event.summary;
-    const item = publicRecord({kind, url, at, summary, claim: postClaim(event.evidence_text), scope: text(event.scope)});
+    const item = publicRecord({kind, url, at, summary, claim: postClaim(event.evidence_text), scope: text(event.scope), sourceSite: 'codexreset.dev'});
     if (item) records.push(item);
   }
   const sourceUpdatedAt = sourceTimes.sort().at(-1) || null;

@@ -4,15 +4,17 @@ English | [简体中文](TERMINOLOGY.zh-CN.md)
 
 ## Reset terminology
 
-| Official English term | Chinese UI wording | Meaning |
+| English term | Chinese UI wording | Meaning |
 | --- | --- | --- |
-| Banked reset | 可用重置 / 可用重置次数 | A saved, one-time usage-limit reset that the account holder can apply before it expires. |
-| Global reset / automatic reset | 全局额度重置 / 自动额度重置 | A reset applied directly to the eligible accounts described in the announcement. It does not create a saved reset. |
+| Reset credit / banked reset | 重置卡 / 可用重置卡 | A saved, one-time usage-limit reset that the account holder can apply before it expires. |
+| Quota reset (global / automatic reset in source descriptions) | 额度重置 | A reset applied directly to the eligible accounts described in the announcement. It does not create a saved reset. |
 | Credits | 付费使用额度 | Additional usage purchased separately; not a banked reset. |
 | Usage limits | 用量限制 | The account's applicable usage allowances. |
 | Weekly / 5-hour usage window | 每周 / 5 小时用量周期 | The normal account usage windows, separate from a promotional reset. |
 
 The English reset names and distinctions follow [OpenAI's banked-reset guide](https://help.openai.com/en/articles/20001498-how-banked-codex-resets-work). The Chinese labels are this project's translations of those meanings, not a claim that OpenAI has standardized these exact Chinese labels. A banked reset is not cash, a recharge card, or API credit. Eligibility, expiry and affected windows vary by offer; the account's Usage page is authoritative.
+
+The interface calls saved reset opportunities **Reset credits**, with **Available resets** as the count label. The [Codex App Server documentation](https://learn.chatgpt.com/docs/app-server#8-earned-rate-limit-resets-chatgpt) also distinguishes earned reset credits from usage credits. The Chinese interface uses **重置卡**, counted in **张**.
 
 ## What updates automatically?
 

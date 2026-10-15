@@ -298,7 +298,7 @@ function Assert-ActivityPage([IntPtr]$window, [int]$processId, $allRecords, $exp
             $expected=@($allRecords | Where-Object {$_.fact -ceq $control.Text})
             Assert-True ($expected.Count -eq 1) 'Fixture record facts were not unique.'
             $rowText=Get-VisibleText $control.ParentHandle $processId
-            Assert-True ($rowText.Contains($expected[0].title) -and $rowText.Contains((Get-WidgetText 'publicType' $language)) -and $rowText.Contains((Get-WidgetText 'announcementSource' $language))) 'Activity record lost its localized title, attribution or announcement source.'
+            Assert-True ($rowText.Contains($expected[0].title) -and $rowText.Contains($expected[0].label) -and $rowText.Contains((Get-WidgetText 'announcementSource' $language))) 'Activity record lost its localized title, attribution or announcement source.'
             $records.Add([pscustomobject]@{fact=$control.Text;parentHandle=$key;documentTop=$control.Bounds.Top-$viewport.Top+$position})
         }
         foreach ($control in $controls) {
@@ -533,7 +533,7 @@ http.createServer(async(req,res)=>{
         $handle = [QuotaSmokeWindows]::Find($ui.Id,$title)
         [void][QuotaSmokeWindows]::SetForegroundWindow($handle)
         $element = [Windows.Automation.AutomationElement]::FromHandle($handle)
-        $creditText=if ($language -eq 'en') {'Banked resets 2'} else {'可用重置 2次'}
+        $creditText=if ($language -eq 'en') {'Available resets 2'} else {'可用重置卡 2 张'}
         $moreText=Get-WidgetText 'moreMessage' $language
         $activityMoreText=Get-WidgetText 'activityMore' $language @(2)
         $activityLessText=Get-WidgetText 'activityLess' $language
@@ -547,7 +547,9 @@ http.createServer(async(req,res)=>{
             $stamp=if ($completed) {$source.deliveredAt} else {$source.scheduledAt}
             $fact=(Get-WidgetText $factKey $language @((Format-WidgetCompactDate ([DateTimeOffset]$stamp) $language)))+' · '+(Get-WidgetText $(if ($source.scope -eq 'paid') {'paid'} else {'all'}) $language)
             $titleKey=$(if ($completed) {'delivered'} else {'upcoming'})+$(if ($source.kind -eq 'banked') {'GrantTitle'} else {'ResetTitle'})
-            [pscustomobject]@{id=$id;fact=$fact;title=(Get-WidgetText $titleKey $language)}
+            # These legacy-shaped fixtures have no recorded collecting site.
+            $expectedTitle=Get-WidgetText 'siteRecords' $language @((Get-WidgetText 'monitorRecord' $language),(Get-WidgetText $titleKey $language))
+            [pscustomobject]@{id=$id;fact=$fact;title=$expectedTitle;label=(Get-WidgetText 'unknownAttribution' $language)}
         })
         Wait-Until {
             $script:layoutNames=Get-VisibleText $handle $ui.Id

@@ -62,7 +62,7 @@ test('combines the preannouncement and completion statement once across mirrored
   assert.equal(item.deliveredAt, '2026-10-11T04:01:09.000Z');
   assert.equal(item.completionTimeBasis, 'announcement');
   const row = deriveAnnouncementsView(result.announcements, now, 'Asia/Shanghai', 'zh-CN').rows[0];
-  assert.match(row.completedText, /完成声明发布.*12:01/);
+  assert.match(row.completedText, /完成消息发布于.*12:01/);
   assert.equal(result.lastGlobal.sourceUrl, preUrl);
 });
 
@@ -120,7 +120,7 @@ test('full completion repairs a cached cropped archive without duplicate or retr
   const view = deriveAnnouncementsView(store.state, clock, 'Asia/Shanghai', 'zh-CN');
   assert.equal(view.rows.length, 0);
   assert.equal(view.history.length, 1);
-  assert.match(view.history[0].completedText, /完成声明发布.*10\/11.*12:01/);
+  assert.match(view.history[0].completedText, /完成消息发布于.*10\/11.*12:01/);
   assert.deepEqual(store.alerts.unread, []);
 });
 
@@ -232,7 +232,7 @@ test('a partial preannouncement refresh preserves the meaning of cached completi
   await store.update((await query(feed([done, pre]), history([record()]))).announcements);
   await store.update((await query(feed([pre]))).announcements);
   assert.equal(store.state.items[0].completionTimeBasis, 'announcement');
-  assert.match(deriveAnnouncementsView(store.state, now, 'UTC', 'en').rows[0].completedText, /^Completion statement posted/);
+  assert.match(deriveAnnouncementsView(store.state, now, 'UTC', 'en').rows[0].completedText, /^Completion message posted/);
 });
 
 test('reading a completion notice clears its canonical paired row after a partial backup update', async () => {

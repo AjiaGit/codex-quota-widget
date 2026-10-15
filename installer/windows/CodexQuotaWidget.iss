@@ -52,8 +52,8 @@ english.StopFailed=Codex Quota Widget could not stop its owned processes. Close 
 #ifdef ChineseMessages
 chinesesimplified.OptionsGroup=其他选项：
 chinesesimplified.DesktopIcon=创建桌面快捷方式
-chinesesimplified.AutoStart=登录 Windows 时启动 Codex 周额度
-chinesesimplified.LaunchWidget=打开 Codex 周额度
+chinesesimplified.AutoStart=登录 Windows 时启动 Codex 额度悬浮窗
+chinesesimplified.LaunchWidget=打开 Codex 额度悬浮窗
 chinesesimplified.StopFailed=未能停止本工具的进程，请关闭悬浮窗后重试。
 #endif
 

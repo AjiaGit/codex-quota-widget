@@ -891,7 +891,7 @@ function Show-Quota {
     } else { (T 'tipDrag') }
     if ($script:mode -eq 'Compact' -and $script:noticeView.hasUnread) {$ringTip+="`n"+$script:noticeView.tooltip}
     $tooltip.SetToolTip($ring, $ringTip)
-    $count=if ($valid -and $null -ne $value.resetCards) {if ($script:language -eq 'zh-CN') {[string]$value.resetCards+'次'} else {[string]$value.resetCards}} else {'—'}
+    $count=if ($valid -and $null -ne $value.resetCards) {if ($script:language -eq 'zh-CN') {[string]$value.resetCards+' 张'} else {[string]$value.resetCards}} else {'—'}
     $cards.Text=(T 'resetLabel')+' '+$count;$cards.TrailingText=T 'disclosureDetails';$cards.AccessibleName=$cards.Text+' · '+(T 'disclosureDetails')
     $tooltip.SetToolTip($cards,(T 'openDetails'));$tooltip.SetToolTip($updated,$updated.Text);$tooltip.SetToolTip($status,$status.Text)
     Update-ResetCreditDetails

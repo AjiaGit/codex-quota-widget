@@ -112,7 +112,7 @@ Test-Case 'paired completion replaces its cached standalone alias and preserves 
  Assert-Equal $previous.announcements.items[0].id $done.id 'Input cache is not mutated'
  foreach($language in @('en','zh-CN')) {
   $row=ConvertTo-WidgetAnnouncementRow $merged.announcements.items[0] $language $now
-  $prefix=if($language -eq 'en'){'Completion statement posted'}else{'完成声明发布'}
+  $prefix=if($language -eq 'en'){'Completion message posted'}else{'完成消息发布于'}
   if(-not $row.completedText.StartsWith($prefix)){throw 'Completion time is not explicitly the statement publication time'}
  }
  $partial=[pscustomobject]@{status='ok';announcements=[pscustomobject]@{status='ok';items=@([pscustomobject]@{id=$paired.id;kind='regular';sourceUrl=$preUrl;certainty='announced';announcedAt=$paired.announcedAt});history=@();stale=$false}}

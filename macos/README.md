@@ -18,9 +18,9 @@ Only run one copy. The service uses `127.0.0.1:39224`.
 - Click the menu-bar percentage to show or hide the window, select compact/detail mode, refresh, open the browser detail page, change language, or quit.
 - Choose **Language → System / English / 简体中文**. The choice is saved and shared with the browser detail page.
 - Click the compact ring to expand; click outside the detailed window to return to its saved compact position and size. Drag the window to move it, or its edges/corners to resize. The default detail window fits its content when screen space permits; long history or a manually reduced window can scroll.
-- Open **Banked resets / Details** for the available reset count and any provided grant/expiry dates. The widget only reads this information.
+- Open **Available resets / Details** for the available reset count and any provided grant/expiry dates. The widget only reads this information.
 - The Dock icon shows remaining weekly quota, or `—` when data is unavailable. Clicking it reopens the widget.
-- **My quota recoveries** appears in the same list as public reset news, with before/after percentages and the local detection time. After 24 hours it is archived and remains in the same activity list. Tracking starts when enabled and persists across restarts; a personal recovery does not confirm a global reset.
+- **Your quota has recovered** appears in the same list as public reset news, with the local detection time; before/after percentages are shown in **About this record**. After 24 hours it is archived and remains in the same activity list. Tracking starts when enabled and persists across restarts; a personal recovery does not confirm a global reset.
 
 Quota and cache checks run every 60 seconds. Refresh, reopening, and wake trigger a prompt update. Temporary failures retry at 15/30/60 seconds; public data refreshes separately every 10 minutes.
 

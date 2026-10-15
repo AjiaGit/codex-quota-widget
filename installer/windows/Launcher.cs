@@ -30,7 +30,7 @@ internal static class Launcher {
                 var match = System.Text.RegularExpressions.Regex.Match(File.ReadAllText(preferences), "\"language\"\\s*:\\s*\"(auto|en|zh-CN)\"");
                 if (match.Success && match.Groups[1].Value != "auto") chinese = match.Groups[1].Value == "zh-CN";
             } catch { }
-            MessageBox.Show(chinese ? "无法启动 Codex 周额度，请重新安装后重试。" : "Codex Quota could not start. Reinstall and try again.", "Codex Quota", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(chinese ? "无法启动 Codex 额度悬浮窗，请重新安装后重试。" : "Codex Quota could not start. Reinstall and try again.", chinese ? "Codex 额度悬浮窗" : "Codex Quota", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return 1;
         }
     }

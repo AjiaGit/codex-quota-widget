@@ -38,12 +38,23 @@ export function deriveRecoveryView(state,language='en',timeZone=Intl.DateTimeFor
       observed:t(language,'recoveryObserved',{time:formatLocalAnnouncementDate(row.observedFrom,timeZone,language,now)}),
       display:{title:t(language,'recoveryRestored'),label:t(language,'accountType'),
         facts:[t(language,'recoveryDetected',{time:formatCompactLocalDate(row.detectedAt,timeZone,language,now)})],
-        detailFacts:[t(language,'recoveryObserved',{time:formatCompactLocalDate(row.observedFrom,timeZone,language,now)})],help:t(language,'recoveryHelp')}})):[];
+        detailFacts:[`${row.beforePercent}% → ${row.afterPercent}%`,t(language,'recoveryObserved',{time:formatCompactLocalDate(row.observedFrom,timeZone,language,now)})],help:t(language,'recoveryHelp')}})):[];
   const started=ready&&Number.isFinite(history.trackingSince)?t(language,'recoveryTracking',{time:formatLocalAnnouncementDate(history.trackingSince,timeZone,language,now)}):'';
   return {rows,note:[t(language,'recoveryExplanation'),started,history?.status==='unsaved'?t(language,'recoveryUnsaved'):''].filter(Boolean).join(' '),
     empty:t(language,ready?'recoveryEmpty':'recoveryUnavailable')};
 }
 function safeSource(value) { try { const url=new URL(value);return url.protocol==='https:' && !url.username && !url.password ? url.href : null; } catch { return null; } }
+function announcementAttribution(item,confirmed,sourceHint,language) {
+  const sites=[...new Set((Array.isArray(item.sourceSites)?item.sourceSites:[])
+    .filter(site=>['codex-reset.com','codexreset.dev'].includes(site)))].sort();
+  if(sourceHint)sites.splice(0,sites.length,'codex-reset.com');
+  const site=sites.join(' / ');
+  const post=confirmed?item.deliverySourceUrl||item.sourceUrl:item.sourceUrl;
+  const publisher=/^https:\/\/(?:x\.com|twitter\.com|www\.twitter\.com)\/thsottiaux\/status\/\d+(?:[?#].*)?$/.test(post||'')?'TIBO':null;
+  const original=Boolean(publisher&&(confirmed?item.completionTimeBasis==='announcement':item.announcementBasis==='original'));
+  return {source:original?publisher:site||t(language,'monitorRecord'),original,
+    label:sourceHint?t(language,'hintAttribution',{sites:site}):site?t(language,original?'originalAttribution':'siteAttribution',{sites:site}):t(language,'unknownAttribution')};
+}
 export function deriveAnnouncementsView(state,now=Date.now(),timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone,language='en') {
   const rows=[],history=[],seen=new Set();
   const renderItem=(item,historical=false)=>{
@@ -59,14 +70,22 @@ export function deriveAnnouncementsView(state,now=Date.now(),timeZone=Intl.DateT
     const scope=item.scope==='paid'?t(language,'paid'):item.scope==='all'?t(language,'all'):(language==='zh-CN'?item.scopeLabel:item.scope)||t(language,'unknownScope');
     const scopeText=sourceHint?'':explicit?scope:t(language,'sourceScope',{scope});
     const scheduleKey=(confirmed?'original':'scheduled')+(item.kind==='banked'?'Grant':'Reset');
-    const plannedText=!explicit?'':plannedDate?t(language,scheduleKey,{time:plannedDate}):!confirmed&&!historical?t(language,'scheduleUnknown'):'';
+    const unknownScheduleKey=item.kind==='banked'?'scheduleUnknownGrant':'scheduleUnknownReset';
+    const plannedText=!explicit?'':plannedDate?t(language,scheduleKey,{time:plannedDate}):!confirmed&&!historical?t(language,unknownScheduleKey):'';
     const completionLabel=item.completionTimeBasis==='announcement'?'completionPosted':'completed';
     const completedText=confirmed?`${t(language,completionLabel)} ${formatLocalAnnouncementDate(delivered,timeZone,language,now)}`:'';
     const announcedText=Number.isFinite(announced)?t(language,explicit?'published':'posted',{time:formatLocalAnnouncementDate(announced,timeZone,language,now)}):'';
     const status=sourceHint?t(language,item.sourceWithdrawn?'siteHintInactive':historical?'siteHintExpired':'siteHintStatus'):confirmed?t(language,item.kind==='banked'?'grantDone':'resetDone'):t(language,item.sourceWithdrawn?'sourceWithdrawn':phase==='unknown'?'historyDeliveryUnknown':phase==='unconfirmed'?'sourceUnconfirmed':phase==='waiting'?'waitingDelivery':phase==='upcoming'?'upcoming':'announcedWaiting');
     const summary=language==='zh-CN'?(item.summaryZh||item.summary||''):(item.summary||'');
-    const titleKey=sourceHint?'siteHintTitle':item.sourceWithdrawn?'withdrawnRecord':(confirmed?'delivered':explicit?'upcoming':'unconfirmed')+(item.kind==='banked'?'GrantTitle':'ResetTitle');
-    const compactPlanned=!explicit?'':plannedDate?t(language,scheduleKey,{time:Number.isFinite(scheduled)?formatCompactLocalDate(scheduled,timeZone,language,now):plannedDate}):!confirmed&&!historical?t(language,'scheduleUnknown'):'';
+    const attribution=announcementAttribution(item,confirmed,sourceHint,language);
+    const historyCopy=Boolean(historical||item.sourceWithdrawn);
+    const titleKey=sourceHint?'siteHintTitle':(confirmed?'delivered':!historyCopy&&phase==='waiting'?'waiting':historyCopy&&explicit?'historical':explicit?'upcoming':'unconfirmed')+(item.kind==='banked'?'GrantTitle':'ResetTitle');
+    let displayTitle=t(language,titleKey,{source:attribution.source});
+    if(!sourceHint&&(confirmed||explicit&&!historyCopy&&phase!=='waiting'))displayTitle=t(language,attribution.original?(confirmed?'publisherSays':'publisherAnnounces'):'siteRecords',{source:attribution.source,message:displayTitle});
+    const kindKey=item.kind==='banked'?'Grant':'Reset';
+    const displayStatus=sourceHint?status:[item.sourceWithdrawn?t(language,'sourceWithdrawn'):'',
+      !historyCopy&&phase==='waiting'?t(language,'waiting'+kindKey):!confirmed&&(historyCopy||phase==='unknown')?t(language,'unknown'+kindKey):''].filter(Boolean).join(' ');
+    const compactPlanned=!explicit?'':plannedDate?t(language,scheduleKey,{time:Number.isFinite(scheduled)?formatCompactLocalDate(scheduled,timeZone,language,now):plannedDate}):!confirmed&&!historical?t(language,unknownScheduleKey):'';
     const compactCompleted=confirmed?`${t(language,completionLabel)} ${formatCompactLocalDate(delivered,timeZone,language,now)}`:'';
     const compactAnnounced=Number.isFinite(announced)?t(language,explicit?'published':'posted',{time:formatCompactLocalDate(announced,timeZone,language,now)}):'';
     return {id:item.id||item.sourceUrl+'#'+item.kind,kind:item.kind,phase,announcedAt:Number.isFinite(announced)?announced:null,title:t(language,sourceHint?'siteHintTitle':item.sourceWithdrawn?'withdrawnRecord':item.kind==='banked'?(explicit?'confirmedGrant':'relatedGrant'):(explicit?'confirmedReset':'relatedReset')),status,
@@ -76,11 +95,11 @@ export function deriveAnnouncementsView(state,now=Date.now(),timeZone=Intl.DateT
       sourceUrl:safeSource(item.sourceUrl),sourceLabel:t(language,explicit?'viewAnnouncement':'viewSource'),deliverySourceUrl:confirmed?safeSource(item.deliverySourceUrl):null,
       monitorSourceUrl:sourceHint?'https://codex-reset.com/':null,
       summary,
-      display:{title:t(language,titleKey),label:t(language,'publicType'),scope:scopeText,
+      display:{title:displayTitle,label:attribution.label,scope:scopeText,
         facts:[compactCompleted||compactPlanned||compactAnnounced].filter(Boolean),
-        detailFacts:[compactPlanned,compactAnnounced].filter(text=>text&&text!==(compactCompleted||compactPlanned||compactAnnounced)),
-        completionMissing:!sourceHint&&!confirmed&&(!explicit||historical),
-        status:sourceHint||['waiting','announced'].includes(phase)?status:'',summary}};
+        detailFacts:[compactPlanned,compactAnnounced,confirmed?t(language,'completionHelp'+kindKey):''].filter(text=>text&&text!==(compactCompleted||compactPlanned||compactAnnounced)),
+        completionMissing:!sourceHint&&!confirmed&&(!explicit||historyCopy),
+        status:displayStatus,summary}};
   };
   for(const item of state?.items||[]){
     const hintExpired=item.sourceHint&&item.certainty!=='announced'&&!item.deliveredAt&&now-Date.parse(item.announcedAt)>=PUBLIC_MAX_AGE;

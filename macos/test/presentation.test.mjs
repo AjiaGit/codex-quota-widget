@@ -26,14 +26,14 @@ test('shows reset cards and the five-hour window only for Plus', () => {
     remainingPercent: 39, resetsAt: reset / 1000, updatedAt: now,
     fiveHour: { remainingPercent: 55, resetsAt: (now + 2 * 60 * 60 * 1000) / 1000 },
   }, now, 'Asia/Hong_Kong');
-  assert.equal(plus.cardsText, '2 次');
+  assert.equal(plus.cardsText, '2 张');
   assert.equal(plus.showFiveHour, true);
   assert.equal(plus.fiveHourText, '55% 剩余');
   const pro = deriveView({ status: 'ok', plan: 'pro', resetCards: 0,
     remainingPercent: 39, resetsAt: reset / 1000, updatedAt: now,
     fiveHour: { remainingPercent: 55, resetsAt: (now + 2 * 60 * 60 * 1000) / 1000 },
   }, now, 'Asia/Hong_Kong');
-  assert.equal(pro.cardsText, '0 次');
+  assert.equal(pro.cardsText, '0 张');
   assert.equal(pro.showFiveHour, false);
 });
 

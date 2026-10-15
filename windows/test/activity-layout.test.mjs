@@ -125,10 +125,11 @@ test('account recovery display omits percentages and groups the local timezone',
   const row=deriveResetActivityView(quota,{items:[],history:[]},now,'Asia/Shanghai','zh-CN').rows[0];
   assert.ok(row.display,'A recovery has its own compact display');
   assert.equal(row.display.title,'本账号额度已恢复');
-  assert.doesNotMatch(JSON.stringify(row.display),/45%|99%|→/);
+  assert.ok(row.display.detailFacts.includes('45% → 99%'));
+  assert.doesNotMatch(JSON.stringify({title:row.display.title,facts:row.display.facts}),/45%|99%|→/);
   assert.match(row.display.facts[0],/本机发现.*11:59/);
   assert.doesNotMatch(row.display.facts[0],/UTC/);
-  assert.match(row.display.help,/不是准确重置/);
+  assert.match(row.display.help,/不等于准确恢复/);
 });
 
 test('source-reported completion remains distinct from confirmed delivery',()=>{
@@ -136,7 +137,7 @@ test('source-reported completion remains distinct from confirmed delivery',()=>{
   const row=presentation.deriveAnnouncementsView(feed,now,'Asia/Shanghai','zh-CN').rows[0];
   assert.ok(row.display,'Public records have compact display facts');
   assert.equal(row.phase,'unconfirmed');
-  assert.equal(row.display.title,'额度重置消息');
+  assert.equal(row.display.title,'额度重置相关消息：进展尚不明确');
   assert.equal(row.display.completionMissing,true);
   assert.match(row.display.facts[0],/发布.*11:59/);
   assert.match(row.display.scope,/(?:网站|来源)标注/);

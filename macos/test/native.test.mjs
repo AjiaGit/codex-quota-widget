@@ -105,7 +105,7 @@ final class LocalService: URLProtocol {
     assert.equal(result.status, 0, result.stderr);
     const output = JSON.parse(result.stdout);
     assert.equal(output.brand, 'Codex Quota');
-    assert.equal(output.zhBrand, 'Codex 周额度');
+    assert.equal(output.zhBrand, 'Codex 额度悬浮窗');
     assert.equal(output.auto, '刷新');
     assert.equal(output.fallback, 'Refresh');
     assert.equal(output.percent, 100);

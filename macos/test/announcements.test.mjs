@@ -33,8 +33,8 @@ test('a source reset category alone never confirms a conditional post or trigger
   await store.update(normalized);
   const row=view.deriveAnnouncementsView(store.state,time,'UTC','zh-CN').rows[0];
   assert.equal(row.phase,'unconfirmed');
-  assert.equal(row.title,'全局重置消息');
-  assert.equal(row.status,'网站未提供完成时间');
+  assert.equal(row.title,'额度重置相关消息');
+  assert.equal(row.status,'进展尚不明确');
   assert.equal(row.plannedText,'');
   assert.match(row.scopeText,/网站标注/);
   assert.deepEqual(store.alerts.unread,[]);
@@ -143,8 +143,8 @@ test('only a complete fresh reconciliation from both sources withdraws a cached 
     assert.equal(store.state.history[0].sourceWithdrawn,true);
     assert.equal(store.state.history[0].deliveredAt,null,'Withdrawal is not delivery');
     const row=view.deriveAnnouncementsView(store.state,now,'UTC','zh-CN').history[0];
-    assert.equal(row.title,'来源已撤下的公告记录');
-    assert.equal(row.status,'监控来源已撤下此记录');
+    assert.equal(row.title,'监控网站已撤下此记录');
+    assert.equal(row.status,'监控网站已撤下此记录，不代表事情已取消或完成。');
     const restored=await source.createAnnouncementStore({file,now:()=>now});
     assert.equal(restored.state.items.length,0);
     assert.equal(restored.state.history[0].sourceWithdrawn,true);
@@ -291,7 +291,7 @@ test('announcement presentation distinguishes upcoming, awaiting completion, com
 
 test('historical announcements without delivery evidence never imply they are still awaiting delivery', () => {
   const item = { id: 'old-grant', kind: 'banked', certainty: 'announced', announcedAt: at(-7 * 24 * hour), deliveredAt: null, sourceUrl: 'https://x.com/thsottiaux/status/old-grant' };
-  for (const [language, status] of [['en', 'Source did not provide a delivery record'], ['zh-CN', '来源未提供送达记录']]) {
+  for (const [language, status] of [['en', 'Completion status unclear'], ['zh-CN', '是否已完成尚不明确']]) {
     const historical = view.deriveAnnouncementsView({ status: 'ok', items: [], history: [item] }, now, 'UTC', language);
     assert.equal(historical.history[0].phase, 'unknown');
     assert.equal(historical.history[0].status, status);
@@ -307,8 +307,8 @@ test('historical completion labels require and preserve delivery evidence', () =
   const item = { id: 'done-reset', kind: 'regular', announcedAt: at(-72 * hour), deliveredAt: at(-48 * hour), sourceUrl: 'https://x.com/thsottiaux/status/done-reset', deliverySourceUrl: 'https://x.com/thsottiaux/status/confirmed' };
   const result = view.deriveAnnouncementsView({ status: 'ok', items: [], history: [item] }, now, 'UTC', 'zh-CN');
   assert.equal(result.history[0].phase, 'archived');
-  assert.equal(result.history[0].status, '已重置');
-  assert.match(result.history[0].completedText, /确认完成/);
+  assert.equal(result.history[0].status, '来源表示额度已重置');
+  assert.match(result.history[0].completedText, /网站记录完成时间/);
   assert.equal(result.history[0].deliverySourceUrl, item.deliverySourceUrl);
 });
 
@@ -422,13 +422,13 @@ test('no known announcements use one merged notice; transport failure has a diff
   assert.equal(typeof view.deriveAnnouncementsView, 'function');
   const empty = view.deriveAnnouncementsView({ status: 'ok', sourceUpdatedAt:at(0), items: [], history: [] }, now, 'UTC', 'zh-CN');
   assert.deepEqual(empty.rows, []);
-  assert.equal(empty.notice, '监控来源暂无已确认的赠送或全局额度重置公告');
+  assert.equal(empty.notice, '监控网站暂无新的重置动态记录');
   const unavailable = view.deriveAnnouncementsView({ status: 'unavailable', items: [], history: [] }, now, 'UTC', 'zh-CN');
-  assert.equal(unavailable.notice, '预告信息暂不可用');
+  assert.equal(unavailable.notice, '监控网站消息暂不可用');
   const known = { id: 'b', kind: 'banked', scheduledDate: '2026-10-01', sourceUrl: 'https://x.com/thsottiaux/status/b' };
   const retained = view.deriveAnnouncementsView({ status: 'unavailable', items: [known], history: [], stale: true }, now, 'UTC', 'en');
   assert.equal(retained.rows.length, 1);
-  assert.equal(retained.notice, 'Information pending update');
+  assert.equal(retained.notice, 'Monitoring-site data pending update');
   assert.doesNotMatch(retained.rows[0].timeText, /00:00/);
 });
 
@@ -472,10 +472,10 @@ test('precise pending schedules show local time and offset independently from an
   const item = { id: 'timed-grant', kind: 'banked', certainty: 'announced', announcedAt: '2026-09-30T10:00:00Z', scheduledAt: '2026-10-01T20:30:00Z', scope: 'paid', sourceUrl: 'https://example.org/announcement' };
   const state = { status: 'ok', items: [item], history: [] };
   const shanghai = view.deriveAnnouncementsView(state, now, 'Asia/Shanghai', 'zh-CN').rows[0];
-  assert.match(shanghai.plannedText, /预定送达.*10\/02.*04:30.*本地 UTC\+08:00/);
+  assert.match(shanghai.plannedText, /预计发放.*10\/02.*04:30.*本地 UTC\+08:00/);
   assert.match(shanghai.announcedText, /公告发布.*09\/30.*18:00.*本地 UTC\+08:00/);
   const pacific = view.deriveAnnouncementsView({ ...state, items: [{ ...item, kind: 'regular' }] }, now, 'America/Los_Angeles', 'en').rows[0];
-  assert.match(pacific.plannedText, /Scheduled reset.*10\/01.*13:30.*local UTC-07:00/);
+  assert.match(pacific.plannedText, /Expected reset.*10\/01.*13:30.*local UTC-07:00/);
   assert.match(pacific.announcedText, /Published.*09\/30.*03:00.*local UTC-07:00/);
 });
 
@@ -496,7 +496,7 @@ test('date-only and unspecified schedules never masquerade as precise local deli
   assert.match(dateOnly.plannedText, /10\/01.*具体时间未公布/);
   assert.doesNotMatch(dateOnly.plannedText, /UTC|\d\d:\d\d|09\/30/);
   const unknown = view.deriveAnnouncementsView({ ...state, items: [{ ...item, scheduledDate: null }] }, now, 'Asia/Shanghai', 'en').rows[0];
-  assert.equal(unknown.plannedText, 'Delivery time not announced');
+  assert.equal(unknown.plannedText, 'Grant time not announced');
   assert.match(unknown.announcedText, /Published.*19:00.*local UTC\+08:00/);
   assert.equal(unknown.completedText, '');
 });
