@@ -75,7 +75,7 @@ test('expired source data remains distinct from a request failure through the ca
   assert.equal(refreshed.reason,null);
 });
 
-test('compact activity keeps every confirmed pending event and the latest personal and public records',()=>{
+test('unified activity keeps chronological records and pages current and pending messages together',()=>{
   const quota={status:'ok',recoveryHistory:{status:'ok',records:[recovery(60000),recovery(120000)]}};
   const feed={status:'ok',sourceUpdatedAt:new Date(now).toISOString(),items:[
     item('latest',30000),item('older',180000),
@@ -84,9 +84,9 @@ test('compact activity keeps every confirmed pending event and the latest person
   ],history:[]};
   const original=JSON.stringify([quota,feed]);
   const view=deriveResetActivityView(quota,feed,now,'Asia/Shanghai','en');
-  assert.ok(Array.isArray(view.featuredRows),'The default list separates featured records from earlier ones');
-  assert.deepEqual(view.featuredRows.map(row=>row.id||row.detectedAt),['latest',now-60000,'grant','reset']);
-  assert.deepEqual(view.earlierRows.map(row=>row.id||row.detectedAt),[now-120000,'older']);
+  assert.deepEqual(view.rows.map(row=>row.id||row.detectedAt),['latest',now-60000,now-120000,'older','grant','reset']);
+  assert.equal(presentation.visibleAnnouncementView(view).rows.length,5);
+  assert.equal(presentation.visibleAnnouncementView(view,{limit:10}).rows.length,6);
   assert.equal(JSON.stringify([quota,feed]),original,'Presentation does not mutate or erase stored records');
 });
 
@@ -150,12 +150,13 @@ test('compact planned times keep an explicit offset when a future event crosses 
   assert.doesNotMatch(row.display.detailFacts.join(' '),/UTC-07:00/);
 });
 
-test('collapsed earlier and history announcements remain unread until those sections are opened',()=>{
-  const activity={featuredRows:[{id:'featured',kind:'regular'}],earlierRows:[{id:'earlier',kind:'banked'}],history:[{id:'history',kind:'regular'}]};
-  const alerts={unread:[{id:'featured',kind:'regular'},{id:'earlier',kind:'banked'},{id:'history',kind:'regular'}]};
-  assert.equal(typeof presentation.visibleAnnouncementView,'function');
-  assert.deepEqual(presentation.announcementIdsForReading(alerts,presentation.visibleAnnouncementView(activity),true),['featured']);
-  assert.deepEqual(presentation.announcementIdsForReading(alerts,presentation.visibleAnnouncementView(activity,{earlierOpen:true,historyOpen:true}),true),['featured','earlier','history']);
+test('unloaded batches remain unread while current and historical messages share the first page',()=>{
+  const records=Array.from({length:6},(_,i)=>({id:'record-'+i,kind:'regular',announcedAt:6-i}));
+  const activity={rows:records.slice(0,3),history:records.slice(3)};
+  const alerts={unread:records};
+  assert.equal(presentation.announcementIdsForReading(alerts,presentation.visibleAnnouncementView(activity),false).length,0);
+  assert.deepEqual(presentation.announcementIdsForReading(alerts,presentation.visibleAnnouncementView(activity),true),records.slice(0,5).map(row=>row.id));
+  assert.deepEqual(presentation.announcementIdsForReading(alerts,presentation.visibleAnnouncementView(activity,{limit:10}),true),records.map(row=>row.id));
 });
 
 test('negated and conditional source summaries never turn into visible claims of completion',()=>{

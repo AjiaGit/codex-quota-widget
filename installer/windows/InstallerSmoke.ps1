@@ -106,6 +106,23 @@ public static class QuotaSmokeWindows {
             return true;
         },IntPtr.Zero); return result;
     }
+    [StructLayout(LayoutKind.Sequential)] private struct ScrollInfo {
+        public uint Size, Mask; public int Min, Max; public uint Page; public int Position, TrackPosition;
+    }
+    [DllImport("user32.dll")] private static extern bool GetScrollInfo(IntPtr window, int bar, ref ScrollInfo info);
+    public static int OwnedScrollPosition(IntPtr parent, IntPtr scroll, int pid) {
+        if (scroll == IntPtr.Zero || ScrollBody(parent,pid) != scroll || !IsOwned(scroll,pid) || !IsChild(parent,scroll) || !IsWindowVisible(scroll))
+            throw new InvalidOperationException("Scroll escaped the owned visible fixture body");
+        var info=new ScrollInfo {Size=(uint)Marshal.SizeOf(typeof(ScrollInfo)),Mask=4};
+        if (!GetScrollInfo(scroll,1,ref info)) throw new InvalidOperationException("Fixture body has no vertical scroll position");
+        return info.Position;
+    }
+    public static int ScrollOwnedBody(IntPtr parent, IntPtr scroll, int pid, int command) {
+        OwnedScrollPosition(parent,scroll,pid);
+        if (command < 0 || command > 7) throw new InvalidOperationException("Unsupported fixture scroll command");
+        SendMessage(scroll,0x0115,new IntPtr(command),IntPtr.Zero);
+        return OwnedScrollPosition(parent,scroll,pid);
+    }
     public static string ReadOwnedDialogText(IntPtr dialog, int pid) {
         if (!IsOwned(dialog,pid)) return null;
         var values=new List<string>();
@@ -234,22 +251,70 @@ function Find-VisibleControl([IntPtr]$parent, [int]$processId, [string]$caption)
     Assert-True ($found.Count -eq 1) "Expected one visible fixture control: [$caption]; found $($found.Count)"
     $found[0]
 }
-function Invoke-UiButton([IntPtr]$window, [IntPtr]$parent, [int]$processId, [string]$caption) {
-    $button=Find-VisibleControl $parent $processId $caption
+function Find-ScrolledControl([IntPtr]$window, [IntPtr]$parent, [int]$processId, [string]$caption) {
     $scroll=[QuotaSmokeWindows]::ScrollBody($window,$processId)
-    if ($scroll -ne [IntPtr]::Zero) {
-        # Reveal the real control before activating it, including after relayout.
-        $viewport=[QuotaSmokeWindows]::OwnedBounds($scroll,$processId)
+    Assert-True ($scroll -ne [IntPtr]::Zero) 'Fixture detail window did not have an owned scrollable body.'
+    $viewport=[QuotaSmokeWindows]::OwnedBounds($scroll,$processId)
+    # A virtualized row has no visible child HWND until its viewport is reached.
+    # Search the current viewport first, then walk from the top when necessary.
+    for ($pass=0; $pass -lt 2; $pass++) {
+        if ($pass -eq 1) {[void][QuotaSmokeWindows]::ScrollOwnedBody($window,$scroll,$processId,6);Start-Sleep -Milliseconds 50}
         for ($attempt=0; $attempt -lt 200; $attempt++) {
-            $bounds=[QuotaSmokeWindows]::OwnedBounds($button.Handle,$processId)
-            if ($bounds.Top -ge $viewport.Top -and $bounds.Bottom -le $viewport.Bottom) {break}
-            $direction=if ($bounds.Top -lt $viewport.Top) {0} else {1}
-            [void][QuotaSmokeWindows]::SendMessage($scroll,0x115,[IntPtr]$direction,[IntPtr]::Zero)
+            $found=@(Get-VisibleControls $parent $processId | Where-Object {$_.Text -ceq $caption})
+            Assert-True ($found.Count -le 1) "Fixture caption was not unique in its owned subtree: $caption"
+            if ($found.Count -eq 1) {
+                $control=$found[0]
+                if ($control.Bounds.Top -ge $viewport.Top -and $control.Bounds.Bottom -le $viewport.Bottom) {return $control}
+                $direction=if ($control.Bounds.Top -lt $viewport.Top) {0} else {1}
+            } else {
+                if ($pass -eq 0) {break}
+                $direction=3 # SB_PAGEDOWN; the next page realizes offscreen rows.
+            }
+            $before=[QuotaSmokeWindows]::OwnedScrollPosition($window,$scroll,$processId)
+            [void][QuotaSmokeWindows]::ScrollOwnedBody($window,$scroll,$processId,$direction)
+            Start-Sleep -Milliseconds 40
+            if ([QuotaSmokeWindows]::OwnedScrollPosition($window,$scroll,$processId) -eq $before) {break}
         }
-        $bounds=[QuotaSmokeWindows]::OwnedBounds($button.Handle,$processId)
-        Assert-True ($bounds.Top -ge $viewport.Top -and $bounds.Bottom -le $viewport.Bottom) "Fixture button could not be scrolled into view: $caption"
     }
+    throw "Fixture control could not be scrolled into view in its owned subtree: $caption"
+}
+function Invoke-UiButton([IntPtr]$window, [IntPtr]$parent, [int]$processId, [string]$caption) {
+    $button=Find-ScrolledControl $window $parent $processId $caption
     [QuotaSmokeWindows]::ClickOwnedButton($parent,$button.Handle,$processId)
+}
+function Assert-ActivityPage([IntPtr]$window, [int]$processId, $allRecords, $expectedRecords, [string]$language, [string]$phase) {
+    $scroll=[QuotaSmokeWindows]::ScrollBody($window,$processId)
+    [void][QuotaSmokeWindows]::ScrollOwnedBody($window,$scroll,$processId,6)
+    $seen=@{};$records=New-Object 'System.Collections.Generic.List[object]';$atBottom=$false
+    for ($page=0; $page -lt 40; $page++) {
+        Start-Sleep -Milliseconds 60
+        $position=[QuotaSmokeWindows]::OwnedScrollPosition($window,$scroll,$processId)
+        $viewport=[QuotaSmokeWindows]::OwnedBounds($scroll,$processId)
+        $controls=@(Get-VisibleControls $window $processId)
+        foreach ($control in @($controls | Where-Object {$_.Text -cin $allRecords.fact -and $_.Bounds.Bottom -gt $viewport.Top -and $_.Bounds.Top -lt $viewport.Bottom} | Sort-Object {$_.Bounds.Top})) {
+            $key=[string]$control.ParentHandle.ToInt64()
+            if ($seen.ContainsKey($key)) {continue}
+            $seen[$key]=$true
+            $expected=@($allRecords | Where-Object {$_.fact -ceq $control.Text})
+            Assert-True ($expected.Count -eq 1) 'Fixture record facts were not unique.'
+            $rowText=Get-VisibleText $control.ParentHandle $processId
+            Assert-True ($rowText.Contains($expected[0].title) -and $rowText.Contains((Get-WidgetText 'publicType' $language)) -and $rowText.Contains((Get-WidgetText 'announcementSource' $language))) 'Activity record lost its localized title, attribution or announcement source.'
+            $records.Add([pscustomobject]@{fact=$control.Text;parentHandle=$key;documentTop=$control.Bounds.Top-$viewport.Top+$position})
+        }
+        foreach ($control in $controls) {
+            Assert-True ($control.Text -notmatch 'fixture-(?:id|announcement|earlier|history)') 'Native UI leaked a fixture ID.'
+        }
+        Save-UiEvidence ([Windows.Automation.AutomationElement]::FromHandle($window)) $language ($phase+'-viewport-'+$page.ToString('00'))
+        $after=[QuotaSmokeWindows]::ScrollOwnedBody($window,$scroll,$processId,3)
+        if ($after -eq $position) {$atBottom=$true;break}
+    }
+    Assert-True $atBottom 'Fixture activity scan did not reach the bottom of the owned viewport.'
+    $ordered=@($records.ToArray() | Sort-Object documentTop)
+    Write-WidgetJson (Join-Path $OutputDir ("activity-page-$phase-$language.json")) @{phase=$phase;language=$language;records=$ordered}
+    Assert-True ($ordered.Count -eq @($expectedRecords).Count) "Loaded activity record count changed ($phase / $language): expected $(@($expectedRecords).Count), found $($ordered.Count)"
+    for ($index=0; $index -lt $ordered.Count; $index++) {
+        Assert-True ($ordered[$index].fact -ceq $expectedRecords[$index].fact) "Unified activity order or deduplication changed ($phase / $language), record $index"
+    }
 }
 function Assert-InlineWindow([IntPtr]$window, [int]$processId, [string]$language) {
     Assert-True ([QuotaSmokeWindows]::Find($processId,(Get-WidgetText 'app' $language)) -eq $window) 'Inline disclosure replaced the main window.'
@@ -424,6 +489,9 @@ const fixtureNow=Date.now(),sourceUpdatedAt=fixtureNow-180000;
 const completed={id:'fixture-announcement-regular-id',kind:'regular',certainty:'announced',announcedAt:new Date(fixtureNow-7200000).toISOString(),scheduledAt:new Date(fixtureNow-3600000).toISOString(),scheduledDate:null,deliveredAt:new Date(fixtureNow-600000).toISOString(),scope:'all',scopeLabel:null,sourceUrl:'https://example.org/regular-announcement',deliverySourceUrl:'https://example.org/regular-delivery',summary:'Confirmed public reset delivery record',summaryZh:'已确认全局额度重置送达记录'};
 const earlier={...completed,id:'fixture-earlier-id',kind:'banked',announcedAt:new Date(fixtureNow-172800000).toISOString(),scheduledAt:new Date(fixtureNow-32400000).toISOString(),deliveredAt:new Date(fixtureNow-28800000).toISOString(),sourceUrl:'https://example.org/earlier',deliverySourceUrl:null,summary:'Earlier grant fixture',summaryZh:'较早赠送测试记录'};
 const archived={...completed,id:'fixture-history-id',announcedAt:new Date(fixtureNow-345600000).toISOString(),scheduledAt:new Date(fixtureNow-262800000).toISOString(),deliveredAt:new Date(fixtureNow-259200000).toISOString(),sourceUrl:'https://example.org/history',deliverySourceUrl:null,summary:'Historical reset fixture',summaryZh:'历史重置测试记录'};
+const archiveRecent={...archived,id:'fixture-history-recent-id',announcedAt:new Date(fixtureNow-129600000).toISOString(),scheduledAt:new Date(fixtureNow-100800000).toISOString(),deliveredAt:new Date(fixtureNow-97200000).toISOString(),sourceUrl:'https://example.org/history-recent',summary:'Recent historical fixture',summaryZh:'较近历史测试记录'};
+const archiveOlder={...archived,id:'fixture-history-older-id',kind:'banked',announcedAt:new Date(fixtureNow-432000000).toISOString(),scheduledAt:new Date(fixtureNow-349200000).toISOString(),deliveredAt:new Date(fixtureNow-345600000).toISOString(),sourceUrl:'https://example.org/history-older',summary:'Older historical grant fixture',summaryZh:'较早历史赠送测试记录'};
+const archiveOldest={...archived,id:'fixture-history-oldest-id',announcedAt:new Date(fixtureNow-518400000).toISOString(),scheduledAt:new Date(fixtureNow-435600000).toISOString(),deliveredAt:new Date(fixtureNow-432000000).toISOString(),sourceUrl:'https://example.org/history-oldest',summary:'Oldest historical reset fixture',summaryZh:'最早历史重置测试记录'};
 http.createServer(async(req,res)=>{
   res.setHeader('Content-Type','application/json');
   if(req.url==='/api/settings') {
@@ -431,7 +499,7 @@ http.createServer(async(req,res)=>{
     else res.end(fs.readFileSync(settingsFile,'utf8'));
   } else if(req.url==='/api/external') {
     const now=fixtureNow;
-    res.end(JSON.stringify({status:'ok',lastGlobal:null,forecast:{next24h:12,next48h:25,next7d:61,sourceUpdatedAt:new Date(now).toISOString()},announcements:{status:'ok',stale:false,sourceUpdatedAt:new Date(now).toISOString(),history:[completed,archived],items:[
+    res.end(JSON.stringify({status:'ok',lastGlobal:null,forecast:{next24h:12,next48h:25,next7d:61,sourceUpdatedAt:new Date(now).toISOString()},announcements:{status:'ok',stale:false,sourceUpdatedAt:new Date(now).toISOString(),history:[archiveOldest,completed,archived,archiveRecent,archiveOlder],items:[
       {id:'fixture-announcement-banked-id',kind:'banked',certainty:'announced',announcedAt:new Date(now-86400000).toISOString(),scheduledAt:new Date(now+86400000).toISOString(),scheduledDate:null,deliveredAt:null,scope:'paid',scopeLabel:null,sourceUrl:'https://example.org/banked-announcement',deliverySourceUrl:null,summary:'Confirmed banked reset grant for paid accounts',summaryZh:'已确认向付费账号赠送重置次数'},
       completed,earlier
     ]}}));
@@ -466,17 +534,25 @@ http.createServer(async(req,res)=>{
         [void][QuotaSmokeWindows]::SetForegroundWindow($handle)
         $element = [Windows.Automation.AutomationElement]::FromHandle($handle)
         $creditText=if ($language -eq 'en') {'Banked resets 2'} else {'可用重置 2次'}
-        $regularTitle=Get-WidgetText 'deliveredResetTitle' $language
-        $grantTitle=Get-WidgetText 'deliveredGrantTitle' $language
-        $pendingTitle=Get-WidgetText 'upcomingGrantTitle' $language
         $moreText=Get-WidgetText 'moreMessage' $language
-        $earlierText=Get-WidgetText 'earlierUpdates' $language @(1)
-        $historyText=Get-WidgetText 'announcementHistory' $language
+        $activityMoreText=Get-WidgetText 'activityMore' $language @(2)
+        $activityLessText=Get-WidgetText 'activityLess' $language
         $sourcesText=Get-WidgetText 'dataSources' $language
+        $expectedIds=@('fixture-announcement-regular-id','fixture-announcement-banked-id','fixture-history-recent-id','fixture-earlier-id','fixture-history-id','fixture-history-older-id','fixture-history-oldest-id')
+        $allRecords=@(foreach ($id in $expectedIds) {
+            $source=@(@($uiExpected.announcements.items)+@($uiExpected.announcements.history) | Where-Object {$_.id -ceq $id})[0]
+            Assert-True ($null -ne $source) "Missing fabricated activity record: $id"
+            $completed=[bool]$source.deliveredAt
+            $factKey=if ($completed) {'deliveredOn'} else {'scheduledGrant'}
+            $stamp=if ($completed) {$source.deliveredAt} else {$source.scheduledAt}
+            $fact=(Get-WidgetText $factKey $language @((Format-WidgetCompactDate ([DateTimeOffset]$stamp) $language)))+' · '+(Get-WidgetText $(if ($source.scope -eq 'paid') {'paid'} else {'all'}) $language)
+            $titleKey=$(if ($completed) {'delivered'} else {'upcoming'})+$(if ($source.kind -eq 'banked') {'GrantTitle'} else {'ResetTitle'})
+            [pscustomobject]@{id=$id;fact=$fact;title=(Get-WidgetText $titleKey $language)}
+        })
         Wait-Until {
             $script:layoutNames=Get-VisibleText $handle $ui.Id
-            $script:layoutNames.Contains($creditText) -and $script:layoutNames.Contains($regularTitle) -and $script:layoutNames.Contains($pendingTitle)
-        } "Current native quota and announcement rows failed to render: $language"
+            $script:layoutNames.Contains($creditText) -and $script:layoutNames.Contains((Get-WidgetText 'activityHeading' $language))
+        } "Current native quota and activity sections failed to render: $language"
         Assert-True (@([QuotaSmokeWindows]::ReadOwnedControls($handle,0)).Count -eq 0) 'Native reader accepted an unrelated process.'
         $creditControl=Find-VisibleControl $handle $ui.Id $creditText
         $wrongProcessRejected=$false
@@ -492,18 +568,15 @@ http.createServer(async(req,res)=>{
         Assert-True ($script:layoutNames.Contains((Get-WidgetText 'activityHeading' $language)) -and $script:layoutNames.Contains((Get-WidgetLocalTimeNote $language))) 'Activity heading or local timezone note missing.'
         Assert-True ($script:layoutNames.Contains((Get-WidgetText 'refreshCadence' $language))) 'Separate quota/public refresh cadence missing.'
         foreach ($obsolete in @('12%','25%','61%')) {Assert-True (-not $script:layoutNames.Contains($obsolete)) 'Obsolete forecast probability column was rendered.'}
-        Assert-True (-not $script:layoutNames.Contains('Sample grant / 示例发放') -and -not $script:layoutNames.Contains($grantTitle) -and -not $script:layoutNames.Contains('codex-resets.com') -and -not $script:layoutNames.Contains('codexreset.dev')) 'A disclosure was expanded by default.'
-        Assert-True (@(Get-VisibleControls $handle $ui.Id | Where-Object {$_.Text -ceq $regularTitle}).Count -eq 1) 'Active/history duplication hid or duplicated the recent completed announcement.'
+        Assert-True (-not $script:layoutNames.Contains('Sample grant / 示例发放') -and -not $script:layoutNames.Contains('codex-resets.com') -and -not $script:layoutNames.Contains('codexreset.dev')) 'A disclosure was expanded by default.'
         $completedExpected=@($uiExpected.announcements.items | Where-Object {$_.id -eq 'fixture-announcement-regular-id'})[0]
-        $completedText=Get-WidgetText 'deliveredOn' $language @((Format-WidgetCompactDate ([DateTimeOffset]$completedExpected.deliveredAt) $language))
-        $completedFact=$completedText+' · '+(Get-WidgetText 'all' $language)
-        Assert-True ($script:layoutNames.Contains($completedFact)) 'Recent announcement omitted completion timestamp or account scope.'
+        $completedFact=$allRecords[0].fact
         $creditBounds=$creditControl.Bounds
         $activityBounds=(Find-VisibleControl $handle $ui.Id (Get-WidgetText 'activityHeading' $language)).Bounds
-        $historyBounds=(Find-VisibleControl $handle $ui.Id $historyText).Bounds
+        $moreBounds=(Find-VisibleControl $handle $ui.Id $activityMoreText).Bounds
         $sourcesBounds=(Find-VisibleControl $handle $ui.Id $sourcesText).Bounds
         $cadenceBounds=(Find-VisibleControl $handle $ui.Id (Get-WidgetText 'refreshCadence' $language)).Bounds
-        Assert-True ($creditBounds.Bottom -le $activityBounds.Top -and $activityBounds.Bottom -le $historyBounds.Top -and $historyBounds.Bottom -le $sourcesBounds.Top -and $sourcesBounds.Bottom -le $cadenceBounds.Top) 'Current detail sections overlapped or changed order.'
+        Assert-True ($creditBounds.Bottom -le $activityBounds.Top -and $activityBounds.Bottom -le $moreBounds.Top -and $moreBounds.Bottom -le $sourcesBounds.Top -and $sourcesBounds.Bottom -le $cadenceBounds.Top) 'Unified detail sections overlapped or changed order.'
         Save-UiEvidence $element $language 'native'
         $buttons=@([QuotaSmokeWindows]::Toolbar($handle,$ui.Id))
         Assert-True ($buttons.Count -eq 3) 'Fixed header did not contain exactly three icon buttons.'
@@ -513,6 +586,12 @@ http.createServer(async(req,res)=>{
         Wait-Until {[IO.File]::ReadAllText((Join-Path $fixtureRoot 'ui-refreshes.txt')).Length -gt $beforeRefresh} 'First toolbar icon did not refresh quota.'
         $scrollBody=[QuotaSmokeWindows]::ScrollBody($handle,$ui.Id)
         Assert-True ($scrollBody -ne [IntPtr]::Zero) 'Fixed fixture detail window did not have a scrollable body.'
+        $wrongScrollProcessRejected=$false
+        try {[void][QuotaSmokeWindows]::ScrollOwnedBody($handle,$scrollBody,0,3)} catch {$wrongScrollProcessRejected=$true}
+        Assert-True $wrongScrollProcessRejected 'Native scroll accepted an unrelated process.'
+        $wrongScrollSubtreeRejected=$false
+        try {[void][QuotaSmokeWindows]::ScrollOwnedBody($scrollBody,$scrollBody,$ui.Id,3)} catch {$wrongScrollSubtreeRejected=$true}
+        Assert-True $wrongScrollSubtreeRejected 'Native scroll escaped its descendant subtree.'
 
         # Count and actual grant/expiry fields expand inside the main window.
         Invoke-UiButton $handle $handle $ui.Id $creditText
@@ -532,7 +611,7 @@ http.createServer(async(req,res)=>{
         [void](Find-VisibleControl $handle $ui.Id $creditText)
 
         # The recent record exposes its original plan and delivery link on demand.
-        $recentPanel=(Find-VisibleControl $handle $ui.Id $regularTitle).ParentHandle
+        $recentPanel=(Find-ScrolledControl $handle $handle $ui.Id $completedFact).ParentHandle
         Assert-True (-not (Get-VisibleText $recentPanel $ui.Id).Contains((Get-WidgetText 'deliverySource' $language))) 'Delivery link was expanded by default.'
         Invoke-UiButton $handle $recentPanel $ui.Id $moreText
         $summary=if ($language -eq 'en') {'Confirmed public reset delivery record'} else {'已确认全局额度重置送达记录'}
@@ -545,28 +624,25 @@ http.createServer(async(req,res)=>{
         Invoke-UiButton $handle $recentPanel $ui.Id $moreText
         Wait-Until {-not (Get-VisibleText $recentPanel $ui.Id).Contains($summary)} 'Message details did not collapse.'
 
-        # One earlier active record and one historical record are distinct from
-        # the recent completed record duplicated in the service history feed.
-        Invoke-UiButton $handle $handle $ui.Id $earlierText
-        Wait-Until {(Get-VisibleText $handle $ui.Id).Contains($grantTitle)} 'Earlier updates did not expand.'
-        $earlierExpected=@($uiExpected.announcements.items | Where-Object {$_.id -eq 'fixture-earlier-id'})[0]
-        $earlierFact=(Get-WidgetText 'deliveredOn' $language @((Format-WidgetCompactDate ([DateTimeOffset]$earlierExpected.deliveredAt) $language)))+' · '+(Get-WidgetText 'all' $language)
-        [void](Find-VisibleControl $handle $ui.Id $earlierFact)
+        # Current and historical rows form one chronological list. Each scan
+        # walks the actual viewport so offscreen virtualization cannot hide a
+        # missing row, a duplicate completed record, or an incorrect page size.
+        Assert-ActivityPage $handle $ui.Id $allRecords @($allRecords | Select-Object -First 5) $language 'activity-first-5'
+        Assert-True (@(Get-VisibleControls $handle $ui.Id | Where-Object {$_.Text -ceq $activityLessText}).Count -eq 0) 'Collapse was offered before loading more records.'
+        Invoke-UiButton $handle $handle $ui.Id $activityMoreText
+        Wait-Until {
+            $text=Get-VisibleText $handle $ui.Id
+            $text.Contains($activityLessText) -and -not $text.Contains($activityMoreText)
+        } 'Loading the final two unified activity records did not update pagination.'
         Assert-InlineWindow $handle $ui.Id $language
-        Save-UiEvidence $element $language 'earlier-updates-inline'
-        Invoke-UiButton $handle $handle $ui.Id $earlierText
-        Wait-Until {-not (Get-VisibleText $handle $ui.Id).Contains($grantTitle)} 'Earlier updates did not collapse.'
-        Invoke-UiButton $handle $handle $ui.Id $historyText
-        Wait-Until {(Get-VisibleText $handle $ui.Id).Contains('codex-resets.com')} 'History did not expand inline.'
-        $historyExpected=@($uiExpected.announcements.history | Where-Object {$_.id -eq 'fixture-history-id'})[0]
-        $historyFact=(Get-WidgetText 'deliveredOn' $language @((Format-WidgetCompactDate ([DateTimeOffset]$historyExpected.deliveredAt) $language)))+' · '+(Get-WidgetText 'all' $language)
-        [void](Find-VisibleControl $handle $ui.Id $historyFact)
-        Assert-True (@(Get-VisibleControls $handle $ui.Id | Where-Object {$_.Text -ceq $regularTitle}).Count -eq 2) 'Expanded history duplicated the recent completed record or omitted the archived record.'
+        Assert-ActivityPage $handle $ui.Id $allRecords $allRecords $language 'activity-all-7'
+        Invoke-UiButton $handle $handle $ui.Id $activityLessText
+        Wait-Until {
+            $text=Get-VisibleText $handle $ui.Id
+            $text.Contains($activityMoreText) -and -not $text.Contains($activityLessText)
+        } 'Unified activity did not collapse to the latest five records.'
         Assert-InlineWindow $handle $ui.Id $language
-        Save-UiEvidence $element $language 'history-inline'
-        Invoke-UiButton $handle $handle $ui.Id $historyText
-        Wait-Until {-not (Get-VisibleText $handle $ui.Id).Contains('codex-resets.com')} 'History did not collapse.'
-        Assert-True (@(Get-VisibleControls $handle $ui.Id | Where-Object {$_.Text -ceq $regularTitle}).Count -eq 1) 'Collapsing history changed the recent activity record.'
+        Assert-ActivityPage $handle $ui.Id $allRecords @($allRecords | Select-Object -First 5) $language 'activity-back-to-5'
 
         Invoke-UiButton $handle $handle $ui.Id $sourcesText
         Wait-Until {(Get-VisibleText $handle $ui.Id).Contains('codexreset.dev')} 'Data sources did not expand inline.'
@@ -575,14 +651,14 @@ http.createServer(async(req,res)=>{
         $cadenceBounds=(Find-VisibleControl $handle $ui.Id (Get-WidgetText 'refreshCadence' $language)).Bounds
         Assert-True ($sourceOne.Top -eq $sourceTwo.Top -and $sourceOne.Right -le $sourceTwo.Left -and $sourceTwo.Bottom -le $cadenceBounds.Top) 'Source links overlapped each other or the separate refresh cadence.'
         Assert-InlineWindow $handle $ui.Id $language
-        [void][QuotaSmokeWindows]::SendMessage($scrollBody,0x115,[IntPtr]7,[IntPtr]::Zero)
+        [void][QuotaSmokeWindows]::ScrollOwnedBody($handle,$scrollBody,$ui.Id,7)
         Save-UiEvidence $element $language 'data-sources-inline'
         Invoke-UiButton $handle $handle $ui.Id $sourcesText
         Wait-Until {-not (Get-VisibleText $handle $ui.Id).Contains('codexreset.dev')} 'Data sources did not collapse.'
         foreach ($control in @([QuotaSmokeWindows]::ReadOwnedControls($handle,$ui.Id))) {
             Assert-True ($control.Text -notmatch 'fixture-(?:id|announcement|earlier|history)') 'Native UI leaked a fixture ID.'
         }
-        [void][QuotaSmokeWindows]::SendMessage($scrollBody,0x115,[IntPtr]6,[IntPtr]::Zero)
+        [void][QuotaSmokeWindows]::ScrollOwnedBody($handle,$scrollBody,$ui.Id,6)
         [void][QuotaSmokeWindows]::SendMessage($buttons[1].Handle,0xF5,[IntPtr]::Zero,[IntPtr]::Zero)
         Wait-Until { [QuotaSmokeWindows]::OwnedBounds($handle,$ui.Id).Width -le 160 } 'Dash did not return to the compact widget.'
         Start-Sleep -Milliseconds 300 # Let the existing 260ms transition finish before clicking the compact surface.

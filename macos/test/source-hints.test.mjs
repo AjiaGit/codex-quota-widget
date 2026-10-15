@@ -100,7 +100,7 @@ test('a source headline displays a subjectless reply without confirming a reset 
     assert.equal(row.completedText, '');
     assert.equal(row.plannedText, '');
     assert.equal(row.display.completionMissing, false, 'Do not imply that only the completion time is missing');
-    assert.equal(deriveResetActivityView({ status: 'unavailable' }, result.announcements, now, 'UTC', language).featuredRows[0].id, item.id);
+    assert.equal(deriveResetActivityView({ status: 'unavailable' }, result.announcements, now, 'UTC', language).rows[0].id, item.id);
   }
 });
 
@@ -195,28 +195,29 @@ test('offline refresh and archival preserve unread hints until the visible recor
   setTime(now + 24 * hour);
   await store.update({ status: 'unavailable' });
   const activity = deriveResetActivityView({ status: 'unavailable' }, store.state, now + 24 * hour, 'UTC', 'en');
-  const collapsed = visibleAnnouncementView(activity);
-  assert.deepEqual(announcementIdsForReading(store.alerts, collapsed, true), []);
-  const expanded = visibleAnnouncementView(activity, { historyOpen: true });
+  const visible = visibleAnnouncementView(activity);
+  assert.deepEqual(announcementIdsForReading(store.alerts, visible, false), []);
+  const expanded = visibleAnnouncementView(activity);
   const viewed = announcementIdsForReading(store.alerts, expanded, true);
   assert.deepEqual(viewed, [reply.url + '#regular']);
   await store.acknowledge(viewed);
   assert.deepEqual(store.alerts.unread, []);
 });
 
-test('reading a visible hint leaves collapsed hints unread', async () => {
+test('reading the first unified page leaves the sixth hint unread until more is loaded', async () => {
   const { store } = await trackedStore();
-  const newer = { ...reply, id: '1000000000000000110', url: 'https://x.com/thsottiaux/status/1000000000000000110', at: '2026-10-15T05:30:00Z' };
-  await store.update((await query(feed([newer, reply], { signal: headline(newer) }))).announcements);
-  const activity = deriveResetActivityView({ status: 'unavailable' }, store.state, now, 'UTC', 'en');
-  const visible = visibleAnnouncementView(activity);
-  assert.deepEqual(announcementIdsForReading(store.alerts, visible, false), []);
-  const viewed = announcementIdsForReading(store.alerts, visible, true);
-  assert.deepEqual(viewed, [newer.url + '#regular']);
+  const newer=Array.from({length:5},(_,i)=>({...reply,id:'100000000000000012'+i,url:'https://x.com/thsottiaux/status/100000000000000012'+i,at:`2026-10-15T05:0${i}:00Z`}));
+  await store.update((await query(feed([...newer,reply],{signal:headline(newer[4])}))).announcements);
+  const activity=deriveResetActivityView({status:'unavailable'},store.state,now,'UTC','en');
+  const visible=visibleAnnouncementView(activity);
+  assert.deepEqual(announcementIdsForReading(store.alerts,visible,false),[]);
+  const viewed=announcementIdsForReading(store.alerts,visible,true);
+  assert.equal(viewed.length,5);
+  assert.equal(viewed.includes(reply.url+'#regular'),false);
   await store.acknowledge(viewed);
-  assert.deepEqual(store.alerts.unread.map(item => item.id), [reply.url + '#regular']);
-  await store.acknowledge(announcementIdsForReading(store.alerts, visibleAnnouncementView(activity, { earlierOpen: true }), true));
-  assert.deepEqual(store.alerts.unread, []);
+  assert.deepEqual(store.alerts.unread.map(item=>item.id),[reply.url+'#regular']);
+  await store.acknowledge(announcementIdsForReading(store.alerts,visibleAnnouncementView(activity,{limit:10}),true));
+  assert.deepEqual(store.alerts.unread,[]);
 });
 
 test('source hint category corrections migrate unread identity without alerting again after reading', async () => {

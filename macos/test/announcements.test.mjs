@@ -379,22 +379,42 @@ test('hidden compact details never acknowledge notices and a visible detail ackn
   assert.deepEqual(view.announcementIdsForReading(null, displayed, true), []);
 });
 
-test('history opens with five recent rows and only displayed batches become read', () => {
+test('current and archived records share one chronological five-row page and unread boundary', () => {
+  const current = Array.from({length:6}, (_,i)=>({id:`current-${i}`,kind:'regular',announcedAt:120-i*20}));
+  const history = Array.from({length:6}, (_,i)=>({id:`archive-${i}`,kind:'banked',announcedAt:110-i*20}));
+  const activity = {rows:current,featuredRows:current.slice(0,2),earlierRows:current.slice(2),history};
+  const alerts = {unread:[...current,...history]};
+  const first = view.visibleAnnouncementView(activity);
+  assert.deepEqual(first.rows.map(row=>row.id),['current-0','archive-0','current-1','archive-1','current-2']);
+  assert.equal(first.nextCount,5);
+  assert.equal(first.canCollapse,false);
+  assert.deepEqual(view.announcementIdsForReading(alerts,first,true).sort(),['current-0','archive-0','current-1','archive-1','current-2'].sort());
+  const second = view.visibleAnnouncementView(activity,{limit:10});
+  assert.equal(second.rows.length,10);
+  assert.equal(second.nextCount,2);
+  assert.equal(second.canCollapse,true);
+  const all = view.visibleAnnouncementView(activity,{limit:15});
+  assert.equal(all.rows.length,12);
+  assert.equal(all.nextCount,0);
+  assert.equal(activity.rows.length,6);
+  assert.equal(activity.history.length,6);
+});
+
+test('an archive-only unified list loads five at a time without marking later pages read', () => {
   const history = Array.from({length:12}, (_,i)=>({id:`history-${i}`,kind:'regular'}));
-  const activity = {featuredRows:[],earlierRows:[],history};
+  const activity = {rows:[],history};
   const alerts = {unread:history};
-  assert.equal(view.visibleAnnouncementView(activity).history.length,0);
-  const first = view.visibleAnnouncementView(activity,{historyOpen:true});
-  assert.deepEqual(first.history.map(row=>row.id),['history-0','history-1','history-2','history-3','history-4']);
-  assert.equal(first.historyNextCount,5);
-  assert.deepEqual(view.announcementIdsForReading(alerts,first,true),first.history.map(row=>row.id));
-  const second = view.visibleAnnouncementView(activity,{historyOpen:true,historyLimit:10});
-  assert.equal(second.history.length,10);
-  assert.equal(second.historyNextCount,2);
+  const first = view.visibleAnnouncementView(activity);
+  assert.deepEqual(first.rows.map(row=>row.id),['history-0','history-1','history-2','history-3','history-4']);
+  assert.equal(first.nextCount,5);
+  assert.deepEqual(view.announcementIdsForReading(alerts,first,true),first.rows.map(row=>row.id));
+  const second = view.visibleAnnouncementView(activity,{limit:10});
+  assert.equal(second.rows.length,10);
+  assert.equal(second.nextCount,2);
   assert.equal(view.announcementIdsForReading(alerts,second,true).includes('history-10'),false);
-  const all = view.visibleAnnouncementView(activity,{historyOpen:true,historyLimit:15});
-  assert.equal(all.history.length,12);
-  assert.equal(all.historyNextCount,0);
+  const all = view.visibleAnnouncementView(activity,{limit:15});
+  assert.equal(all.rows.length,12);
+  assert.equal(all.nextCount,0);
   assert.equal(history.length,12,'Pagination never truncates stored history');
 });
 

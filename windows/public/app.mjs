@@ -102,10 +102,7 @@ export function deriveResetActivityView(quotaState,publicState,now=Date.now(),ti
   }
   const newestFirst=(a,b)=>(b.detectedAt??b.announcedAt??-Infinity)-(a.detectedAt??a.announcedAt??-Infinity);
   rows.sort(newestFirst);history.sort(newestFirst);
-  const latestPersonal=rows.find(row=>row.kind==='recovery'),latestPublic=rows.find(row=>row.kind!=='recovery');
-  const featuredRows=rows.filter(row=>row===latestPersonal||row===latestPublic||['upcoming','waiting','announced'].includes(row.phase));
-  const featured=new Set(featuredRows);
-  return {rows,featuredRows,earlierRows:rows.filter(row=>!featured.has(row)),history,publicView,recoveryWarning:quotaState?.status==='ok'&&quotaState.recoveryHistory?.status==='unsaved'?t(language,'recoveryUnsaved'):''};
+  return {rows,history,publicView,recoveryWarning:quotaState?.status==='ok'&&quotaState.recoveryHistory?.status==='unsaved'?t(language,'recoveryUnsaved'):''};
 }
 export function publicRequestFailure(state) {
   return {...state,status:'unavailable',announcements:{...state?.announcements,status:'unavailable',reason:'request-failed',stale:true}};
@@ -135,31 +132,40 @@ export function announcementIdsForReading(alerts,view,visible) {
   const rendered=new Set([...(view?.rows||[]),...(view?.history||[])].map(row=>row.id));
   return alerts.unread.filter(row=>['banked','regular'].includes(row?.kind)&&rendered.has(row.id)).map(row=>row.id);
 }
-export function visibleAnnouncementView(activity,{earlierOpen=false,historyOpen=false,historyLimit=5}={}) {
-  const limit=Number.isFinite(historyLimit)?Math.max(5,Math.floor(historyLimit)):5;
-  const history=historyOpen?activity.history.slice(0,limit):[];
-  return {rows:[...activity.featuredRows,...(earlierOpen?activity.earlierRows:[])],history,
-    historyNextCount:historyOpen?Math.min(5,activity.history.length-history.length):0};
+export function visibleAnnouncementView(activity,{limit=5}={}) {
+  const count=Number.isFinite(limit)?Math.max(5,Math.floor(limit)):5;
+  const records=[...activity.rows,...activity.history].sort((a,b)=>(b.detectedAt??b.announcedAt??-Infinity)-(a.detectedAt??a.announcedAt??-Infinity));
+  const rows=records.slice(0,count);
+  return {rows,nextCount:Math.min(5,records.length-rows.length),canCollapse:rows.length>5};
 }
 if(typeof document!=='undefined') {
   document.body.dataset.embedded=String(new URLSearchParams(location.search).get('embedded')==='1');
   const byId=id=>document.getElementById(id),root=byId('card'),refreshButton=byId('refresh');
   let state={status:'loading'},externalState={status:'loading'},loading=false,retryingPublic=false,setting='auto';
   let detailVisible=document.body.dataset.embedded!=='true',acknowledging=false;
-  let historyLimit=5,historyRenderKeys=[];
-  async function acknowledgeRenderedAnnouncements(view) {
+  let activityLimit=5,activityRenderKeys=[],readAgain=false,readableView={rows:[]};
+  async function acknowledgeRenderedAnnouncements() {
+    if(acknowledging){readAgain=true;return;}
+    const shown=new Set(Array.from(byId('announcement-list').children).filter(node=>{
+      const box=node.getBoundingClientRect();
+      return node.getClientRects().length&&box.bottom>0&&box.top<innerHeight;
+    }).map(node=>node.dataset.id));
+    const view={rows:readableView.rows.filter(row=>shown.has(row.id))};
     const ids=announcementIdsForReading(externalState.announcementAlerts,view,detailVisible&&!document.hidden);
-    if(acknowledging||!ids.length)return;
+    if(!ids.length)return;
     acknowledging=true;
     try {
       const response=await fetch('/api/announcement-alerts/read',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})});
       if(response.ok){externalState.announcementAlerts=await response.json();window.webkit?.messageHandlers?.announcementRead?.postMessage({});}
-    }catch{}finally{acknowledging=false;}
+    }catch{}finally{acknowledging=false;if(readAgain){readAgain=false;acknowledgeRenderedAnnouncements();}}
   }
   window.addEventListener('quota-detail-visibility',event=>{
     const wasVisible=detailVisible;detailVisible=event.detail===true;
-    if(detailVisible){if(!wasVisible)window.scrollTo(0,0);loadExternal();}
+    if(detailVisible){if(!wasVisible){activityLimit=5;render();window.scrollTo(0,0);}loadExternal();}
   });
+  const recordVisibility=new IntersectionObserver(()=>acknowledgeRenderedAnnouncements());
+  window.addEventListener('scroll',()=>acknowledgeRenderedAnnouncements(),{passive:true});
+  window.addEventListener('resize',()=>acknowledgeRenderedAnnouncements());
   const renderedLists=new Map();
   const replaceList=(id,signature,children)=>{if(renderedLists.get(id)===signature)return;byId(id).replaceChildren(...children());renderedLists.set(id,signature);};
   const language=()=>resolveLanguage(setting,navigator.language);
@@ -176,11 +182,11 @@ if(typeof document!=='undefined') {
     });
   }
   const layoutObserver=new ResizeObserver(reportDetailLayout);layoutObserver.observe(root);
-  document.addEventListener('toggle',event=>{
-    if(event.target.id==='announcement-history'&&!event.target.open)historyLimit=5;
-    render();reportDetailLayout();
-  },true);
-  byId('history-more').addEventListener('click',()=>{historyLimit+=5;render();});
+  document.addEventListener('toggle',()=>{render();reportDetailLayout();},true);
+  byId('activity-more').addEventListener('click',()=>{activityLimit+=5;render();});
+  byId('activity-less').addEventListener('click',()=>{
+    activityLimit=5;render();byId('announcement-list').scrollIntoView({block:'start'});
+  });
   function render() {
     const lang=language(),view=deriveView(state,Date.now(),undefined,lang);
     document.documentElement.lang=lang;document.title=t(lang,'brand');
@@ -209,8 +215,8 @@ if(typeof document!=='undefined') {
       if(kind==='recovery'){const path=document.createElementNS(svg.namespaceURI,'path');path.setAttribute('d','M3 11a9 9 0 1 1 3 8M3 5v6h6M12 7v5l3 2');svg.append(path);return svg;}
       const path=document.createElementNS(svg.namespaceURI,'path');path.setAttribute('d',kind==='banked'?'M3 9h18v4H3zM5 13v9h14v-9M12 9v13M12 9H8a3 3 0 1 1 3-3l1 3Zm0 0h4a3 3 0 1 0-3-3l-1 3Z':'M4 9h4l11-5v16l-11-5H4V9Zm4 6 2 7H6l-2-7M22 9v6');svg.append(path);return svg;
     };
-    const announcementNode=(row,history=false)=>{
-      const item=document.createElement(history?'li':'article');item.className='announcement';item.dataset.phase=row.phase;item.dataset.id=row.id;
+    const announcementNode=row=>{
+      const item=document.createElement('article');item.className='announcement';item.dataset.phase=row.phase;item.dataset.id=row.id||`recovery:${row.detectedAt}`;
       item.append(icon(row.kind));
       const content=document.createElement('div');content.className='announcement-content';
       const display=row.display,headingLine=document.createElement('div');headingLine.className='announcement-heading';
@@ -236,37 +242,32 @@ if(typeof document!=='undefined') {
       }
       item.append(content);return item;
     };
-    replaceList('announcement-list',JSON.stringify([lang,activity.featuredRows]),()=>activity.featuredRows.map(row=>announcementNode(row)));
-    const earlier=byId('earlier-updates');earlier.hidden=!activity.earlierRows.length;
-    byId('earlier-updates-label').textContent=t(lang,'earlierUpdates',{count:activity.earlierRows.length});
-    replaceList('earlier-updates-list',JSON.stringify([lang,activity.earlierRows]),()=>activity.earlierRows.map(row=>announcementNode(row)));
-    const empty=!activity.rows.length;
+    const visibleActivity=visibleAnnouncementView(activity,{limit:activityLimit});
+    const list=byId('announcement-list');
+    const keys=visibleActivity.rows.map(row=>JSON.stringify([lang,row]));
+    const appendOnly=activityRenderKeys.length>0&&activityRenderKeys.every((key,i)=>key===keys[i]);
+    const expanded=new Set(Array.from(list.children).filter(node=>node.querySelector('details')?.open).map(node=>node.dataset.id));
+    if(!appendOnly){for(const node of list.children)recordVisibility.unobserve(node);list.replaceChildren();}
+    for(const row of visibleActivity.rows.slice(appendOnly?activityRenderKeys.length:0)){
+      const node=announcementNode(row);const details=node.querySelector('details');
+      if(details&&expanded.has(node.dataset.id))details.open=true;
+      list.append(node);recordVisibility.observe(node);
+    }
+    activityRenderKeys=keys;
+    byId('activity-more').hidden=!visibleActivity.nextCount;
+    byId('activity-more').textContent=t(lang,'activityMore',{count:visibleActivity.nextCount});
+    byId('activity-less').hidden=!visibleActivity.canCollapse;
+    byId('activity-less').textContent=t(lang,'activityLess');
+    const empty=!visibleActivity.rows.length;
     const notice=!empty?'':externalState.status==='loading'?t(lang,'publicLoading'):publicNotice.visible?'':t(lang,'activityEmpty');
     byId('announcement-notice').textContent=notice;byId('announcement-notice').hidden=!notice;
-    byId('activity-empty-help').hidden=!empty||publicNotice.visible||externalState.status==='loading';
     byId('recovery-warning').textContent=activity.recoveryWarning;byId('recovery-warning').hidden=!activity.recoveryWarning;
-    const historyOpen=byId('announcement-history').open;
-    const visibleActivity=visibleAnnouncementView(activity,{earlierOpen:!earlier.hidden&&earlier.open,historyOpen,historyLimit});
-    const historyList=byId('announcement-history-list');
-    const historyKeys=visibleActivity.history.map(row=>JSON.stringify([lang,row]));
-    const appendOnly=historyRenderKeys.length>0&&historyRenderKeys.every((key,i)=>key===historyKeys[i]);
-    const expanded=new Set(Array.from(historyList.children).filter(node=>node.querySelector('details')?.open).map(node=>node.dataset.id));
-    if(!appendOnly)historyList.replaceChildren();
-    for(const row of visibleActivity.history.slice(appendOnly?historyRenderKeys.length:0)){
-      const node=announcementNode(row,true);const details=node.querySelector('details');
-      if(details&&expanded.has(row.id))details.open=true;
-      historyList.append(node);
-    }
-    if(historyOpen&&!visibleActivity.history.length){const item=document.createElement('li');item.textContent=t(lang,'historyEmpty');historyList.append(item);}
-    historyRenderKeys=historyKeys;
-    byId('history-more').hidden=!visibleActivity.historyNextCount;
-    byId('history-more').textContent=t(lang,'historyMore',{count:visibleActivity.historyNextCount});
     const details=deriveResetDetails(state,lang);byId('reset-details-note').textContent=details.note;
     replaceList('reset-details-list',JSON.stringify([lang,details.rows]),()=>details.rows.map(row=>{const item=document.createElement('li'),title=document.createElement('strong');title.textContent=row.title;item.append(title);for(const text of[row.description,row.granted,row.expires].filter(Boolean)){const line=document.createElement('p');line.textContent=text;item.append(line);}return item;}));
     byId('ring').setAttribute('aria-label',t(lang,'weekly'));byId('ring').setAttribute('aria-valuenow',String(view.ringPercent));byId('ring').setAttribute('aria-valuetext',view.percentText==='—'?view.statusText:t(lang,'percentRemaining',{percent:view.ringPercent}));
     byId('language').value=setting;refreshButton.disabled=loading;byId('setup-link').hidden=state.errorCode!=='cli_missing';
     reportDetailLayout();
-    acknowledgeRenderedAnnouncements(visibleActivity);
+    readableView=visibleActivity;acknowledgeRenderedAnnouncements();
   }
   async function loadExternal(){try{const response=await fetch('/api/external',{cache:'no-store'});if(!response.ok)throw Error();externalState=await response.json();}catch{externalState=publicRequestFailure(externalState);}render();}
   async function retryPublic(){

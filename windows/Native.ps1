@@ -35,7 +35,7 @@ $script:WidgetStrings = @{
         recoveryMore = 'About this record'
         publicRetrying = 'Refreshing public updates'
         detailsPartial = 'The list may be incomplete; the available count above is authoritative.'
-        historyAttribution = 'Earlier historical records'; historyMore = 'Show {0} more'
+        historyAttribution = 'Earlier historical records'; activityMore = 'Show {0} more'; activityLess = 'Show latest 5'
         resetLabel = 'Banked resets'
         disclosureDetails = 'Details'
         recoveryCount = '{0} records'; recoveryNone = 'No records'; relatedBanked = 'Banked reset news'; relatedRegular = 'Global reset news'; phaseUnconfirmed = 'Tracker has no completion time'; sourceScope = 'Tracker scope: {0}'; postedOn = 'Posted: {0}'
@@ -117,7 +117,7 @@ $script:WidgetStrings = @{
         recoveryMore = '记录说明'
         publicRetrying = '正在刷新公共信息'
         detailsPartial = '列表可能不完整，可用数量以上方显示为准。'
-        historyAttribution = '早期历史记录'; historyMore = '再显示 {0} 条'
+        historyAttribution = '早期历史记录'; activityMore = '再显示 {0} 条'; activityLess = '只看最近 5 条'
         resetLabel = '可用重置'
         disclosureDetails = '详情'
         recoveryCount = '{0} 条记录'; recoveryNone = '暂无记录'; relatedBanked = '重置次数赠送消息'; relatedRegular = '全局重置消息'; phaseUnconfirmed = '网站未提供完成时间'; sourceScope = '网站标注：{0}'; postedOn = '消息发布 {0}'
@@ -276,20 +276,10 @@ function Get-WidgetResetDetailsView($data, [string]$language, [DateTimeOffset]$n
     }
     [pscustomobject]@{note=$note;rows=@($rows)}
 }
-function Get-WidgetActivityPartition($rows) {
-    $featured=@();$earlier=@();$personal=$false;$public=$false
-    foreach ($row in @($rows)) {
-        $first=if ($row.kind -eq 'recovery') {-not $personal} else {-not $public}
-        if ($row.kind -eq 'recovery') {$personal=$true} else {$public=$true}
-        if ($first -or $row.phase -in @('upcoming','waiting','announced')) {$featured+=,$row} else {$earlier+=,$row}
-    }
-    [pscustomobject]@{featured=@($featured);earlier=@($earlier)}
-}
-function Get-WidgetVisibleActivityView($activity, [bool]$earlierOpen, [bool]$historyOpen, [int]$historyLimit=5) {
-    $active=@($activity.featured)
-    if ($earlierOpen) {$active+=@($activity.earlier)}
-    $history=if ($historyOpen) {@($activity.history | Select-Object -First ([Math]::Max(5,$historyLimit)))} else {@()}
-    [pscustomobject]@{active=@($active);history=@($history);historyNextCount=$(if ($historyOpen) {[Math]::Min(5,@($activity.history).Count-@($history).Count)} else {0})}
+function Get-WidgetVisibleActivityView($activity, [int]$limit=5) {
+    $records=@(@($activity.active)+@($activity.history) | Where-Object {$_} | Sort-Object sortAt -Descending)
+    $shown=@($records | Select-Object -First ([Math]::Max(5,$limit)))
+    [pscustomobject]@{active=$shown;history=@();nextCount=[Math]::Min(5,$records.Count-$shown.Count);canCollapse=$shown.Count -gt 5}
 }
 function Get-WidgetPublicNoticeView($external, [string]$language, [DateTimeOffset]$now=[DateTimeOffset]::UtcNow) {
     $feed=$external.announcements;$stamp=ConvertTo-WidgetTimestamp $feed.sourceUpdatedAt
@@ -377,7 +367,7 @@ function Get-WidgetRecoveryView($data, [string]$language, [DateTimeOffset]$now =
 function Get-WidgetDetailSectionOrder([bool]$plus) {
     'hero'
     if ($plus) { 'fiveHour' }
-    'credits'; 'announcements'; 'history'; 'sources'; 'footer'
+    'credits'; 'announcements'; 'sources'; 'footer'
 }
 function ConvertTo-WidgetTimestamp($value) {
     if ([string]::IsNullOrWhiteSpace([string]$value)) { return $null }
