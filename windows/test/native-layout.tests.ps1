@@ -302,4 +302,21 @@ Test-Case 'hidden detail never acknowledges notices and newly arrived unseen IDs
     Assert-Equal (Get-WidgetAnnouncementReadIds $alerts $view $false).Count 0 'Compact and hidden state'
     Assert-Equal ((Get-WidgetAnnouncementReadIds $alerts $view $true) -join ',') 'shown' 'Only rendered IDs'
 }
+Test-Case 'history pages expose only five more rows and never mark later pages read' {
+    $rows=@(0..11 | ForEach-Object {[pscustomobject]@{id=('history-'+$_);key=('history-'+$_)}})
+    $activity=[pscustomobject]@{featured=@();earlier=@();history=$rows}
+    $alerts=[pscustomobject]@{ids=@($rows.id)}
+    Assert-Equal (Get-WidgetVisibleActivityView $activity $false $false).history.Count 0 'Closed history'
+    $first=Get-WidgetVisibleActivityView $activity $false $true
+    Assert-Equal ($first.history.id -join ',') 'history-0,history-1,history-2,history-3,history-4' 'Initial five recent records'
+    Assert-Equal $first.historyNextCount 5 'Next batch size'
+    Assert-Equal ((Get-WidgetAnnouncementReadIds $alerts $first $true) -join ',') 'history-0,history-1,history-2,history-3,history-4' 'Only shown records become read'
+    $second=Get-WidgetVisibleActivityView $activity $false $true 10
+    Assert-Equal $second.history.Count 10 'Second batch'
+    Assert-Equal $second.historyNextCount 2 'Final partial batch'
+    $all=Get-WidgetVisibleActivityView $activity $false $true 15
+    Assert-Equal $all.history.Count 12 'Final page includes all remaining rows'
+    Assert-Equal $all.historyNextCount 0 'No more button after the end'
+    Assert-Equal $activity.history.Count 12 'Stored history retained'
+}
 if ($script:failures) { throw "$script:failures native layout tests failed" }

@@ -379,6 +379,25 @@ test('hidden compact details never acknowledge notices and a visible detail ackn
   assert.deepEqual(view.announcementIdsForReading(null, displayed, true), []);
 });
 
+test('history opens with five recent rows and only displayed batches become read', () => {
+  const history = Array.from({length:12}, (_,i)=>({id:`history-${i}`,kind:'regular'}));
+  const activity = {featuredRows:[],earlierRows:[],history};
+  const alerts = {unread:history};
+  assert.equal(view.visibleAnnouncementView(activity).history.length,0);
+  const first = view.visibleAnnouncementView(activity,{historyOpen:true});
+  assert.deepEqual(first.history.map(row=>row.id),['history-0','history-1','history-2','history-3','history-4']);
+  assert.equal(first.historyNextCount,5);
+  assert.deepEqual(view.announcementIdsForReading(alerts,first,true),first.history.map(row=>row.id));
+  const second = view.visibleAnnouncementView(activity,{historyOpen:true,historyLimit:10});
+  assert.equal(second.history.length,10);
+  assert.equal(second.historyNextCount,2);
+  assert.equal(view.announcementIdsForReading(alerts,second,true).includes('history-10'),false);
+  const all = view.visibleAnnouncementView(activity,{historyOpen:true,historyLimit:15});
+  assert.equal(all.history.length,12);
+  assert.equal(all.historyNextCount,0);
+  assert.equal(history.length,12,'Pagination never truncates stored history');
+});
+
 test('no known announcements use one merged notice; transport failure has a different notice and retains known rows', () => {
   assert.equal(typeof view.deriveAnnouncementsView, 'function');
   const empty = view.deriveAnnouncementsView({ status: 'ok', sourceUpdatedAt:at(0), items: [], history: [] }, now, 'UTC', 'zh-CN');

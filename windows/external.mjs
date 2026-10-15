@@ -46,6 +46,8 @@ function normalizedAnnouncement(raw, now, scheduled = false, persisted = false) 
   const deliveredAt = timestamp(persisted ? raw.deliveredAt : raw.delivered_at, now, announcedAt ? Date.parse(announcedAt) : -Infinity);
   const schedule = persisted ? raw.scheduledAt : scheduled ? raw.scheduled_for ?? raw.scheduled_at : null;
   const scheduledMs = preciseTimestamp(schedule);
+  const sourceHint = persisted && raw.certainty !== 'announced' && !deliveredAt &&
+    ['active', 'recent', 'inactive'].includes(raw.sourceHint) ? raw.sourceHint : null;
   return {
     id: sourceUrl + '#' + kind,
     kind, announcedAt, certainty: raw.certainty === 'announced' ? 'announced' : 'unconfirmed',
@@ -55,7 +57,8 @@ function normalizedAnnouncement(raw, now, scheduled = false, persisted = false) 
     deliveredAt, scope: text(raw.scope), scopeLabel: text(persisted ? raw.scopeLabel : raw.scope_label),
     sourceUrl, deliverySourceUrl: deliveredAt ? safeHttpsUrl(persisted ? raw.deliverySourceUrl : raw.delivered_source_url) : null,
     summary: text(raw.summary ?? (scheduled ? raw.note_en : null)), summaryZh: text(persisted ? raw.summaryZh : raw.summary_zh ?? (scheduled ? raw.note_zh : null)),
-    sourceWithdrawn: persisted && raw.sourceWithdrawn === true,
+    sourceHint,
+    sourceWithdrawn: sourceHint === 'inactive' || persisted && raw.sourceWithdrawn === true,
     completionTimeBasis: persisted && raw.completionTimeBasis === 'announcement' ? 'announcement' : null,
     kindBasis: persisted && raw.kindBasis === 'original' ? 'original' : null,
   };
@@ -63,13 +66,26 @@ function normalizedAnnouncement(raw, now, scheduled = false, persisted = false) 
 function deduplicate(items, knownItems = []) {
   // The complete original post overrides a mirror's category, including a
   // previously cached category. Keep that authority across partial refreshes.
-  const originalKinds = new Map([...knownItems, ...items].filter(item => item.kindBasis === 'original')
+  const candidates = [...knownItems, ...items];
+  const originalKinds = new Map(candidates.filter(item => item.kindBasis === 'original')
     .map(item => [item.sourceUrl, item.kind]));
+  // A display-only hint and a mirror's generic record refer to the same post.
+  // Resolve their category once; confirmed evidence still takes precedence.
+  const hintKinds = new Map(candidates.filter(item => item.sourceHint).map(item => [item.sourceUrl, item.kind]));
+  for (const item of candidates) if (hintKinds.has(item.sourceUrl) && confirmedAnnouncement(item))
+    hintKinds.set(item.sourceUrl, item.kind);
   const map = new Map();
   for (let item of items) {
-    const kind = originalKinds.get(item.sourceUrl);
-    if (kind) item = { ...item, kind, id: item.sourceUrl + '#' + kind, kindBasis: 'original' };
+    const kind = originalKinds.get(item.sourceUrl) || hintKinds.get(item.sourceUrl);
+    if (kind) item = { ...item, kind, id: item.sourceUrl + '#' + kind,
+      kindBasis: originalKinds.has(item.sourceUrl) ? 'original' : item.kindBasis };
     const previous = map.get(item.id);
+    // A site's lower-confidence hint cannot replace confirmed wording/evidence.
+    if (previous && item.sourceHint && confirmedAnnouncement(previous)) continue;
+    // A mirror without hint metadata has no authority to change its lifecycle.
+    if (previous?.sourceHint && !item.sourceHint && !confirmedAnnouncement(item)) continue;
+    if (previous?.sourceHint === 'inactive' && item.sourceHint === 'recent')
+      item = { ...item, sourceHint: 'inactive', sourceWithdrawn: true };
     map.set(item.id, previous ? { ...previous, ...item,
       announcedAt: item.announcedAt || previous.announcedAt,
       scheduledAt: item.scheduledAt || previous.scheduledAt,
@@ -79,6 +95,8 @@ function deduplicate(items, knownItems = []) {
       kindBasis: item.kindBasis || previous.kindBasis,
       completionTimeBasis: item.deliveredAt ? item.completionTimeBasis : previous.completionTimeBasis,
       deliverySourceUrl: item.deliverySourceUrl || previous.deliverySourceUrl } : item);
+    const merged = map.get(item.id);
+    if (confirmedAnnouncement(merged)) merged.sourceHint = null;
   }
   // If the original completion post proves a different type, release an older
   // inferred pairing instead of retaining its completion fields through merging.
@@ -150,7 +168,7 @@ function publicRecord({kind, url, at, summary, claim, scope = null, kindBasis = 
     deliverySourceUrl: deliveredAt ? url : null, completionTimeBasis: deliveredAt ? 'announcement' : null,
     certainty: claim === 'announced' || deliveredAt ? 'announced' : 'unconfirmed',
     scheduledAt: null, scheduledDate: null, scheduledTimeZone: null, scope, scopeLabel: null, kindBasis,
-    summary: text(summary), summaryZh: null, sourceWithdrawn: false };
+    summary: text(summary), summaryZh: null, sourceHint: null, sourceWithdrawn: false };
 }
 
 function providerView(records, sourceUpdatedAt, now, stale = false, keepPending = true) {
@@ -173,14 +191,32 @@ function normalizeCodexFeed(data, now, archiveKinds) {
     const kind = /\bbanked reset\b/i.test(summary) ? 'banked' : /\bglobal reset\b/i.test(summary) ? 'regular' :
       archiveKinds.get(url) || categories.get(url) || (/\breset\b/i.test(summary) ? 'regular' : null);
     const claim = postClaim(summary);
-    // Site categories and classifier flags alone cannot confirm an announcement.
-    if (claim === 'unconfirmed') continue;
+    // Read current AND recent site signals, so headline rotation between polls
+    // does not discard a retained signal. These are display-only, never promises.
+    if (claim === 'unconfirmed') {
+      if (post.kind !== 'signal' || !categories.get(url) || String(post.id) !== url.split('/').at(-1) ||
+          data.stale === true || !recentTimestamp(data.fetched_at, now) || now - Date.parse(at) >= MAX_AGE_MS) continue;
+      const headline = data.signal;
+      const matches = headline?.kind === 'signal' && officialPostUrl(headline.url) === url &&
+        String(headline.tweet_id) === String(post.id);
+      const sourceHint = matches && headline.active === false ? 'inactive' :
+        matches && headline.active === true ? 'active' : 'recent';
+      const item = publicRecord({ kind, url, at, summary, claim });
+      records.push({ ...item, sourceHint, sourceWithdrawn: sourceHint === 'inactive' });
+      continue;
+    }
     const scope = /\bpaid accounts\b|\bplus,? pro(?:,? and)? business\b/i.test(summary) ? 'paid' : null;
     const kindBasis = /\b(?:banked|global) reset\b/i.test(summary) ? 'original' : null;
     const item = publicRecord({kind, url, at, summary, claim, scope, kindBasis});
     if (item) records.push(item);
   }
-  return providerView(records, data.fetched_at, now, data.stale === true);
+  const headline = data.signal, headlineUrl = officialPostUrl(headline?.url);
+  // Partial timelines can omit the original post. A validated stop signal may
+  // retire an already-known hint, but cannot create a new record on its own.
+  const inactiveHintUrls = data.stale !== true && recentTimestamp(data.fetched_at, now) &&
+    headline?.kind === 'signal' && headline.active === false && headlineUrl &&
+    String(headline.tweet_id) === headlineUrl.split('/').at(-1) ? [headlineUrl] : [];
+  return { ...providerView(records, data.fetched_at, now, data.stale === true), inactiveHintUrls };
 }
 
 function normalizeCodexHistory(data, now) {
@@ -210,6 +246,10 @@ const active = (item, now) => !item.sourceWithdrawn && (item.deliveredAt
   ? now - Date.parse(item.deliveredAt) < MAX_AGE_MS
   : item.certainty === 'announced' || item.announcedAt && now - Date.parse(item.announcedAt) < MAX_AGE_MS);
 const confirmedAnnouncement = item => item.certainty === 'announced' || Boolean(item.deliveredAt);
+const sourceHintNotice = item => ['active', 'recent'].includes(item.sourceHint) && !item.sourceWithdrawn;
+const noticeEligible = item => confirmedAnnouncement(item) || sourceHintNotice(item);
+const noticeEntry = item => ({ id: item.id, kind: item.kind,
+  ...(!confirmedAnnouncement(item) && sourceHintNotice(item) ? { sourceHint: true } : {}) });
 
 export function normalizeAnnouncements(data, now = Date.now()) {
   const product = data?.products?.codex;
@@ -259,8 +299,8 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
       for(const id of (Array.isArray(tracking.observed) ? tracking.observed : []).slice(-500))if(alertIdentity(id))observed.add(id);
       for(const entry of (Array.isArray(tracking.unread) ? tracking.unread : []).slice(0,100)) {
         const identity = alertIdentity(entry?.id);
-        if(identity && identity.kind === entry.kind && observed.has(identity.id) &&
-          [...snapshot.items,...snapshot.history].some(item=>item.id===identity.id && confirmedAnnouncement(item)))unread.set(identity.id,identity);
+        const record = identity && [...snapshot.items,...snapshot.history].find(item=>item.id===identity.id && noticeEligible(item));
+        if(record && identity.kind === entry.kind && observed.has(identity.id))unread.set(identity.id,noticeEntry(record));
       }
     }
   } catch {}
@@ -290,20 +330,33 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
       return alerts();
     },
     async update(input) {
-      const known=new Map([...snapshot.history,...snapshot.items].map(item=>[item.id,item]));
-      const mergeKnown=item=>known.has(item.id)?deduplicate([known.get(item.id),item])[0]:item;
-      const incomingItems = clean(input?.items), incomingHistory = clean(input?.history);
-      const originals = [...known.values(), ...incomingHistory, ...incomingItems].filter(item=>item.kindBasis === 'original');
-      const freshItems = deduplicate(incomingItems, originals).map(mergeKnown), freshHistory = deduplicate(incomingHistory, originals).map(mergeKnown);
       const fresh=input?.status === 'ok' && !input.stale && recentTimestamp(input.sourceUpdatedAt,now());
+      const inactiveHints = new Set(fresh && Array.isArray(input.inactiveHintUrls)
+        ? input.inactiveHintUrls.map(officialPostUrl).filter(Boolean) : []);
+      const withdrawHint = item => item.sourceHint && inactiveHints.has(item.sourceUrl)
+        ? { ...item, sourceHint: 'inactive', sourceWithdrawn: true } : item;
+      const incomingItems = clean(input?.items), incomingHistory = clean(input?.history);
+      const knownItems = [...snapshot.history,...snapshot.items].map(withdrawHint);
+      const authorities = [...knownItems, ...incomingHistory, ...incomingItems];
+      const known=new Map(deduplicate(knownItems, authorities).map(item=>[item.id,item]));
+      const mergeKnown=item=>known.has(item.id)?deduplicate([known.get(item.id),item])[0]:item;
+      const freshItems = deduplicate(incomingItems, authorities).map(mergeKnown), freshHistory = deduplicate(incomingHistory, authorities).map(mergeKnown);
+      // Measure freshness before merging cached metadata into generic mirror rows.
+      const hintEvidence = new Set([...incomingHistory, ...incomingItems].filter(item=>item.sourceHint).map(item=>item.sourceUrl));
       if(fresh) {
         if(baselineAt !== null)for(const item of freshItems) {
           const completionId = item.deliverySourceUrl + '#' + item.kind;
           const newCompletion = item.completionTimeBasis === 'announcement' && item.deliveredAt &&
             !observed.has(completionId) && known.get(item.id)?.deliverySourceUrl !== item.deliverySourceUrl;
           const publication = newCompletion ? item.deliveredAt : item.announcedAt;
-          if(confirmedAnnouncement(item) && (newCompletion || !observed.has(item.id) || known.has(item.id) && !confirmedAnnouncement(known.get(item.id))) && publication && Date.parse(publication) >= baselineAt)
-            unread.set(item.id,{id:item.id,kind:item.kind});
+          const prior = known.get(item.id);
+          const newConfirmed = confirmedAnnouncement(item) &&
+            (newCompletion || !observed.has(item.id) || prior && !confirmedAnnouncement(prior));
+          const seenPost = observed.has(item.id) || observed.has(item.sourceUrl + (item.kind === 'banked' ? '#regular' : '#banked'));
+          const newHint = sourceHintNotice(item) && hintEvidence.has(item.sourceUrl) &&
+            (!seenPost || prior && !prior.sourceHint && !confirmedAnnouncement(prior));
+          if((newConfirmed || newHint) && publication && Date.parse(publication) >= baselineAt)
+            unread.set(item.id,noticeEntry(item));
         }
         else baselineAt = now();
         for(const item of [...freshHistory,...freshItems]) {
@@ -311,8 +364,11 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
           if(item.completionTimeBasis === 'announcement' && item.deliverySourceUrl)observed.add(item.deliverySourceUrl + '#' + item.kind);
         }
       }
-      for(const item of [...freshHistory,...freshItems])if(!confirmedAnnouncement(item))unread.delete(item.id);
-      const previous = project(), previousItems = previous.items;
+      for(const item of [...freshHistory,...freshItems])if(!noticeEligible(item))unread.delete(item.id);
+      const previous = project();
+      previous.items = deduplicate(previous.items.map(withdrawHint), authorities);
+      previous.history = deduplicate(previous.history.map(withdrawHint), authorities);
+      const previousItems = previous.items;
       const evidence = new Map([...freshHistory, ...freshItems].map(item => [item.id, item]));
       // Absence only changes status when both complete, fresh feeds agree. Failure
       // or an empty single-source lookup must preserve the pending announcement.
@@ -321,9 +377,17 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
         reconciled && !reconciled.has(item.id) && !item.deliveredAt ? {...item,sourceWithdrawn:true} : item);
       for(const item of retained)if(item.sourceWithdrawn)unread.delete(item.id);
       const records = linkCompletions([...previous.history, ...retained, ...freshHistory, ...freshItems]);
-      for (const item of records) if (item.kindBasis === 'original') {
+      for (const item of records) {
+        if (!noticeEligible(item)) unread.delete(item.id);
+        // A cached source can improve an existing record without being fresh
+        // enough to create a notice. Keep its unread type aligned with the card.
+        else if (unread.has(item.id)) unread.set(item.id, noticeEntry(item));
+      }
+      const hintUrls = new Set(knownItems.filter(item=>item.sourceHint).map(item=>item.sourceUrl));
+      for (const item of records) if (item.kindBasis === 'original' || item.sourceHint || hintUrls.has(item.sourceUrl)) {
         const oldId = item.sourceUrl + (item.kind === 'banked' ? '#regular' : '#banked');
-        if (unread.delete(oldId)) unread.set(item.id, {id:item.id,kind:item.kind});
+        if (observed.has(oldId)) observed.add(item.id);
+        if (unread.delete(oldId) && noticeEligible(item)) unread.set(item.id, noticeEntry(item));
       }
       for (const item of records) if (item.deliverySourceUrl && item.deliverySourceUrl !== item.sourceUrl) {
         const alias = item.deliverySourceUrl + '#' + item.kind;
@@ -339,7 +403,8 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
         history: records.filter(item=>historicalIds.has(item.id) || historicalIds.has(item.deliverySourceUrl + '#' + item.kind)),
         sourceUpdatedAt: timestamp(input?.sourceUpdatedAt, now()) || snapshot.sourceUpdatedAt,
         stale: input?.status !== 'ok' || input?.stale === true || currentRecords.some(item => !item.sourceWithdrawn &&
-          !evidence.has(item.id) && !evidence.has(item.deliverySourceUrl + '#' + item.kind)) };
+          (item.sourceHint ? !hintEvidence.has(item.sourceUrl) :
+            !evidence.has(item.id) && !evidence.has(item.deliverySourceUrl + '#' + item.kind))) };
       await persist();
       return project();
     },
@@ -399,9 +464,9 @@ export async function queryExternal({ fetchFn = fetch, now = Date.now() } = {}) 
     reason: fresh.length ? null : views.some(view=>view.reason === 'source-stale') ? 'source-stale' :
       views.some(view=>view.reason === 'invalid-data') ? 'invalid-data' : 'request-failed',
     items: records.filter(item=>active(item, now) && (activeIds.has(item.id) || activeIds.has(item.deliverySourceUrl + '#' + item.kind))),
-    history: records, sourceUpdatedAt, stale: !fresh.length };
+    history: records, sourceUpdatedAt, stale: !fresh.length, inactiveHintUrls: feed.inactiveHintUrls || [] };
   // These feeds are partial and retain different event stages. Absence cannot withdraw a promise.
-  const latest = records.filter(item=>item.kind === 'regular' && item.announcedAt)
+  const latest = records.filter(item=>item.kind === 'regular' && item.announcedAt && !item.sourceHint)
     .sort((a,b)=>Date.parse(b.deliveredAt || b.announcedAt)-Date.parse(a.deliveredAt || a.announcedAt))[0];
   const lastGlobal = latest ? { announcedAt: latest.announcedAt, deliveredAt: latest.deliveredAt,
     sourceUrl: latest.sourceUrl, deliverySourceUrl: latest.deliverySourceUrl, scope: latest.scope,

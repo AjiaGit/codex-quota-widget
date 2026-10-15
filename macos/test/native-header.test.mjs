@@ -40,12 +40,17 @@ import CoreGraphics
     let reset = NativeAnnouncementAlerts(object: ["unread": [["id": "https://example.org/reset#regular", "kind": "regular"]]])
     let invalid = NativeAnnouncementAlerts(object: ["unread": [["id": "javascript:alert(1)#banked", "kind": "banked"], ["id": "https://example.org/hint#hinted", "kind": "hinted"]]])
     let both = NativeAnnouncementAlerts(object: ["unread": [["id": "https://example.org/grant#banked", "kind": "banked"], ["id": "https://example.org/reset#regular", "kind": "regular"]]])
+    let hint = NativeAnnouncementAlerts(object: ["unread": [["id": "https://example.org/site#regular", "kind": "regular", "sourceHint": true]]])
+    let mixed = NativeAnnouncementAlerts(object: ["unread": [["id": "https://example.org/site#regular", "kind": "regular", "sourceHint": true], ["id": "https://example.org/grant#banked", "kind": "banked"]]])
     let frames = [36.0, 48.0, 100.0].map { side -> [Double] in
       let rect = nativeCompactNoticeRect(in: CGRect(x: 0, y: 0, width: side, height: side))
       return [side, Double(rect.minX), Double(rect.minY), Double(rect.width), Double(rect.height)]
     }
     let result: [String: Any] = ["grant": grant.tooltip(NativeLocalizer(setting: .simplifiedChinese)),
       "reset": reset.tooltip(NativeLocalizer(setting: .english)), "both": both.tooltip(NativeLocalizer(setting: .english)),
+      "hintUnread": hint.hasUnread, "hint": hint.tooltip(NativeLocalizer(setting: .english)),
+      "hintZh": hint.tooltip(NativeLocalizer(setting: .simplifiedChinese)),
+      "mixed": mixed.tooltip(NativeLocalizer(setting: .english)),
       "invalid": invalid.hasUnread, "frames": frames]
     print(String(data: try JSONSerialization.data(withJSONObject: result), encoding: .utf8)!)
   }
@@ -54,6 +59,10 @@ import CoreGraphics
   assert.match(output.reset, /global reset/);
   assert.match(output.both, /banked reset grant.*global reset/);
   assert.equal(output.invalid, false);
+  assert.equal(output.hintUnread, true);
+  assert.match(output.hint, /monitoring-site hint/i);
+  assert.match(output.hintZh, /监控网站提示/);
+  assert.match(output.mixed, /public updates/i);
   for (const [side,x,y,width,height] of output.frames) {
     assert.ok(width >= 5 && width <= 8 && width === height);
     assert.ok(x >= 5 && y >= 5 && x + width <= side - 5 && y + height <= side - 5);

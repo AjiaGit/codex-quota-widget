@@ -374,6 +374,7 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
    Show-External
    Assert-Equal $form.Top $anchor.y 'Short view starts at the user anchor'
    $script:historyExpanded=$true;Show-External
+   while($script:visibleActivityView.historyNextCount -gt 0){$historyMore.PerformClick()}
    Assert-Equal $form.Top $screen.Top 'Long history temporarily fits the full screen'
    Save-WindowPosition
    Assert-Equal (Read-WidgetJson $temp).detailY $anchor.y 'Temporary screen fitting must not overwrite the user anchor'
@@ -395,7 +396,15 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
    Show-External
    Assert-Equal $historyRowsPanel.Controls.Count 0 'Hidden history must not create fifty sets of native controls'
    $script:historyExpanded=$true;Show-External
-   Assert-Equal $script:historyRows.Count 50 'All history records are available when opened'
+   Assert-Equal $script:historyRows.Count 5 'History initially creates only five recent records'
+   $first=$script:historyRows[0];$historyMore.PerformClick()
+   Assert-Equal $script:historyRows.Count 10 'More history appends five records'
+   if(-not [object]::ReferenceEquals($first,$script:historyRows[0])){throw 'Appending history rebuilt previously shown controls'}
+   while($script:visibleActivityView.historyNextCount -gt 0){$historyMore.PerformClick()}
+   Assert-Equal $script:historyRows.Count 50 'Every stored record is still accessible in batches'
+   Assert-Equal $script:visibleActivityView.historyNextCount 0 'No more action at the end'
+   $historyButton.PerformClick();$historyButton.PerformClick()
+   Assert-Equal $script:historyRows.Count 5 'Reopening history starts with five records again'
    $first=$script:historyRows[0];Show-External
    if(-not [object]::ReferenceEquals($first,$script:historyRows[0])){throw 'An unchanged refresh rebuilt the history controls'}
   }finally{$script:externalData=$oldExternal;$script:historyExpanded=$false;$script:announcementRenderKey='';Show-External}
@@ -564,7 +573,7 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
    $form.ClientSize=[Drawing.Size]::new(606,500)
    $script:externalData=[pscustomobject]@{status='ok';announcements=[pscustomobject]@{status='ok';stale=$false;sourceUpdatedAt=$now.ToString('o');items=@();history=@()}}
    foreach($i in 1..50){$script:externalData.announcements.history+=,[pscustomobject]@{id=('https://example.invalid/FABRICATED-viewport-'+$i+'#regular');kind='regular';sourceUrl='https://example.invalid/FABRICATED';certainty='announced';announcedAt=$now.AddDays(-$i).ToString('o');deliveredAt=$now.AddDays(-$i).ToString('o')}}
-   Show-External;$body.AutoScrollPosition=[Drawing.Point]::Empty
+   Show-External;while($script:visibleActivityView.historyNextCount -gt 0){$historyMore.PerformClick()};$body.AutoScrollPosition=[Drawing.Point]::Empty
    $node=$ast.Find({param($n) $n -is [Management.Automation.Language.InvokeMemberExpressionAst] -and $n.Expression.Extent.Text -eq '$body' -and $n.Member.Value -eq 'Add_Scroll'},$true)
    if(-not $node){throw 'Native scroll does not update the activity viewport'}
    & $node.Arguments[0].ScriptBlock.GetScriptBlock()
@@ -648,6 +657,8 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
     Start-ModeTransition 'Detail'
     if($form.ClientSize.Width -lt 404 -or $form.ClientSize.Height -lt 390){throw 'Expanded detail kept compact dimensions'}
     $script:historyExpanded=$true;Show-External
+    Assert-Equal $script:historyRows.Count 5 'History still opens in batches after language switching'
+    while ($script:visibleActivityView.historyNextCount -gt 0) {$historyMore.PerformClick()}
     Assert-Equal $script:historyRows.Count 50 'All history survives language switching'
     Assert-Equal $title.Text (T 'app') 'Title translated'
     Assert-Equal $cadence.Text (T 'refreshCadence') 'Footer translated'

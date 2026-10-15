@@ -336,6 +336,8 @@ $script:layoutPlus = $null
 $script:layoutBusy = $false
 $script:detailDragging = $false
 $script:historyExpanded = $false
+$script:historyLimit = 5
+$script:activityRecordKeys = @{}
 $script:visibleActivityView = $null
 $script:announcementRenderKey = ''
 $script:activityRenderKeys = @{}
@@ -578,13 +580,14 @@ $activityEmpty=New-Label '' 0 0 346 22 10.5;$activityEmptyHelp=New-Label (T 'act
 $recoveryWarning=New-Label '' 0 0 346 22 10.5
 foreach ($control in @($activityHeading,$localTimeNote,$publicStatusPanel,$recoveryWarning,$activityRowsPanel,$earlierButton,$earlierRowsPanel,$activityEmpty,$activityEmptyHelp)){[void]$announcementPanel.Controls.Add($control)}
 $historyButton=New-DisclosureButton 'history' 'announcement-history-toggle';$historyButton.Add_Click({$script:historyExpanded=-not $script:historyExpanded;Show-External})
+$historyMore=New-DisclosureButton '' 'history-more';$oldFont=$historyMore.Font;$historyMore.Font=[Drawing.Font]::new('Segoe UI',9.75,[Drawing.FontStyle]::Underline);$oldFont.Dispose();$historyMore.Tag='muted';$historyMore.ShowChevron=$false;$historyMore.Add_Click({$script:historyLimit+=5;Show-External})
 $historyRowsPanel=New-Object Windows.Forms.Panel
 $historyAttribution=New-Object Windows.Forms.FlowLayoutPanel;$historyAttribution.WrapContents=$true
 $historyLabel=New-Label (T 'historyAttribution') 0 0 200 24 9.75;$historyLabel.AutoSize=$true
 $historyLink=[WidgetLinkLabel]::new();$historyLink.Text='codex-resets.com';$historyLink.Font=[Drawing.Font]::new('Segoe UI',9.75);$historyLink.AutoSize=$true;$historyLink.UseMnemonic=$false
 [void]$historyLink.Links.Add(0,$historyLink.Text.Length,'https://codex-resets.com/');$historyLink.Add_LinkClicked({try{Start-Process -FilePath 'https://codex-resets.com/'}catch{}})
 [void]$historyAttribution.Controls.Add($historyLabel);[void]$historyAttribution.Controls.Add($historyLink)
-foreach ($control in @($historyButton,$historyRowsPanel,$historyAttribution)){[void]$historyPanel.Controls.Add($control)}
+foreach ($control in @($historyButton,$historyRowsPanel,$historyMore,$historyAttribution)){[void]$historyPanel.Controls.Add($control)}
 $sourcesButton=New-DisclosureButton 'sources' 'data-sources-toggle';$sourcesButton.Add_Click({Toggle-DataSources});[void]$sourcesPanel.Controls.Add($sourcesButton)
 $sourceChecked=New-Label '' 0 0 346 24 9.75;[void]$sourcesPanel.Controls.Add($sourceChecked)
 $attribution=New-Object Windows.Forms.FlowLayoutPanel
@@ -672,7 +675,7 @@ function Layout-AnnouncementRows($parent, $rows, [int]$width, [int]$startY=0) {
         if ($parts.source -and -not $stacked) {Set-ControlBox $parts.source ($width-$sourceWidth) $insideY $sourceWidth $titleHeight}
         $insideY+=$titleHeight+2
         if ($parts.source -and $stacked) {$insideY+=(Set-WrappedBox $parts.source $left $insideY $mainWidth 20)+2}
-        foreach ($control in @($parts.fact,$parts.missing,$parts.status) | Where-Object {$_ -and $_.Text}) {$insideY+=(Set-WrappedBox $control $left $insideY $mainWidth 20)+2}
+        foreach ($control in @($parts.monitor,$parts.fact,$parts.missing,$parts.status) | Where-Object {$_ -and $_.Text}) {$insideY+=(Set-WrappedBox $control $left $insideY $mainWidth 20)+2}
         if ($parts.more) {
             Set-ControlBox $parts.more $left $insideY ([Math]::Min(180,$mainWidth)) 26;$insideY+=26
             $expanded=[bool]$script:recordExpanded[$parts.key];$parts.more.Expanded=$expanded;$parts.extraPanel.Visible=$expanded
@@ -779,11 +782,13 @@ function Update-ResponsiveLayout {
             if ($hasEarlier) {Set-ControlBox $earlierButton 0 $aY $cw 34;$aY+=34;if ($script:earlierExpanded) {Set-ControlBox $earlierRowsPanel 0 $aY $cw 1;$aY+=(Layout-AnnouncementRows $earlierRowsPanel $script:earlierRows $cw)}}
             $announcementPanel.Height=$aY+10
             Set-ControlBox $historyButton 0 10 $cw 30;$historyButton.Expanded=$script:historyExpanded
-            $historyRowsPanel.Visible=$script:historyExpanded;$historyAttribution.Visible=$script:historyExpanded;$historyHeight=50
+            $historyRowsPanel.Visible=$script:historyExpanded;$historyAttribution.Visible=$script:historyExpanded;$historyMore.Visible=$script:historyExpanded -and $script:visibleActivityView.historyNextCount -gt 0;$historyHeight=50
             if ($script:historyExpanded) {
                 Set-ControlBox $historyRowsPanel 0 48 $cw 1;$rowsHeight=Layout-AnnouncementRows $historyRowsPanel $script:historyRows $cw
                 if ($script:historyEmpty) {$rowsHeight=Set-WrappedBox $script:historyEmpty 0 0 $cw 22}
-                $historyRowsPanel.Height=[Math]::Max(1,$rowsHeight);Set-ControlBox $historyAttribution 0 (48+$rowsHeight+8) $cw 24
+                $historyRowsPanel.Height=[Math]::Max(1,$rowsHeight);$historyEnd=48+$rowsHeight+8
+                if ($historyMore.Visible) {Set-ControlBox $historyMore 0 $historyEnd $cw 30;$historyEnd+=38}
+                Set-ControlBox $historyAttribution 0 $historyEnd $cw 24
                 $historyAttribution.Height=[Math]::Max(24,$historyAttribution.GetPreferredSize([Drawing.Size]::new($cw,0)).Height);$historyHeight=$historyAttribution.Bottom+10
             }
             $historyPanel.Height=$historyHeight;Set-ControlBox $sourcesButton 0 10 $cw 30;$sourcesButton.Expanded=$script:sourcesExpanded
@@ -945,7 +950,8 @@ function New-AnnouncementControl($row) {
     $heading=New-Label $view.title 36 30 346 22 11.25 $true;$heading.Tag='strong'
     $fact=New-Label $view.fact 36 54 346 22 10.5;$fact.Visible=[bool]$view.fact;$statusLine=New-Label $view.status 36 80 346 22 9.75;$statusLine.Visible=[bool]$view.status
     $missing=if ($view.missing) {New-Label (T 'completionNotProvided') 36 80 346 22 10.5} else {$null}
-    $sourceLink=if ($row.sourceUrl) {New-ActivityLink (T 'announcementSource') $row.sourceUrl} else {$null}
+    $sourceLink=if ($row.sourceUrl) {New-ActivityLink (T $(if ($row.sourceHint) {'viewSource'} else {'announcementSource'})) $row.sourceUrl} else {$null}
+    $monitorLink=if ($row.monitorSourceUrl) {New-ActivityLink (T 'siteHintSource') $row.monitorSourceUrl} else {$null}
     $more=$null;$extraPanel=$null;$key=if ($row.key) {[string]$row.key} else {[string]$row.sortAt+'/'+[string]$row.title}
     if ($view.extra -or $row.deliverySourceUrl) {
         $more=New-DisclosureButton '' 'record-details-toggle';$more.Text=T $(if ($row.kind -eq 'recovery') {'recoveryMore'} else {'moreMessage'});$oldFont=$more.Font;$more.Font=[Drawing.Font]::new('Segoe UI',9.75,[Drawing.FontStyle]::Underline);$oldFont.Dispose();$more.ShowChevron=$false;$more.Tag=@{key=$key}
@@ -954,9 +960,9 @@ function New-AnnouncementControl($row) {
         if ($view.extra){$extra=New-Label $view.extra 0 0 346 24 9.75;[void]$extraPanel.Controls.Add($extra)}
         if ($row.deliverySourceUrl){[void]$extraPanel.Controls.Add((New-ActivityLink (T 'deliverySource') $row.deliverySourceUrl))}
     }
-    foreach ($control in @($icon,$label,$heading,$fact,$statusLine,$missing,$sourceLink,$more,$extraPanel) | Where-Object {$_}){[void]$panel.Controls.Add($control)}
+    foreach ($control in @($icon,$label,$heading,$fact,$statusLine,$missing,$sourceLink,$monitorLink,$more,$extraPanel) | Where-Object {$_}){[void]$panel.Controls.Add($control)}
     $panel.Add_Paint({param($sender,$e);$pen=[Drawing.Pen]::new($script:colors.line,1);try{$e.Graphics.DrawLine($pen,0,$sender.Height-1,$sender.Width,$sender.Height-1)}finally{$pen.Dispose()}})
-    $panel.Tag=@{key=$key;icon=$icon;label=$label;title=$heading;fact=$fact;status=$statusLine;missing=$missing;source=$sourceLink;more=$more;extraPanel=$extraPanel};return $panel
+    $panel.Tag=@{key=$key;icon=$icon;label=$label;title=$heading;fact=$fact;status=$statusLine;missing=$missing;source=$sourceLink;monitor=$monitorLink;more=$more;extraPanel=$extraPanel};return $panel
 }
 function Get-ControlOwnedFonts($control) {
     if ($control -is [Windows.Forms.Label] -or $control -is [Windows.Forms.Button]) {$control.Font}
@@ -969,6 +975,7 @@ function Clear-PanelControls($panel) {
 }
 function Show-External {
     $script:externalLayoutChanged=$false
+    if (-not $script:historyExpanded) {$script:historyLimit=5}
     $now=[DateTimeOffset]::UtcNow
     $activityInputKey=@{language=$script:language;status=$script:data.status;recovery=$script:data.recoveryHistory;feed=$script:externalData.announcements;time=[Math]::Floor($now.ToUnixTimeMilliseconds()/30000)} | ConvertTo-Json -Depth 12 -Compress
     if ($activityInputKey -cne $script:activityInputKey -or -not $script:cachedActivityView) {
@@ -977,19 +984,19 @@ function Show-External {
     }
     $view=$script:cachedActivityView
     $notice=Get-WidgetPublicNoticeView $script:externalData $script:language $now
-    $renderKey=@{language=$script:language;view=$view;notice=$notice;earlier=$script:earlierExpanded;history=$script:historyExpanded;
+    $renderKey=@{language=$script:language;view=$view;notice=$notice;earlier=$script:earlierExpanded;history=$script:historyExpanded;historyLimit=$script:historyLimit;
         recoveryStatus=$script:data.recoveryHistory.status;pending=[bool]$script:externalTask;retrying=[bool]($script:externalTask -and -not $script:externalTask.IsCompleted)} | ConvertTo-Json -Depth 12 -Compress
     if ($script:announcementRenderKey -ne '' -and $renderKey -ceq $script:externalRenderKey) {Update-AnnouncementIndicator;Start-AnnouncementRead;return}
     $paintBatch=[WidgetRenderBatch]::Pause($form)
     try {
     $partition=Get-WidgetActivityPartition $view.active
     $script:activityView=[pscustomobject]@{featured=$partition.featured;earlier=$partition.earlier;history=$view.history}
-    $script:visibleActivityView=Get-WidgetVisibleActivityView $script:activityView $script:earlierExpanded $script:historyExpanded
+    $script:visibleActivityView=Get-WidgetVisibleActivityView $script:activityView $script:earlierExpanded $script:historyExpanded $script:historyLimit
     $key=$view | ConvertTo-Json -Depth 8 -Compress
     $force=$script:announcementRenderKey -eq ''
     if ($force) {
         foreach ($panel in @($activityRowsPanel,$earlierRowsPanel,$historyRowsPanel)) {Clear-PanelControls $panel}
-        $script:activityRenderKeys=@{};$script:announcementRows=@();$script:earlierRows=@();$script:historyRows=@();$script:historyEmpty=$null
+        $script:activityRenderKeys=@{};$script:activityRecordKeys=@{};$script:announcementRows=@();$script:earlierRows=@();$script:historyRows=@();$script:historyEmpty=$null
     }
     # Build hidden disclosures only when opened, and keep native controls across
     # unchanged refreshes. A fifty-record archive otherwise creates 500 controls
@@ -997,7 +1004,7 @@ function Show-External {
     $groups=@(
         @{panel=$activityRowsPanel;records=@($partition.featured);enabled=$true;slot='announcementRows'},
         @{panel=$earlierRowsPanel;records=@($partition.earlier);enabled=$script:earlierExpanded;slot='earlierRows'},
-        @{panel=$historyRowsPanel;records=@($view.history);enabled=$script:historyExpanded;slot='historyRows'}
+        @{panel=$historyRowsPanel;records=@($script:visibleActivityView.history);enabled=$script:historyExpanded;slot='historyRows'}
     )
     foreach ($group in $groups) {
         if (-not $group.enabled) {continue}
@@ -1005,13 +1012,20 @@ function Show-External {
         if ($rowKey -ceq $script:activityRenderKeys[$group.slot]) {continue}
         $group.panel.SuspendLayout()
         try {
-            Clear-PanelControls $group.panel;$rows=@()
-            foreach ($row in $group.records) {
+            $rowKeys=@($group.records | ForEach-Object {@{language=$script:language;row=$_} | ConvertTo-Json -Depth 8 -Compress})
+            $oldKeys=@(if ($script:activityRecordKeys.ContainsKey($group.slot)) {$script:activityRecordKeys[$group.slot]})
+            $rows=@((Get-Variable -Scope Script -Name $group.slot).Value)
+            $append=$group.slot -eq 'historyRows' -and $oldKeys.Count -gt 0 -and $oldKeys.Count -le $rowKeys.Count -and $rows.Count -eq $oldKeys.Count
+            if ($append) {for($i=0;$i -lt $oldKeys.Count;$i++){if($oldKeys[$i] -cne $rowKeys[$i]){$append=$false;break}}}
+            if (-not $append) {Clear-PanelControls $group.panel;$rows=@()}
+            $added=@()
+            foreach ($row in @($group.records | Select-Object -Skip $rows.Count)) {
                 $panel=New-AnnouncementControl $row
                 if ($group.slot -ne 'announcementRows') {$panel.Visible=$false}
-                $rows+=,$panel
+                $added+=,$panel
             }
-            $group.panel.Controls.AddRange([Windows.Forms.Control[]]$rows)
+            $group.panel.Controls.AddRange([Windows.Forms.Control[]]$added);$rows+=@($added)
+            $script:activityRecordKeys[$group.slot]=$rowKeys
         } finally {$group.panel.ResumeLayout($false)}
         Set-Variable -Scope Script -Name $group.slot -Value $rows
         if ($group.slot -eq 'historyRows') {
@@ -1030,6 +1044,7 @@ function Show-External {
     $publicRetry.Text=T $(if ($script:externalTask -and -not $script:externalTask.IsCompleted){'publicRetrying'}else{'publicRetry'});$publicRetry.Enabled=$null -eq $script:externalTask
     $recoveryWarning.Text=if ($script:data.recoveryHistory.status -eq 'unsaved'){T 'recoveryUnsaved'}else{''};$recoveryWarning.Visible=[bool]$recoveryWarning.Text
     $earlierButton.Text=T 'earlierUpdates' @($partition.earlier.Count);$earlierButton.Expanded=$script:earlierExpanded
+    $historyMore.Text=T 'historyMore' @($script:visibleActivityView.historyNextCount);$historyMore.AccessibleName=$historyMore.Text
     $historyButton.Text=T 'announcementHistory';$historyButton.AccessibleName=T $(if ($script:historyExpanded){'collapseHistory'}else{'expandHistory'});$historyLabel.Text=T 'historyAttribution'
     $sourcesButton.Text=T 'dataSources';$sourcesButton.AccessibleName=$sourcesButton.Text;Set-AttributionLinks (T 'sourceLinks');$cadence.Text=T 'refreshCadence'
     Update-ResponsiveLayout;Update-AnnouncementIndicator;Start-AnnouncementRead

@@ -134,6 +134,8 @@ struct NativeLocalizer {
         case "new_grant": pair = ("New banked reset grant announcement · Click for details", "有新的重置次数赠送公告，点击查看详情")
         case "new_global_reset": pair = ("New global reset announcement · Click for details", "有新的全局额度重置公告，点击查看详情")
         case "new_announcements": pair = ("New banked reset grant and global reset announcements · Click for details", "有新的重置次数赠送和全局额度重置公告，点击查看详情")
+        case "new_source_hints": pair = ("New monitoring-site hint · Click for details", "有新的监控网站提示，点击查看详情")
+        case "new_public_updates": pair = ("New public updates · Click for details", "有新的公开消息，点击查看详情")
         case "cli_missing": pair = ("Codex CLI was not found. Install Codex CLI or the Codex desktop app, then reopen this widget.", "未找到 Codex CLI。请安装 Codex CLI 或 Codex 桌面应用，然后重新打开此工具。")
         case "signed_out": pair = ("Sign in to Codex, or run codex login in Terminal, then choose Refresh.", "请先登录 Codex，或在终端运行 codex login，然后点击刷新。")
         case "timeout": pair = ("Codex took too long to respond. Check your connection and choose Refresh.", "Codex 查询超时。请检查网络，然后点击刷新。")
@@ -151,6 +153,8 @@ struct NativeLocalizer {
 struct NativeAnnouncementAlerts {
     let ids: [String]
     private let kinds: Set<String>
+    private let hasSourceHints: Bool
+    private let hasAnnouncements: Bool
     var hasUnread: Bool { !ids.isEmpty }
 
     init(object: [String: Any]?) {
@@ -162,10 +166,13 @@ struct NativeAnnouncementAlerts {
         }
         ids = entries.compactMap { $0["id"] as? String }
         kinds = Set(entries.compactMap { $0["kind"] as? String })
+        hasSourceHints = entries.contains { $0["sourceHint"] as? Bool == true }
+        hasAnnouncements = entries.contains { $0["sourceHint"] as? Bool != true }
     }
 
     func tooltip(_ localizer: NativeLocalizer) -> String {
         guard hasUnread else { return "" }
+        if hasSourceHints { return localizer.text(hasAnnouncements ? "new_public_updates" : "new_source_hints") }
         return localizer.text(kinds.count > 1 ? "new_announcements" : kinds.contains("banked") ? "new_grant" : "new_global_reset")
     }
 }

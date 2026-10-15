@@ -29,14 +29,18 @@ $script:WidgetStrings = @{
         deliveredResetTitle = 'Source recorded a global reset'
         unconfirmedGrantTitle = 'Reset grant update'
         unconfirmedResetTitle = 'Quota reset update'
+        siteHintTitle = 'Monitoring-site hint'; siteHintSource = 'Source: codex-reset.com'; viewSource = 'View original'
+        siteHintStatus = 'Site signal; not a confirmed reset announcement'
+        siteHintExpired = 'Site hint expired; no reset confirmation inferred'; siteHintInactive = 'Site no longer marks this signal as active'
         recoveryMore = 'About this record'
         publicRetrying = 'Refreshing public updates'
         detailsPartial = 'The list may be incomplete; the available count above is authoritative.'
-        historyAttribution = 'Earlier historical records'
+        historyAttribution = 'Earlier historical records'; historyMore = 'Show {0} more'
         resetLabel = 'Banked resets'
         disclosureDetails = 'Details'
         recoveryCount = '{0} records'; recoveryNone = 'No records'; relatedBanked = 'Banked reset news'; relatedRegular = 'Global reset news'; phaseUnconfirmed = 'Tracker has no completion time'; sourceScope = 'Tracker scope: {0}'; postedOn = 'Posted: {0}'
         recoveryTitle = 'My quota recoveries'; recoveryDetected = 'Noticed locally: {0}'; recoveryObserved = 'Previous reading: {0}'; recoveryExplanation = 'Changes to your own quota.'; recoveryTracking = 'Recording since {0}.'; recoveryEmpty = 'No new quota recovery recorded yet.'; recoveryUnavailable = 'Tracking unavailable. Refresh after signing in to Codex.'; recoveryUnsaved = 'Local saving failed; new records may be lost when the app closes.'
+        newSourceHints = 'New monitoring-site hint · Click for details'; newPublicUpdates = 'New public updates · Click for details'
         newGrant = 'New banked reset grant announcement · Click for details'; newGlobalReset = 'New global reset announcement · Click for details'; newAnnouncements = 'New banked reset grant and global reset announcements · Click for details'
         app = 'Codex quota'; loading = 'Loading'; reading = 'Reading quota'; updated = 'Updated'; unavailable = 'Unavailable'; refreshing = 'Refreshing'
         compact = 'Mini'; refresh = 'Refresh'; weekly = 'Weekly remaining'; untilReset = 'Time to reset'; reset = 'Resets {0}'; resetUnknown = 'Reset time —'
@@ -107,14 +111,18 @@ $script:WidgetStrings = @{
         deliveredResetTitle = '来源已记录全局额度重置'
         unconfirmedGrantTitle = '重置次数赠送消息'
         unconfirmedResetTitle = '额度重置消息'
+        siteHintTitle = '监控网站提示'; siteHintSource = '来源：codex-reset.com'; viewSource = '查看原文'
+        siteHintStatus = '网站信号，尚未确认为重置预告'
+        siteHintExpired = '提示已过期，不代表重置已完成'; siteHintInactive = '网站已停止提示这条信号'
         recoveryMore = '记录说明'
         publicRetrying = '正在刷新公共信息'
         detailsPartial = '列表可能不完整，可用数量以上方显示为准。'
-        historyAttribution = '早期历史记录'
+        historyAttribution = '早期历史记录'; historyMore = '再显示 {0} 条'
         resetLabel = '可用重置'
         disclosureDetails = '详情'
         recoveryCount = '{0} 条记录'; recoveryNone = '暂无记录'; relatedBanked = '重置次数赠送消息'; relatedRegular = '全局重置消息'; phaseUnconfirmed = '网站未提供完成时间'; sourceScope = '网站标注：{0}'; postedOn = '消息发布 {0}'
         recoveryTitle = '我的额度恢复'; recoveryDetected = '本机发现：{0}'; recoveryObserved = '上次读取：{0}'; recoveryExplanation = '这里只记录你自己的额度变化。'; recoveryTracking = '从 {0} 开始记录。'; recoveryEmpty = '还没有新的额度恢复记录。'; recoveryUnavailable = '记录暂不可用，登录 Codex 后刷新。'; recoveryUnsaved = '本地保存失败，本次新记录可能在关闭应用后丢失。'
+        newSourceHints = '有新的监控网站提示，点击查看详情'; newPublicUpdates = '有新的公开消息，点击查看详情'
         newGrant = '有新的重置次数赠送公告，点击查看详情'; newGlobalReset = '有新的全局额度重置公告，点击查看详情'; newAnnouncements = '有新的重置次数赠送和全局额度重置公告，点击查看详情'
         app = 'Codex 周额度'; loading = '读取中'; reading = '正在读取额度'; updated = '数据已更新'; unavailable = '暂不可用'; refreshing = '正在刷新'
         compact = '极简'; refresh = '刷新'; weekly = '本周剩余'; untilReset = '距离重置'; reset = '重置 {0}'; resetUnknown = '重置时间 —'
@@ -277,10 +285,11 @@ function Get-WidgetActivityPartition($rows) {
     }
     [pscustomobject]@{featured=@($featured);earlier=@($earlier)}
 }
-function Get-WidgetVisibleActivityView($activity, [bool]$earlierOpen, [bool]$historyOpen) {
+function Get-WidgetVisibleActivityView($activity, [bool]$earlierOpen, [bool]$historyOpen, [int]$historyLimit=5) {
     $active=@($activity.featured)
     if ($earlierOpen) {$active+=@($activity.earlier)}
-    [pscustomobject]@{active=@($active);history=$(if ($historyOpen) {@($activity.history)} else {@()})}
+    $history=if ($historyOpen) {@($activity.history | Select-Object -First ([Math]::Max(5,$historyLimit)))} else {@()}
+    [pscustomobject]@{active=@($active);history=@($history);historyNextCount=$(if ($historyOpen) {[Math]::Min(5,@($activity.history).Count-@($history).Count)} else {0})}
 }
 function Get-WidgetPublicNoticeView($external, [string]$language, [DateTimeOffset]$now=[DateTimeOffset]::UtcNow) {
     $feed=$external.announcements;$stamp=ConvertTo-WidgetTimestamp $feed.sourceUpdatedAt
@@ -311,14 +320,14 @@ function Get-WidgetActivityPresentation($row, [string]$language) {
     $completed=$row.phase -in @('delivered','archived')
     $explicit=$completed -or $row.explicit
     $key=$(if ($completed) {'delivered'} elseif ($explicit) {'upcoming'} else {'unconfirmed'})+$(if ($row.kind -eq 'banked') {'GrantTitle'} else {'ResetTitle'})
-    $title=Get-WidgetText $(if ($row.withdrawn) {'withdrawnRecord'} else {$key}) $language
+    $title=Get-WidgetText $(if ($row.sourceHint) {'siteHintTitle'} elseif ($row.withdrawn) {'withdrawnRecord'} else {$key}) $language
     $completedText=if ($row.compactCompletedText) {$row.compactCompletedText} else {$row.completedText}
     $scheduledText=if ($row.compactScheduledText) {$row.compactScheduledText} else {$row.scheduledText}
     $announcedText=if ($row.compactAnnouncedText) {$row.compactAnnouncedText} else {$row.announcedText}
     $fact=if ($completedText) {$completedText} elseif ($scheduledText) {$scheduledText} else {$announcedText}
     $extra=@(@($scheduledText,$announcedText) | Where-Object {$_ -and $_ -ne $fact})
     $extra+=@($row.scheduleNote,$row.summary,$row.retentionText) | Where-Object {$_}
-    [pscustomobject]@{title=$title;label=(Get-WidgetText 'publicType' $language);fact=(@($fact,$row.scopeText) | Where-Object {$_}) -join ' · ';status=$(if ($row.phase -in @('waiting','announced')) {Get-WidgetText ('phase'+(Get-Culture).TextInfo.ToTitleCase([string]$row.phase)) $language} else {''});extra=$extra -join [Environment]::NewLine;missing=($row.phase -in @('unknown','unconfirmed'))}
+    [pscustomobject]@{title=$title;label=(Get-WidgetText 'publicType' $language);fact=(@($fact,$row.scopeText) | Where-Object {$_}) -join ' · ';status=$(if ($row.sourceHint) {$row.hintStatus} elseif ($row.phase -in @('waiting','announced')) {Get-WidgetText ('phase'+(Get-Culture).TextInfo.ToTitleCase([string]$row.phase)) $language} else {''});extra=$extra -join [Environment]::NewLine;missing=(-not $row.sourceHint -and $row.phase -in @('unknown','unconfirmed'))}
 }
 function Test-WidgetOutsideClick([string]$mode, [bool]$visible, [bool]$animating,
                                  [Drawing.Rectangle]$frame, [Drawing.Point]$point) {
@@ -433,16 +442,17 @@ function Get-WidgetFiveHourView($quota, [string]$language, [DateTimeOffset]$now 
     [pscustomobject]@{visible=[bool]$visible;percentText=$percentText;resetText=$resetText;compactResetText=$compactResetText}
 }
 function Get-WidgetAnnouncementAlertView($alerts, [string]$language) {
-    $ids=@(); $kinds=@()
+    $ids=@(); $kinds=@(); $hasSourceHints=$false; $hasAnnouncements=$false
     foreach ($row in @($alerts.unread)) {
         if (-not $row -or $row.kind -notin @('banked','regular')) {continue}
         $id=[string]$row.id; $suffix='#'+[string]$row.kind
         if (-not $id.EndsWith($suffix,[StringComparison]::Ordinal)) {continue}
         if (-not (Test-WidgetHttpsUrl $id.Substring(0,$id.Length-$suffix.Length))) {continue}
         $ids+=,$id; $kinds+=,[string]$row.kind
+        if ($row.sourceHint -is [bool] -and $row.sourceHint) {$hasSourceHints=$true} else {$hasAnnouncements=$true}
         if ($ids.Count -ge 100) {break}
     }
-    $key=if (($kinds | Select-Object -Unique).Count -gt 1) {'newAnnouncements'} elseif ($kinds -contains 'banked') {'newGrant'} else {'newGlobalReset'}
+    $key=if ($hasSourceHints) {if ($hasAnnouncements) {'newPublicUpdates'} else {'newSourceHints'}} elseif (($kinds | Select-Object -Unique).Count -gt 1) {'newAnnouncements'} elseif ($kinds -contains 'banked') {'newGrant'} else {'newGlobalReset'}
     [pscustomobject]@{ids=@($ids);hasUnread=($ids.Count -gt 0);tooltip=$(if ($ids.Count) {Get-WidgetText $key $language} else {''})}
 }
 function Get-WidgetAnnouncementReadIds($alerts, $view, [bool]$visible) {
@@ -459,6 +469,7 @@ function ConvertTo-WidgetAnnouncementRow($row, [string]$language, [DateTimeOffse
     $phase=Get-WidgetAnnouncementPhase $row $now
     $completed=$phase -in @('delivered','archived')
     $explicit=$completed -or $row.certainty -eq 'announced'
+    $sourceHint=-not $explicit -and $row.sourceHint -in @('active','recent','inactive')
     if ($historical -and -not $completed) { $phase='unknown' }
     $scheduleKey=$(if ($completed) {'original'} else {'scheduled'})+$(if ($row.kind -eq 'banked') {'Grant'} else {'Reset'})
     $scheduledText=$null; $completedText=$null; $announcedText=$null
@@ -481,7 +492,7 @@ function ConvertTo-WidgetAnnouncementRow($row, [string]$language, [DateTimeOffse
     $announced=ConvertTo-WidgetTimestamp $row.announcedAt
     if ($announced) { $announcedText=Get-WidgetText $(if ($explicit) {'announcedOn'} else {'postedOn'}) $language @((Format-WidgetAnnouncementDate $announced $language $timeZone $now)) }
     $scope=if ($row.scope -eq 'paid') {Get-WidgetText 'paid' $language} elseif ($row.scope -eq 'all') {Get-WidgetText 'all' $language} elseif ($row.scopeLabel) {[string]$row.scopeLabel} else {Get-WidgetText 'unknownScope' $language}
-    if (-not $explicit) {$scope=Get-WidgetText 'sourceScope' $language @($scope)}
+    if ($sourceHint) {$scope=''} elseif (-not $explicit) {$scope=Get-WidgetText 'sourceScope' $language @($scope)}
     $phaseKey=if ($row.sourceWithdrawn) {'sourceWithdrawn'} else {'phase'+(Get-Culture).TextInfo.ToTitleCase($phase)}
     $scheduleNote=if ($scheduled -and $row.scheduledTimeZone) {Get-WidgetText 'sourceTimeZoneNote' $language @([string]$row.scheduledTimeZone)} else {''}
     $summary=if ((Resolve-WidgetLanguage $language) -eq 'zh-CN' -and $row.summaryZh) {[string]$row.summaryZh} elseif ($row.summary) {[string]$row.summary} else {''}
@@ -489,7 +500,8 @@ function ConvertTo-WidgetAnnouncementRow($row, [string]$language, [DateTimeOffse
     if ($scheduled -and $scheduledText) {$compactScheduled=Get-WidgetText $scheduleKey $language @((Format-WidgetCompactDate $scheduled $language $timeZone $now))}
     if ($completed) {$compactCompleted=Get-WidgetText $completionKey $language @((Format-WidgetCompactDate $delivered $language $timeZone $now))}
     if ($announced) {$compactAnnounced=Get-WidgetText $(if ($explicit) {'announcedOn'} else {'postedOn'}) $language @((Format-WidgetCompactDate $announced $language $timeZone $now))}
-    $details=@((Get-WidgetText $phaseKey $language))
+    $hintStatus=if ($sourceHint) {Get-WidgetText $(if ($row.sourceWithdrawn) {'siteHintInactive'} elseif ($historical) {'siteHintExpired'} else {'siteHintStatus'}) $language} else {''}
+    $details=@($(if ($sourceHint) {$hintStatus} else {Get-WidgetText $phaseKey $language}))
     if ($scheduledText) {$details+=,$scheduledText}
     if ($completedText) {$details+=,$completedText}
     if ($announcedText) {$details+=,$announcedText}
@@ -497,10 +509,11 @@ function ConvertTo-WidgetAnnouncementRow($row, [string]$language, [DateTimeOffse
     $details+=,$scope
     [pscustomobject]@{
         key=Get-WidgetAnnouncementKey $row; id=[string]$row.id; kind=[string]$row.kind; explicit=$explicit; withdrawn=[bool]$row.sourceWithdrawn; phase=$phase; sortAt=$(if ($announced) {$announced.ToUnixTimeMilliseconds()} else {[long]::MinValue})
-        title=Get-WidgetText $(if ($row.sourceWithdrawn) {'withdrawnRecord'} elseif ($row.kind -eq 'banked') {if ($explicit) {'confirmedBanked'} else {'relatedBanked'}} else {if ($explicit) {'confirmedRegular'} else {'relatedRegular'}}) $language
+        title=Get-WidgetText $(if ($sourceHint) {'siteHintTitle'} elseif ($row.sourceWithdrawn) {'withdrawnRecord'} elseif ($row.kind -eq 'banked') {if ($explicit) {'confirmedBanked'} else {'relatedBanked'}} else {if ($explicit) {'confirmedRegular'} else {'relatedRegular'}}) $language
         compactScheduledText=$compactScheduled;compactCompletedText=$compactCompleted;compactAnnouncedText=$compactAnnounced
         details=$details -join ' · '; scheduledText=$scheduledText; completedText=$completedText; announcedText=$announcedText; scheduleNote=$scheduleNote; scopeText=$scope
-        summary=$summary
+        summary=$summary;sourceHint=$sourceHint;hintStatus=$hintStatus
+        monitorSourceUrl=$(if ($sourceHint) {'https://codex-reset.com/'} else {$null})
         retentionText=$(if ($phase -eq 'delivered') {Get-WidgetText 'retention' $language} else {''})
         sourceUrl=$(if (Test-WidgetHttpsUrl $row.sourceUrl) {[string]$row.sourceUrl} else {$null})
         deliverySourceUrl=$(if ($completed -and (Test-WidgetHttpsUrl $row.deliverySourceUrl)) {[string]$row.deliverySourceUrl} else {$null})
@@ -516,8 +529,10 @@ function Get-WidgetAnnouncementView($external, [string]$language, [DateTimeOffse
         if (-not $row -or $row.kind -notin @('banked','regular')) { continue }
         $key=Get-WidgetAnnouncementKey $row
         if ($seen.ContainsKey($key)) { continue }; $seen[$key]=$true
-        $view=ConvertTo-WidgetAnnouncementRow $row $language $now
-        if ($view.phase -eq 'archived' -or $row.sourceWithdrawn) {$history.Add($view)} else {$active.Add($view)}
+        $posted=ConvertTo-WidgetTimestamp $row.announcedAt
+        $hintExpired=$row.sourceHint -and $row.certainty -ne 'announced' -and -not $row.deliveredAt -and $posted -and ($now-$posted).TotalHours -ge 24
+        $view=ConvertTo-WidgetAnnouncementRow $row $language $now ([bool]$hintExpired)
+        if ($view.phase -eq 'archived' -or $row.sourceWithdrawn -or $hintExpired) {$history.Add($view)} else {$active.Add($view)}
     }
     foreach ($row in @($feed.history)) {
         if (-not $row -or $row.kind -notin @('banked','regular')) { continue }
@@ -558,13 +573,24 @@ function Merge-WidgetExternalData($previous, $incoming, [bool]$transportFailure 
     $fresh=if ($incoming -and -not $transportFailure) {$incoming.announcements} else {$null}
     $old=if ($previous) {$previous.announcements} else {$null}
     $feed=if ($fresh) {$fresh | ConvertTo-Json -Depth 12 | ConvertFrom-Json} elseif ($old) {$old | ConvertTo-Json -Depth 12 | ConvertFrom-Json} else {[pscustomobject]@{status='unavailable';items=@();history=@();sourceUpdatedAt=$null;stale=$true}}
-    $originalKinds=@{}
+    $originalKinds=@{};$hintKinds=@{};$records=@()
     foreach ($snapshot in @($old,$fresh)) {
         if (-not $snapshot) { continue }
         foreach ($row in @($snapshot.history)+@($snapshot.items)) {
+            if ($row -and $row.kind -in @('banked','regular') -and (Test-WidgetHttpsUrl $row.sourceUrl)) {
+                $records+=,$row
+                if ($row.sourceHint -in @('active','recent','inactive')) {$hintKinds[[string]$row.sourceUrl]=[string]$row.kind}
+            }
             if ($row -and $row.kind -in @('banked','regular') -and $row.kindBasis -eq 'original' -and (Test-WidgetHttpsUrl $row.sourceUrl)) {
                 $originalKinds[[string]$row.sourceUrl]=[string]$row.kind
             }
+        }
+    }
+    # Follow the service's same-post hint category reconciliation across cached
+    # snapshots; confirmed evidence and explicit original categories still win.
+    foreach ($row in $records) {
+        if ($hintKinds.ContainsKey([string]$row.sourceUrl) -and ($row.certainty -eq 'announced' -or $row.deliveredAt)) {
+            $hintKinds[[string]$row.sourceUrl]=[string]$row.kind
         }
     }
     $entries=[ordered]@{}
@@ -577,6 +603,10 @@ function Merge-WidgetExternalData($previous, $incoming, [bool]$transportFailure 
             foreach ($row in @($snapshot.$bucket)) {
                 if (-not $row -or $row.kind -notin @('banked','regular')) { continue }
                 $copy=$row | ConvertTo-Json -Depth 8 | ConvertFrom-Json
+                if ($hintKinds.ContainsKey([string]$copy.sourceUrl)) {
+                    $copy.kind=$hintKinds[[string]$copy.sourceUrl]
+                    $copy | Add-Member -NotePropertyName id -NotePropertyValue ($copy.sourceUrl+'#'+$copy.kind) -Force
+                }
                 if ($originalKinds.ContainsKey([string]$copy.sourceUrl)) {
                     $copy.kind=$originalKinds[[string]$copy.sourceUrl]
                     $copy | Add-Member -NotePropertyName id -NotePropertyValue ($copy.sourceUrl+'#'+$copy.kind) -Force

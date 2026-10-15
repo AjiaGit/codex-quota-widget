@@ -84,6 +84,7 @@ a:hover { color:#24d3a5; }
 .announcement-history .announcement { margin:0; }
 .announcement-history strong { color:var(--text); font-size:14px; line-height:1.5; }
 .announcement-history a { font-size:13px; }
+.history-more { padding:6px 0; margin:4px 0; border:0; color:var(--muted); font-size:13px; text-decoration:underline; text-underline-offset:3px; }
 .language-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:16px 0 0; color:var(--muted); font-size:13px; }
 button,select { font:inherit; border:1px solid var(--line); background:var(--surface); color:var(--text); cursor:pointer; caret-color:#24d3a5; }
 select { padding:8px 10px; border-radius:5px; max-width:70%; }
