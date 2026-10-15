@@ -246,6 +246,29 @@ function Get-VisibleControls([IntPtr]$parent, [int]$processId) {
 function Get-VisibleText([IntPtr]$parent, [int]$processId) {
     @(Get-VisibleControls $parent $processId | ForEach-Object {$_.Text}) -join "`n"
 }
+# Startup can enumerate controls while captions and layout are still changing.
+# Stability is independent of expected values, so a persistently wrong rendering
+# still reaches and fails the original assertions instead of being accepted.
+function Get-StableVisibleSnapshot([IntPtr]$window, [int]$processId) {
+    $deadline=[DateTime]::UtcNow.AddSeconds(5);$previous=$null
+    do {
+        $controls=@(Get-VisibleControls $window $processId)
+        $signature=@($controls | Sort-Object {$_.Handle.ToInt64()} | ForEach-Object {
+            [ordered]@{handle=$_.Handle.ToInt64();parent=$_.ParentHandle.ToInt64();text=$_.Text;bounds=$_.Bounds}
+        }) | ConvertTo-Json -Depth 8 -Compress
+        if ($null -ne $previous -and $signature -ceq $previous) {
+            return [pscustomobject]@{controls=$controls;text=(@($controls | ForEach-Object {$_.Text}) -join "`n")}
+        }
+        $previous=$signature
+        Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw 'Fixture visible controls did not stabilize within five seconds.'
+}
+function Find-SnapshotControl($snapshot, [string]$caption) {
+    $found=@($snapshot.controls | Where-Object {$_.Text -ceq $caption})
+    Assert-True ($found.Count -eq 1) "Expected one fixture control in the consumed snapshot: [$caption]; found $($found.Count)"
+    return $found[0]
+}
 function Find-VisibleControl([IntPtr]$parent, [int]$processId, [string]$caption) {
     $found=@(Get-VisibleControls $parent $processId | Where-Object {$_.Text -ceq $caption})
     Assert-True ($found.Count -eq 1) "Expected one visible fixture control: [$caption]; found $($found.Count)"
@@ -602,8 +625,17 @@ http.createServer(async(req,res)=>{
             $script:layoutNames=Get-VisibleText $handle $ui.Id
             $script:layoutNames.Contains($creditText) -and $script:layoutNames.Contains((Get-WidgetText 'activityHeading' $language))
         } "Current native quota and activity sections failed to render: $language"
+        $initialSnapshot=Get-StableVisibleSnapshot $handle $ui.Id
+        $script:layoutNames=$initialSnapshot.text
+        Write-WidgetJson (Join-Path $OutputDir ("ui-trace-initial-assertions-$language.json")) @{
+            phase='initial-assertions';language=$language;actualText=$script:layoutNames
+            nativeControls=@($initialSnapshot.controls | ForEach-Object {
+                @{nativeHandle=$_.Handle.ToInt64();parentHandle=$_.ParentHandle.ToInt64();actualText=$_.Text;visible=$_.Visible;bounds=$_.Bounds}
+            })
+        }
+        Assert-True ($script:layoutNames.Contains($creditText) -and $script:layoutNames.Contains((Get-WidgetText 'activityHeading' $language))) 'Initial quota and activity sections changed before validation.'
         Assert-True (@([QuotaSmokeWindows]::ReadOwnedControls($handle,0)).Count -eq 0) 'Native reader accepted an unrelated process.'
-        $creditControl=Find-VisibleControl $handle $ui.Id $creditText
+        $creditControl=Find-SnapshotControl $initialSnapshot $creditText
         $wrongProcessRejected=$false
         try {[QuotaSmokeWindows]::ClickOwnedButton($handle,$creditControl.Handle,0)} catch {$wrongProcessRejected=$true}
         Assert-True $wrongProcessRejected 'Native click accepted an unrelated process.'
@@ -621,10 +653,10 @@ http.createServer(async(req,res)=>{
         $completedExpected=@($uiExpected.announcements.items | Where-Object {$_.id -eq 'fixture-announcement-regular-id'})[0]
         $completedFact=$allRecords[0].fact
         $creditBounds=$creditControl.Bounds
-        $activityBounds=(Find-VisibleControl $handle $ui.Id (Get-WidgetText 'activityHeading' $language)).Bounds
-        $moreBounds=(Find-VisibleControl $handle $ui.Id $activityMoreText).Bounds
-        $sourcesBounds=(Find-VisibleControl $handle $ui.Id $sourcesText).Bounds
-        $cadenceBounds=(Find-VisibleControl $handle $ui.Id (Get-WidgetText 'refreshCadence' $language)).Bounds
+        $activityBounds=(Find-SnapshotControl $initialSnapshot (Get-WidgetText 'activityHeading' $language)).Bounds
+        $moreBounds=(Find-SnapshotControl $initialSnapshot $activityMoreText).Bounds
+        $sourcesBounds=(Find-SnapshotControl $initialSnapshot $sourcesText).Bounds
+        $cadenceBounds=(Find-SnapshotControl $initialSnapshot (Get-WidgetText 'refreshCadence' $language)).Bounds
         Assert-True ($creditBounds.Bottom -le $activityBounds.Top -and $activityBounds.Bottom -le $moreBounds.Top -and $moreBounds.Bottom -le $sourcesBounds.Top -and $sourcesBounds.Bottom -le $cadenceBounds.Top) 'Unified detail sections overlapped or changed order.'
         Save-UiEvidence $element $language 'native'
         $buttons=@([QuotaSmokeWindows]::Toolbar($handle,$ui.Id))
@@ -646,13 +678,14 @@ http.createServer(async(req,res)=>{
         Invoke-UiButton $handle $handle $ui.Id $creditText
         Wait-Until {(Get-VisibleText $handle $ui.Id).Contains('Sample grant / 示例发放')} "Inline reset details did not expand: $language"
         Assert-InlineWindow $handle $ui.Id $language
-        $grantRow=(Find-VisibleControl $handle $ui.Id 'Sample grant / 示例发放').ParentHandle
-        $grantValue=Get-VisibleText $grantRow $ui.Id
+        $grantSnapshot=Get-StableVisibleSnapshot $handle $ui.Id
+        $grantRow=(Find-SnapshotControl $grantSnapshot 'Sample grant / 示例发放').ParentHandle
+        $grantValue=@($grantSnapshot.controls | Where-Object {$_.ParentHandle -eq $grantRow} | ForEach-Object {$_.Text}) -join "`n"
         foreach ($field in @(@('grantedAt','grant'),@('expiresAt','expiry'))) {
             $date=Format-WidgetCompactDate ([DateTimeOffset]::FromUnixTimeSeconds([long]$uiExpectedQuota.resetDetails[0].($field[0]))) $language
             Assert-True ($grantValue.Contains((Get-WidgetText $field[1] $language @($date)))) 'Inline grant or expiry field was missing or untranslated.'
         }
-        Assert-True ($grantValue.Contains('Fabricated test data / 虚构测试数据') -and (Get-VisibleText $handle $ui.Id).Contains((Get-WidgetText 'detailsPartial' $language))) 'Inline reset details omitted description or authoritative-count explanation.'
+        Assert-True ($grantValue.Contains('Fabricated test data / 虚构测试数据') -and $grantSnapshot.text.Contains((Get-WidgetText 'detailsPartial' $language))) 'Inline reset details omitted description or authoritative-count explanation.'
         [void](Find-VisibleControl $handle $ui.Id $creditText)
         Save-UiEvidence $element $language 'reset-details-inline'
         Invoke-UiButton $handle $handle $ui.Id $creditText
@@ -694,9 +727,10 @@ http.createServer(async(req,res)=>{
 
         Invoke-UiButton $handle $handle $ui.Id $sourcesText
         Wait-Until {(Get-VisibleText $handle $ui.Id).Contains('codexreset.dev')} 'Data sources did not expand inline.'
-        $sourceOne=(Find-VisibleControl $handle $ui.Id 'codex-reset.com').Bounds
-        $sourceTwo=(Find-VisibleControl $handle $ui.Id 'codexreset.dev').Bounds
-        $cadenceBounds=(Find-VisibleControl $handle $ui.Id (Get-WidgetText 'refreshCadence' $language)).Bounds
+        $sourceSnapshot=Get-StableVisibleSnapshot $handle $ui.Id
+        $sourceOne=(Find-SnapshotControl $sourceSnapshot 'codex-reset.com').Bounds
+        $sourceTwo=(Find-SnapshotControl $sourceSnapshot 'codexreset.dev').Bounds
+        $cadenceBounds=(Find-SnapshotControl $sourceSnapshot (Get-WidgetText 'refreshCadence' $language)).Bounds
         Assert-True ($sourceOne.Top -eq $sourceTwo.Top -and $sourceOne.Right -le $sourceTwo.Left -and $sourceTwo.Bottom -le $cadenceBounds.Top) 'Source links overlapped each other or the separate refresh cadence.'
         Assert-InlineWindow $handle $ui.Id $language
         [void][QuotaSmokeWindows]::ScrollOwnedBody($handle,$scrollBody,$ui.Id,7)
