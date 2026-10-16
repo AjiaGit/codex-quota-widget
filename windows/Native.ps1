@@ -1,6 +1,26 @@
 ﻿# Shared native helpers. Dot-source this file; it does not start a service or UI.
 $script:WidgetStrings = @{
     en = @{
+        providerUnavailable = '{0}: unavailable'
+        providerDelayed = '{0}: updates delayed'
+        providerInvalid = '{0}: unusable data'
+        viewWebsiteRecord = 'View site record'
+        monitoringScope = 'Website monitoring accounts'
+        freeScope = 'Free accounts'
+        siteRecordTime = 'Website record updated {0}'
+        categoryPreview = 'Advance notice'
+        categoryComplete = 'Completion update'
+        categoryUnverified = 'Unverified update'
+        unverifiedHelp = 'It is not yet clear whether this is an advance notice or a completion message.'
+        unknownHintHelp = 'The event type and whether this is an advance notice or a completion message are unclear.'
+        observedGrant = '{0} detected: monitoring accounts received reset credits'
+        observedReset = '{0} detected: monitoring-account quota recovered'
+        observationTime = 'Website detected {0}'
+        publicPartial = 'Some message sources are unavailable'
+        publicPartialHelp = 'Updates may be incomplete. Working sources are still shown.'
+        correctionNotice = 'Message corrected: the previous completion statement was withdrawn.'
+        cancelledNotice = 'The source cancelled this announcement.'
+        delayedNotice = 'The source postponed this announcement.'
         completionHelpReset = 'This is a source report of completion; it does not confirm recovery of your account quota.'
         completionHelpGrant = 'This is a source report of completion; it does not confirm that your account received reset credits.'
         scheduleUnknownReset = 'Reset time not announced'
@@ -47,11 +67,11 @@ $script:WidgetStrings = @{
         upcomingResetTitle = 'Quota will be reset'
         deliveredGrantTitle = 'Reset credits granted'
         deliveredResetTitle = 'Quota has been reset'
-        unconfirmedGrantTitle = 'Reset credit update: grant status unclear'
-        unconfirmedResetTitle = 'Quota-reset update: progress unclear'
-        siteHintTitle = '{0} flagged a reset-related hint'; siteHintSource = 'Open monitoring site'; viewSource = 'View original'
+        unconfirmedGrantTitle = 'Reset credit update awaiting verification'
+        unconfirmedResetTitle = 'Quota-reset update awaiting verification'
+        siteHintTitle = 'Reset update awaiting verification'; siteHintSource = 'Open monitoring site'; viewSource = 'View original'
         siteHintStatus = 'It is unclear whether this concerns reset credits or a quota reset, or what stage it has reached.'
-        siteHintExpired = 'This site hint expired; this does not establish whether the event completed.'; siteHintInactive = 'The site stopped flagging this hint; this does not establish cancellation or completion.'
+        siteHintExpired = 'Earlier site hint; subsequent progress is unknown.'; siteHintInactive = 'The site stopped flagging this hint; subsequent progress is unknown.'
         recoveryMore = 'About this record'
         publicRetrying = 'Fetching monitoring-site updates…'
         detailsPartial = 'Each reset credit is one manual quota-reset opportunity in Codex. Details may be incomplete; the available count above is authoritative.'
@@ -97,20 +117,40 @@ $script:WidgetStrings = @{
         scheduledGrant = 'Expected grant: {0}'; scheduledReset = 'Expected reset: {0}'; originalGrant = 'Originally expected grant: {0}'; originalReset = 'Originally expected reset: {0}'
         localAnnouncementTime = '{0} (local {1})'; dateOnlySchedule = '{0} (time not announced)'
         sourceTimeZoneNote = 'Converted from {0} by the monitoring source; see original post.'; sourceWithdrawn = 'The monitoring site removed this record; this does not establish cancellation or completion.'; withdrawnRecord = 'Record removed by monitoring site'
-        publicUpdated = 'Public data updated {0}'; publicUpdateUnknown = 'Public update time unavailable'; refreshCadence = 'Auto-refresh: quota every 1 min · public data every 10 min'; sourceLinks = 'codex-reset.com / codexreset.dev'
+        publicUpdated = 'Public data updated {0}'; publicUpdateUnknown = 'Public update time unavailable'; refreshCadence = 'Auto-refresh: quota every 1 min · public updates adapt to activity'; sourceLinks = 'codex-reset.com / codexreset.dev'
         announcementSource = 'View original post'; deliverySource = 'Completion evidence'; announcementHistory = 'History'; historyEmpty = 'No history yet'
 
         expandHistory = 'Show history'; collapseHistory = 'Hide history'
     }
     'zh-CN' = @{
+        providerUnavailable = '{0}：暂不可用'
+        providerDelayed = '{0}：更新延迟'
+        providerInvalid = '{0}：数据不可用'
+        viewWebsiteRecord = '查看网站记录'
+        monitoringScope = '网站监测账号'
+        freeScope = '免费账号'
+        siteRecordTime = '网站记录时间 {0}'
+        categoryPreview = '预告'
+        categoryComplete = '完成消息'
+        categoryUnverified = '待核实消息'
+        unverifiedHelp = '暂无法判断是预告还是完成消息。'
+        unknownHintHelp = '暂无法判断具体事项，以及是预告还是完成消息。'
+        observedGrant = '{0} 检测到：监测账号收到重置卡'
+        observedReset = '{0} 检测到：监测账号额度已恢复'
+        observationTime = '网站检测 {0}'
+        publicPartial = '部分来源暂不可用'
+        publicPartialHelp = '消息可能不完整，仍在显示可用来源的记录。'
+        correctionNotice = '消息已更正：此前的完成说法已撤回。'
+        cancelledNotice = '来源已取消本次预告事项。'
+        delayedNotice = '来源已推迟本次预告事项。'
         completionHelpReset = '此为来源的重置完成消息，不能据此确认本账号额度已恢复。'
         completionHelpGrant = '此为来源的发放完成消息，不能据此确认本账号已收到重置卡。'
-        scheduleUnknownReset = '重置时间尚未公布'
-        scheduleUnknownGrant = '发放时间尚未公布'
+        scheduleUnknownReset = '具体时间尚未公布'
+        scheduleUnknownGrant = '具体时间尚未公布'
         unknownReset = '是否已重置尚不明确。'
         unknownGrant = '是否已发放尚不明确。'
-        waitingReset = '尚未取得重置完成消息。'
-        waitingGrant = '尚未取得发放完成消息。'
+        waitingReset = '预计时间已过，暂未查到重置完成消息。'
+        waitingGrant = '预计时间已过，暂未查到发放完成消息。'
         historicalResetTitle = '{0} 的历史额度重置预告'
         historicalGrantTitle = '{0} 的历史重置卡赠送预告'
         waitingResetTitle = '{0} 的额度重置预告：原定时间已过'
@@ -132,7 +172,7 @@ $script:WidgetStrings = @{
         activityEmpty = '最近没有新的重置动态'
         activityEmptyHelp = '可展开查看更多历史记录。'
         localTimeNote = '所有时间均为本地时间（当前 {0}）'
-        publicRefreshFailed = '暂时无法获取监控网站消息'
+        publicRefreshFailed = '暂时无法更新消息'
         publicStale = '监控网站数据尚未更新'
         publicInvalid = '监控网站返回的数据暂不可用'
         publicSourceDelayed = '新消息可能尚未收录'
@@ -149,11 +189,11 @@ $script:WidgetStrings = @{
         upcomingResetTitle = '将重置额度'
         deliveredGrantTitle = '重置卡已发放'
         deliveredResetTitle = '额度已重置'
-        unconfirmedGrantTitle = '重置卡相关消息：发放进展尚不明确'
-        unconfirmedResetTitle = '额度重置相关消息：进展尚不明确'
-        siteHintTitle = '{0} 出现重置相关提示'; siteHintSource = '打开监控网站'; viewSource = '查看原文'
+        unconfirmedGrantTitle = '重置卡消息待核实'
+        unconfirmedResetTitle = '额度重置消息待核实'
+        siteHintTitle = '重置相关消息待核实'; siteHintSource = '打开监控网站'; viewSource = '查看原文'
         siteHintStatus = '尚不明确是赠送重置卡还是重置额度，也未确认进展。'
-        siteHintExpired = '这条网站提示已过期，仅指提示有效期，不能据此判断事情是否完成。'; siteHintInactive = '网站已停止这条提示，不代表事情已取消或完成。'
+        siteHintExpired = '较早的网站提示，后续进展未知。'; siteHintInactive = '网站已停止这条提示，后续进展未知。'
         recoveryMore = '记录说明'
         publicRetrying = '正在获取监控网站消息…'
         detailsPartial = '每张重置卡代表一次在 Codex 中手动重置额度的机会。明细可能不完整，可用数量以上方显示为准。'
@@ -199,7 +239,7 @@ $script:WidgetStrings = @{
         scheduledGrant = '预计发放：{0}'; scheduledReset = '预计重置：{0}'; originalGrant = '原定发放：{0}'; originalReset = '原定重置：{0}'
         localAnnouncementTime = '{0}（本地 {1}）'; dateOnlySchedule = '{0}（具体时间未公布）'
         sourceTimeZoneNote = '来源按 {0} 时区换算；原文见公告。'; sourceWithdrawn = '监控网站已撤下此记录，不代表事情已取消或完成。'; withdrawnRecord = '监控网站已撤下此记录'
-        publicUpdated = '公告数据更新 {0}'; publicUpdateUnknown = '公告更新时间暂不可用'; refreshCadence = '自动刷新：额度每1分钟 · 公共信息每10分钟'; sourceLinks = 'codex-reset.com / codexreset.dev'
+        publicUpdated = '公告数据更新 {0}'; publicUpdateUnknown = '公告更新时间暂不可用'; refreshCadence = '自动刷新：额度每1分钟 · 公开消息按进展刷新'; sourceLinks = 'codex-reset.com / codexreset.dev'
         announcementSource = '查看原帖'; deliverySource = '完成依据'; announcementHistory = '历史记录'; historyEmpty = '暂无历史记录'
 
         expandHistory = '展开历史记录'; collapseHistory = '收起历史记录'
@@ -323,17 +363,19 @@ function Get-WidgetVisibleActivityView($activity, [int]$limit=5) {
 }
 function Get-WidgetPublicNoticeView($external, [string]$language, [DateTimeOffset]$now=[DateTimeOffset]::UtcNow) {
     $feed=$external.announcements;$stamp=ConvertTo-WidgetTimestamp $feed.sourceUpdatedAt
-    $fresh=$stamp -and $stamp -le $now.AddMinutes(5) -and ($now-$stamp).TotalHours -le 24
+    $fresh=$stamp -and $stamp -le $now.AddMinutes(5) -and ($now-$stamp).TotalMinutes -le 30
+    $partial=$feed.partial -or @($feed.providerHealth | Where-Object {$_ -and $_.status -ne 'ok'}).Count -gt 0
     $fetched=''
     if ($null -ne $feed.lastFetchedAt) {try {$date=[DateTimeOffset]::FromUnixTimeMilliseconds([long]$feed.lastFetchedAt);if ($date -le $now) {$fetched=Get-WidgetText 'lastFetched' $language @((Format-WidgetCompactDate $date $language ([TimeZoneInfo]::Local) $now))}} catch {}}
     $reason=$feed.reason
     if (-not $reason) {$reason=if ($external.status -eq 'unavailable' -or $feed.status -eq 'unavailable') {'request-failed'} elseif (-not $fresh) {'source-stale'} else {$null}}
-    $titleKey=switch ($reason) {'request-failed' {'publicRefreshFailed'} 'invalid-data' {'publicInvalid'} 'source-stale' {'publicStale'} default {'publicPending'}}
+    $sourceDetails=@($feed.providerHealth | Where-Object {$_ -and $_.status -ne 'ok'} | ForEach-Object {Get-WidgetText $(if ($_.reason -eq 'source-stale') {'providerDelayed'} elseif ($_.reason -eq 'invalid-data') {'providerInvalid'} else {'providerUnavailable'}) $language @([string]$_.site)}) -join ' / '
+    $titleKey=if ($partial -and $feed.status -eq 'ok') {'publicPartial'} else {switch ($reason) {'request-failed' {'publicRefreshFailed'} 'invalid-data' {'publicInvalid'} 'source-stale' {'publicStale'} default {'publicPending'}}}
     [pscustomobject]@{
-        visible=($external.status -ne 'loading' -and -not ($external.status -eq 'ok' -and $feed.status -eq 'ok' -and -not $feed.stale -and $fresh))
+        visible=($external.status -ne 'loading' -and ($partial -or -not ($external.status -eq 'ok' -and $feed.status -eq 'ok' -and -not $feed.stale -and $fresh)))
         hasCache=(@($feed.items).Where({$_}).Count+@($feed.history).Where({$_}).Count -gt 0)
         reason=$reason;failed=($reason -eq 'request-failed');title=(Get-WidgetText $titleKey $language)
-        help=$(if ($reason -eq 'source-stale') {Get-WidgetText 'publicSourceDelayed' $language} else {''})
+        help=(@($(if ($partial -and $feed.status -eq 'ok') {Get-WidgetText 'publicPartialHelp' $language} elseif ($reason -eq 'source-stale') {Get-WidgetText 'publicSourceDelayed' $language}),$sourceDetails) | Where-Object {$_}) -join ' '
         sourceUpdatedText=$(if ($stamp -and $stamp -le $now) {Get-WidgetText 'publicSourceTime' $language @((Format-WidgetCompactDate $stamp $language ([TimeZoneInfo]::Local) $now))} else {''})
         lastFetchedText=$fetched
     }
@@ -345,14 +387,13 @@ function Get-WidgetLocalTimeNote([string]$language, [DateTimeOffset]$now=[DateTi
 }
 function Get-WidgetActivityAttribution($row, [string]$language) {
     $sites=@(@($row.sourceSites) | Where-Object {$_ -in @('codex-reset.com','codexreset.dev')} | Sort-Object -Unique)
-    if ($row.sourceHint) {$sites=@('codex-reset.com')}
     $site=$sites -join ' / '
     $completed=$row.completedEvidence -or $row.phase -in @('delivered','archived')
     $post=if ($completed -and $row.deliverySourceUrl) {$row.deliverySourceUrl} else {$row.sourceUrl}
-    $publisher=if ($post -match '^https://(?:x\.com|twitter\.com|www\.twitter\.com)/thsottiaux/status/\d+(?:[?#].*)?$') {'TIBO'} else {$null}
-    $original=[bool]($publisher -and $(if ($completed) {$row.completionTimeBasis -eq 'announcement'} else {$row.announcementBasis -eq 'original'}))
+    $publisher=if ($post -match '^https://(?:x\.com|twitter\.com|www\.twitter\.com)/thsottiaux/status/\d+(?:[?#].*)?$') {'Tibo'} else {$null}
+    $original=[bool]($publisher -and $row.statementBasis -notin @('site','observation') -and $(if ($completed) {$row.completionTimeBasis -eq 'announcement'} else {$row.announcementBasis -eq 'original'}))
     $source=if ($original) {$publisher} elseif ($site) {$site} else {Get-WidgetText 'monitorRecord' $language}
-    $label=if ($row.sourceHint) {Get-WidgetText 'hintAttribution' $language @($site)} elseif ($site) {Get-WidgetText $(if ($original) {'originalAttribution'} else {'siteAttribution'}) $language @($site)} else {Get-WidgetText 'unknownAttribution' $language}
+    $label=if ($site) {Get-WidgetText $(if ($original) {'originalAttribution'} else {'siteAttribution'}) $language @($site)} else {Get-WidgetText 'unknownAttribution' $language}
     [pscustomobject]@{source=$source;original=$original;label=$label}
 }
 function Get-WidgetActivityPresentation($row, [string]$language) {
@@ -363,10 +404,16 @@ function Get-WidgetActivityPresentation($row, [string]$language) {
     $explicit=$completed -or $row.explicit
     $kind=if ($row.kind -eq 'banked') {'Grant'} else {'Reset'}
     $attribution=Get-WidgetActivityAttribution $row $language
-    $key=$(if ($completed) {'delivered'} elseif ($row.phase -eq 'waiting') {'waiting'} elseif ($row.phase -eq 'unknown' -and $explicit) {'historical'} elseif ($explicit) {'upcoming'} else {'unconfirmed'})+$kind+'Title'
-    $title=Get-WidgetText $(if ($row.sourceHint) {'siteHintTitle'} else {$key}) $language @($attribution.source)
-    if (-not $row.sourceHint -and ($completed -or ($explicit -and $row.phase -notin @('waiting','unknown')))) {
-        $title=Get-WidgetText $(if ($attribution.original) {if ($completed) {'publisherSays'} else {'publisherAnnounces'}} else {'siteRecords'}) $language @($attribution.source,$title)
+    $category=Get-WidgetText $(if ($completed) {'categoryComplete'} elseif ($explicit) {'categoryPreview'} else {'categoryUnverified'}) $language
+    if ($completed -and $row.statementBasis -eq 'observation') {
+        $title=Get-WidgetText ('observed'+$kind) $language @($attribution.source)
+    } elseif ($completed -or ($explicit -and $row.phase -ne 'unknown')) {
+        $action=Get-WidgetText ($(if ($completed) {'delivered'} else {'upcoming'})+$kind+'Title') $language
+        $title=Get-WidgetText $(if ($completed) {'publisherSays'} else {'publisherAnnounces'}) $language @($attribution.source,$action)
+    } elseif ($explicit) {
+        $title=Get-WidgetText ('historical'+$kind+'Title') $language @($attribution.source)
+    } else {
+        $title=Get-WidgetText $(if ($row.kindKnown -eq $false) {'siteHintTitle'} else {'unconfirmed'+$kind+'Title'}) $language
     }
     $completedText=if ($row.compactCompletedText) {$row.compactCompletedText} else {$row.completedText}
     $scheduledText=if ($row.compactScheduledText) {$row.compactScheduledText} else {$row.scheduledText}
@@ -375,11 +422,17 @@ function Get-WidgetActivityPresentation($row, [string]$language) {
     $extra=@(@($scheduledText,$announcedText) | Where-Object {$_ -and $_ -ne $fact})
     $extra+=@($row.scheduleNote,$row.summary,$row.retentionText) | Where-Object {$_}
     if ($completed) {$extra+=Get-WidgetText ('completionHelp'+$kind) $language}
-    $status=if ($row.sourceHint) {$row.hintStatus} else {
+    $status=if ($row.correction) {
+        Get-WidgetText $(switch ($row.correction) {'not-complete' {'correctionNotice'} 'cancelled' {'cancelledNotice'} 'delayed' {'delayedNotice'}}) $language
+    } elseif (-not $explicit) {
+        @($(if ($row.sourceHint -and ($row.withdrawn -or $row.phase -eq 'unknown')) {Get-WidgetText $(if ($row.withdrawn) {'siteHintInactive'} else {'siteHintExpired'}) $language}),
+          (Get-WidgetText $(if ($row.kindKnown -eq $false) {'unknownHintHelp'} else {'unverifiedHelp'}) $language)) | Where-Object {$_}
+    } else {
         @($(if ($row.withdrawn) {Get-WidgetText 'sourceWithdrawn' $language}),
-          $(if ($row.phase -eq 'waiting') {Get-WidgetText ('waiting'+$kind) $language} elseif (-not $completed -and $row.phase -eq 'unknown') {Get-WidgetText ('unknown'+$kind) $language})) | Where-Object {$_}
+          $(if ($row.phase -eq 'waiting') {Get-WidgetText ('waiting'+$kind) $language})) | Where-Object {$_}
     }
-    [pscustomobject]@{title=$title;label=$attribution.label;fact=(@($fact,$row.scopeText) | Where-Object {$_}) -join ' · ';status=(@($status) -join ' ');extra=$extra -join [Environment]::NewLine;missing=(-not $completed -and -not $row.sourceHint -and $row.phase -in @('unknown','unconfirmed'))}
+    [pscustomobject]@{title=$title;category=$category;label=($category+' · '+$attribution.label);fact=(@($fact,$row.scopeText) | Where-Object {$_}) -join ' · ';status=(@($status) -join ' ');extra=$extra -join [Environment]::NewLine;missing=$false}
+
 }
 function Test-WidgetOutsideClick([string]$mode, [bool]$visible, [bool]$animating,
                                  [Drawing.Rectangle]$frame, [Drawing.Point]$point) {
@@ -543,11 +596,11 @@ function ConvertTo-WidgetAnnouncementRow($row, [string]$language, [DateTimeOffse
     }
     if (-not $explicit) { $scheduledText=$null }
     if ($explicit -and -not $scheduledText -and -not $completed -and -not $historical) { $scheduledText=Get-WidgetText $(if ($row.kind -eq 'banked') {'scheduleUnknownGrant'} else {'scheduleUnknownReset'}) $language }
-    $completionKey=if ($row.completionTimeBasis -eq 'announcement') {'completionPosted'} else {'deliveredOn'}
+    $completionKey=if ($row.completionTimeBasis -eq 'site-report') {'siteRecordTime'} elseif ($row.completionTimeBasis -eq 'observation') {'observationTime'} elseif ($row.completionTimeBasis -eq 'announcement') {'completionPosted'} else {'deliveredOn'}
     if ($completed) { $completedText=Get-WidgetText $completionKey $language @((Format-WidgetAnnouncementDate $delivered $language $timeZone $now)) }
     $announced=ConvertTo-WidgetTimestamp $row.announcedAt
     if ($announced) { $announcedText=Get-WidgetText $(if ($explicit) {'announcedOn'} else {'postedOn'}) $language @((Format-WidgetAnnouncementDate $announced $language $timeZone $now)) }
-    $scope=if ($row.scope -eq 'paid') {Get-WidgetText 'paid' $language} elseif ($row.scope -eq 'all') {Get-WidgetText 'all' $language} elseif ($row.scopeLabel) {[string]$row.scopeLabel} else {Get-WidgetText 'unknownScope' $language}
+    $scope=if ($row.scope -eq 'paid') {Get-WidgetText 'paid' $language} elseif ($row.scope -eq 'all') {Get-WidgetText 'all' $language} elseif ($row.scope -eq 'monitoring') {Get-WidgetText 'monitoringScope' $language} elseif ($row.scope -eq 'free') {Get-WidgetText 'freeScope' $language} elseif ($row.scopeLabel) {[string]$row.scopeLabel} else {Get-WidgetText 'unknownScope' $language}
     if ($sourceHint) {$scope=''} elseif (-not $explicit) {$scope=Get-WidgetText 'sourceScope' $language @($scope)}
     $phaseKey=if ($row.sourceWithdrawn) {'sourceWithdrawn'} else {'phase'+(Get-Culture).TextInfo.ToTitleCase($phase)}
     $scheduleNote=if ($scheduled -and $row.scheduledTimeZone) {Get-WidgetText 'sourceTimeZoneNote' $language @([string]$row.scheduledTimeZone)} else {''}
@@ -570,6 +623,7 @@ function ConvertTo-WidgetAnnouncementRow($row, [string]$language, [DateTimeOffse
         details=$details -join ' · '; scheduledText=$scheduledText; completedText=$completedText; announcedText=$announcedText; scheduleNote=$scheduleNote; scopeText=$scope
         summary=$summary;sourceHint=$sourceHint;hintStatus=$hintStatus
         completedEvidence=$completed;sourceSites=@($row.sourceSites);announcementBasis=$row.announcementBasis;completionTimeBasis=$row.completionTimeBasis
+        statementBasis=$row.statementBasis;kindKnown=($row.kindKnown -ne $false);correction=$row.correction
         monitorSourceUrl=$(if ($sourceHint) {'https://codex-reset.com/'} else {$null})
         retentionText=$(if ($phase -eq 'delivered') {Get-WidgetText 'retention' $language} else {''})
         sourceUrl=$(if (Test-WidgetHttpsUrl $row.sourceUrl) {[string]$row.sourceUrl} else {$null})
@@ -580,7 +634,7 @@ function Get-WidgetAnnouncementView($external, [string]$language, [DateTimeOffse
     $active=New-Object 'System.Collections.Generic.List[object]'; $history=New-Object 'System.Collections.Generic.List[object]'
     $feed=if ($external) {$external.announcements} else {$null}
     $stamp=ConvertTo-WidgetTimestamp $feed.sourceUpdatedAt
-    $stale=-not $feed -or $feed.stale -or $feed.status -ne 'ok' -or -not $stamp -or $stamp -gt $now.AddMinutes(5) -or ($now-$stamp).TotalHours -gt 24
+    $stale=-not $feed -or $feed.stale -or $feed.status -ne 'ok' -or -not $stamp -or $stamp -gt $now.AddMinutes(5) -or ($now-$stamp).TotalMinutes -gt 30
     $seen=@{}
     foreach ($row in @($feed.items)) {
         if (-not $row -or $row.kind -notin @('banked','regular')) { continue }
@@ -630,6 +684,15 @@ function Merge-WidgetExternalData($previous, $incoming, [bool]$transportFailure 
     $fresh=if ($incoming -and -not $transportFailure) {$incoming.announcements} else {$null}
     $old=if ($previous) {$previous.announcements} else {$null}
     $feed=if ($fresh) {$fresh | ConvertTo-Json -Depth 12 | ConvertFrom-Json} elseif ($old) {$old | ConvertTo-Json -Depth 12 | ConvertFrom-Json} else {[pscustomobject]@{status='unavailable';items=@();history=@();sourceUpdatedAt=$null;stale=$true}}
+    if ($feed.PSObject.Properties['providerHealth']) {
+        if ($transportFailure -or -not $incoming) {
+            $result | Add-Member -NotePropertyName status -NotePropertyValue 'unavailable' -Force
+            $feed | Add-Member -NotePropertyName stale -NotePropertyValue $true -Force
+            $feed | Add-Member -NotePropertyName reason -NotePropertyValue 'request-failed' -Force
+        }
+        $result | Add-Member -NotePropertyName announcements -NotePropertyValue $feed -Force
+        return $result
+    }
     $originalKinds=@{};$hintKinds=@{};$records=@()
     foreach ($snapshot in @($old,$fresh)) {
         if (-not $snapshot) { continue }

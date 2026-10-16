@@ -12,7 +12,7 @@ function Assert-Equal($actual,$expected,[string]$reason) {
 $now=[DateTimeOffset]::Parse('2026-10-15T06:00:00Z')
 $sourceUrl='https://x.com/thsottiaux/status/1000000000000000101'
 function New-Hint {
-    [pscustomobject]@{id=($sourceUrl+'#regular');kind='regular';certainty='unconfirmed';sourceHint='active';
+    [pscustomobject]@{id=($sourceUrl+'#regular');kind='regular';certainty='unconfirmed';sourceHint='active';kindKnown=$false;sourceSites=@('codex-reset.com');
         sourceUrl=$sourceUrl;announcedAt='2026-10-15T04:56:00Z';summary='Landing within the next 2 hours';sourceWithdrawn=$false}
 }
 foreach ($language in @('en','zh-CN')) {
@@ -35,8 +35,8 @@ foreach ($language in @('en','zh-CN')) {
     Test-Case "source hint presentation is attributed and not confirmed ($language)" {
         $row=ConvertTo-WidgetAnnouncementRow (New-Hint) $language $now $false ([TimeZoneInfo]::Utc)
         $view=Get-WidgetActivityPresentation $row $language
-        Assert-Equal $view.title $(if ($language -eq 'en') {'codex-reset.com flagged a reset-related hint'} else {'codex-reset.com 出现重置相关提示'}) 'Same title as Mac'
-        Assert-Equal $view.status $(if ($language -eq 'en') {'It is unclear whether this concerns reset credits or a quota reset, or what stage it has reached.'} else {'尚不明确是赠送重置卡还是重置额度，也未确认进展。'}) 'Evidence level stays visible'
+        Assert-Equal $view.title $(if ($language -eq 'en') {'Reset update awaiting verification'} else {'重置相关消息待核实'}) 'Same title as Mac'
+        Assert-Equal $view.status $(if ($language -eq 'en') {'The event type and whether this is an advance notice or a completion message are unclear.'} else {'暂无法判断具体事项，以及是预告还是完成消息。'}) 'Evidence level stays visible'
         Assert-Equal $row.monitorSourceUrl 'https://codex-reset.com/' 'Fixed monitoring source link'
         Assert-Equal $row.sourceUrl $sourceUrl 'Original post link'
         Assert-Equal $row.explicit $false 'Not a confirmed announcement'
@@ -48,10 +48,10 @@ foreach ($language in @('en','zh-CN')) {
         $record=New-Hint
         $row=ConvertTo-WidgetAnnouncementRow $record $language $now $true
         $view=Get-WidgetActivityPresentation $row $language
-        Assert-Equal $view.status $(if ($language -eq 'en') {'This site hint expired; this does not establish whether the event completed.'} else {'这条网站提示已过期，仅指提示有效期，不能据此判断事情是否完成。'}) 'Expired without completion'
+        Assert-Equal $view.status $(if ($language -eq 'en') {'Earlier site hint; subsequent progress is unknown. The event type and whether this is an advance notice or a completion message are unclear.'} else {'较早的网站提示，后续进展未知。 暂无法判断具体事项，以及是预告还是完成消息。'}) 'Expired without completion'
         $record.sourceHint='inactive';$record.sourceWithdrawn=$true
         $view=Get-WidgetActivityPresentation (ConvertTo-WidgetAnnouncementRow $record $language $now $true) $language
-        Assert-Equal $view.status $(if ($language -eq 'en') {'The site stopped flagging this hint; this does not establish cancellation or completion.'} else {'网站已停止这条提示，不代表事情已取消或完成。'}) 'Inactive is not completion'
+        Assert-Equal $view.status $(if ($language -eq 'en') {'The site stopped flagging this hint; subsequent progress is unknown. The event type and whether this is an advance notice or a completion message are unclear.'} else {'网站已停止这条提示，后续进展未知。 暂无法判断具体事项，以及是预告还是完成消息。'}) 'Inactive is not completion'
     }
     Test-Case "cached hint expires without a successful server refresh ($language)" {
         $external=[pscustomobject]@{status='unavailable';announcements=[pscustomobject]@{status='unavailable';stale=$true;items=@((New-Hint));history=@()}}
@@ -65,7 +65,7 @@ foreach ($language in @('en','zh-CN')) {
         Assert-Equal $row.explicit $true 'Confirmed evidence keeps its existing presentation'
         Assert-Equal $row.monitorSourceUrl $null 'No source-hint attribution after confirmation'
         $view=Get-WidgetActivityPresentation $row $language
-        if ($view.title -in @('codex-reset.com flagged a reset-related hint','codex-reset.com 出现重置相关提示')) { throw 'Confirmation still presented as a hint' }
+        if ($view.title -in @('Reset update awaiting verification','重置相关消息待核实')) { throw 'Confirmation still presented as a hint' }
     }
 }
 Test-Case 'native cache follows a source hint category correction without duplicate rows' {

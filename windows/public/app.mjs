@@ -3,7 +3,7 @@ const TEN_MINUTES = 10 * 60 * 1000;
 const PUBLIC_MAX_AGE = 24 * 60 * 60 * 1000;
 function publicSourceFresh(state,now) {
   const stamp=Date.parse(state?.sourceUpdatedAt);
-  return Number.isFinite(stamp)&&stamp<=now+5*60000&&now-stamp<=PUBLIC_MAX_AGE;
+  return Number.isFinite(stamp)&&stamp<=now+5*60000&&now-stamp<=30*60000;
 }
 function formatCountdown(milliseconds, language) {
   const minutes=Math.max(0,Math.ceil(milliseconds/60000));
@@ -47,13 +47,12 @@ function safeSource(value) { try { const url=new URL(value);return url.protocol=
 function announcementAttribution(item,confirmed,sourceHint,language) {
   const sites=[...new Set((Array.isArray(item.sourceSites)?item.sourceSites:[])
     .filter(site=>['codex-reset.com','codexreset.dev'].includes(site)))].sort();
-  if(sourceHint)sites.splice(0,sites.length,'codex-reset.com');
   const site=sites.join(' / ');
   const post=confirmed?item.deliverySourceUrl||item.sourceUrl:item.sourceUrl;
-  const publisher=/^https:\/\/(?:x\.com|twitter\.com|www\.twitter\.com)\/thsottiaux\/status\/\d+(?:[?#].*)?$/.test(post||'')?'TIBO':null;
-  const original=Boolean(publisher&&(confirmed?item.completionTimeBasis==='announcement':item.announcementBasis==='original'));
+  const publisher=/^https:\/\/(?:x\.com|twitter\.com|www\.twitter\.com)\/thsottiaux\/status\/\d+(?:[?#].*)?$/.test(post||'')?'Tibo':null;
+  const original=Boolean(publisher&&item.statementBasis!=='site'&&item.statementBasis!=='observation'&&(confirmed?item.completionTimeBasis==='announcement':item.announcementBasis==='original'));
   return {source:original?publisher:site||t(language,'monitorRecord'),original,
-    label:sourceHint?t(language,'hintAttribution',{sites:site}):site?t(language,original?'originalAttribution':'siteAttribution',{sites:site}):t(language,'unknownAttribution')};
+    label:site?t(language,original?'originalAttribution':'siteAttribution',{sites:site}):t(language,'unknownAttribution')};
 }
 export function deriveAnnouncementsView(state,now=Date.now(),timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone,language='en') {
   const rows=[],history=[],seen=new Set();
@@ -67,12 +66,12 @@ export function deriveAnnouncementsView(state,now=Date.now(),timeZone=Intl.DateT
     const phase=confirmed?(now-delivered>=86400000?'archived':'delivered'):historical?'unknown':!explicit?'unconfirmed':Number.isFinite(scheduled)?(scheduled<=now?'waiting':'upcoming'):Number.isFinite(day)?(now>=day+86400000?'waiting':'upcoming'):'announced';
     const planDate=Number.isFinite(scheduled)?scheduled:day;
     const plannedDate=Number.isFinite(scheduled)?formatLocalAnnouncementDate(scheduled,timeZone,language,now):Number.isFinite(planDate)?t(language,'dateOnlySchedule',{date:formatShortDate(planDate,'UTC',language,now,true)}):'';
-    const scope=item.scope==='paid'?t(language,'paid'):item.scope==='all'?t(language,'all'):(language==='zh-CN'?item.scopeLabel:item.scope)||t(language,'unknownScope');
+    const scope=item.scope==='paid'?t(language,'paid'):item.scope==='all'?t(language,'all'):item.scope==='monitoring'?t(language,'monitoringScope'):item.scope==='free'?t(language,'freeScope'):(language==='zh-CN'?item.scopeLabel:item.scope)||t(language,'unknownScope');
     const scopeText=sourceHint?'':explicit?scope:t(language,'sourceScope',{scope});
     const scheduleKey=(confirmed?'original':'scheduled')+(item.kind==='banked'?'Grant':'Reset');
     const unknownScheduleKey=item.kind==='banked'?'scheduleUnknownGrant':'scheduleUnknownReset';
     const plannedText=!explicit?'':plannedDate?t(language,scheduleKey,{time:plannedDate}):!confirmed&&!historical?t(language,unknownScheduleKey):'';
-    const completionLabel=item.completionTimeBasis==='announcement'?'completionPosted':'completed';
+    const completionLabel=item.completionTimeBasis==='site-report'?'siteRecordTime':item.completionTimeBasis==='observation'?'observationTime':item.completionTimeBasis==='announcement'?'completionPosted':'completed';
     const completedText=confirmed?`${t(language,completionLabel)} ${formatLocalAnnouncementDate(delivered,timeZone,language,now)}`:'';
     const announcedText=Number.isFinite(announced)?t(language,explicit?'published':'posted',{time:formatLocalAnnouncementDate(announced,timeZone,language,now)}):'';
     const status=sourceHint?t(language,item.sourceWithdrawn?'siteHintInactive':historical?'siteHintExpired':'siteHintStatus'):confirmed?t(language,item.kind==='banked'?'grantDone':'resetDone'):t(language,item.sourceWithdrawn?'sourceWithdrawn':phase==='unknown'?'historyDeliveryUnknown':phase==='unconfirmed'?'sourceUnconfirmed':phase==='waiting'?'waitingDelivery':phase==='upcoming'?'upcoming':'announcedWaiting');
@@ -81,9 +80,18 @@ export function deriveAnnouncementsView(state,now=Date.now(),timeZone=Intl.DateT
     const historyCopy=Boolean(historical||item.sourceWithdrawn);
     const titleKey=sourceHint?'siteHintTitle':(confirmed?'delivered':!historyCopy&&phase==='waiting'?'waiting':historyCopy&&explicit?'historical':explicit?'upcoming':'unconfirmed')+(item.kind==='banked'?'GrantTitle':'ResetTitle');
     let displayTitle=t(language,titleKey,{source:attribution.source});
-    if(!sourceHint&&(confirmed||explicit&&!historyCopy&&phase!=='waiting'))displayTitle=t(language,attribution.original?(confirmed?'publisherSays':'publisherAnnounces'):'siteRecords',{source:attribution.source,message:displayTitle});
+    if(!sourceHint&&(confirmed||explicit&&!historyCopy)) {
+      if(!confirmed)displayTitle=t(language,'upcoming'+(item.kind==='banked'?'Grant':'Reset')+'Title');
+      displayTitle=t(language,confirmed?'publisherSays':'publisherAnnounces',{source:attribution.source,message:displayTitle});
+    }
+    if(!explicit)displayTitle=t(language,item.kindKnown===false?'siteHintTitle':(item.kind==='banked'?'unconfirmedGrantTitle':'unconfirmedResetTitle'));
+    if(confirmed&&item.statementBasis==='observation')displayTitle=t(language,item.kind==='banked'?'observedGrant':'observedReset',{source:attribution.source});
     const kindKey=item.kind==='banked'?'Grant':'Reset';
-    const displayStatus=sourceHint?status:[item.sourceWithdrawn?t(language,'sourceWithdrawn'):'',
+    const category=t(language,confirmed?'categoryComplete':explicit?'categoryPreview':'categoryUnverified');
+    const correctionKey=item.correction==='not-complete'?'correctionNotice':item.correction==='cancelled'?'cancelledNotice':item.correction==='delayed'?'delayedNotice':null;
+    const displayStatus=correctionKey?t(language,correctionKey):!explicit?
+      [sourceHint&&(item.sourceWithdrawn||historical)?t(language,item.sourceWithdrawn?'siteHintInactive':'siteHintExpired'):'',
+        t(language,item.kindKnown===false?'unknownHintHelp':'unverifiedHelp')].filter(Boolean).join(' '):[item.sourceWithdrawn?t(language,'sourceWithdrawn'):'',
       !historyCopy&&phase==='waiting'?t(language,'waiting'+kindKey):!confirmed&&(historyCopy||phase==='unknown')?t(language,'unknown'+kindKey):''].filter(Boolean).join(' ');
     const compactPlanned=!explicit?'':plannedDate?t(language,scheduleKey,{time:Number.isFinite(scheduled)?formatCompactLocalDate(scheduled,timeZone,language,now):plannedDate}):!confirmed&&!historical?t(language,unknownScheduleKey):'';
     const compactCompleted=confirmed?`${t(language,completionLabel)} ${formatCompactLocalDate(delivered,timeZone,language,now)}`:'';
@@ -92,13 +100,13 @@ export function deriveAnnouncementsView(state,now=Date.now(),timeZone=Intl.DateT
       scheduleNote:explicit&&Number.isFinite(scheduled)&&item.scheduledTimeZone?t(language,'sourceTimeZoneNote',{zone:item.scheduledTimeZone}):'',scheduleNoteDetail:language==='zh-CN'?(item.summaryZh||''):(item.summary||item.summaryZh||''),
       plannedText,completedText,announcedText,scopeText,retentionText:phase==='delivered'?t(language,'retention'):'',
       timeText:[completedText||plannedText||announcedText,scopeText].filter(Boolean).join(' · '),
-      sourceUrl:safeSource(item.sourceUrl),sourceLabel:t(language,explicit?'viewAnnouncement':'viewSource'),deliverySourceUrl:confirmed?safeSource(item.deliverySourceUrl):null,
+      sourceUrl:safeSource(item.sourceUrl),sourceLabel:t(language,item.statementBasis==='observation'?'viewWebsiteRecord':explicit?'viewAnnouncement':'viewSource'),deliverySourceUrl:confirmed?safeSource(item.deliverySourceUrl):null,
       monitorSourceUrl:sourceHint?'https://codex-reset.com/':null,
       summary,
-      display:{title:displayTitle,label:attribution.label,scope:scopeText,
+      display:{title:displayTitle,category,label:attribution.label,scope:scopeText,
         facts:[compactCompleted||compactPlanned||compactAnnounced].filter(Boolean),
         detailFacts:[compactPlanned,compactAnnounced,confirmed?t(language,'completionHelp'+kindKey):''].filter(text=>text&&text!==(compactCompleted||compactPlanned||compactAnnounced)),
-        completionMissing:!sourceHint&&!confirmed&&(!explicit||historyCopy),
+        completionMissing:false,
         status:displayStatus,summary}};
   };
   for(const item of state?.items||[]){
@@ -128,14 +136,17 @@ export function publicRequestFailure(state) {
 }
 export function derivePublicNotice(state,now=Date.now(),timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone,language='en') {
   const feed=state?.announcements;
-  const visible=state?.status!=='loading'&&!(state?.status==='ok'&&feed?.status==='ok'&&!feed.stale&&publicSourceFresh(feed,now));
+  const partial=feed?.partial===true || Array.isArray(feed?.providerHealth)&&feed.providerHealth.some(provider=>provider.status!=='ok');
+  const visible=state?.status!=='loading'&&(partial||!(state?.status==='ok'&&feed?.status==='ok'&&!feed.stale&&publicSourceFresh(feed,now)));
   const hasCache=Boolean(feed?.items?.length||feed?.history?.length);
   const stamp=feed?.lastFetchedAt;
   const sourceStamp=Date.parse(feed?.sourceUpdatedAt);
   const reason=feed?.reason||(state?.status==='unavailable'||feed?.status==='unavailable'?'request-failed':!publicSourceFresh(feed,now)?'source-stale':null);
+  const sourceDetails=(feed?.providerHealth||[]).filter(provider=>provider.status!=='ok').map(provider=>
+    t(language,provider.reason==='source-stale'?'providerDelayed':provider.reason==='invalid-data'?'providerInvalid':'providerUnavailable',{site:provider.site})).join(' · ');
   return {visible,hasCache,reason,failed:reason==='request-failed',
-    title:t(language,reason==='request-failed'?'publicRefreshFailed':reason==='invalid-data'?'publicInvalid':reason==='source-stale'?'publicStale':'publicPending'),
-    help:reason==='source-stale'?t(language,'publicSourceDelayed'):'',
+    title:t(language,partial&&feed?.status==='ok'?'publicPartial':reason==='request-failed'?'publicRefreshFailed':reason==='invalid-data'?'publicInvalid':reason==='source-stale'?'publicStale':'publicPending'),
+    help:[partial&&feed?.status==='ok'?t(language,'publicPartialHelp'):reason==='source-stale'?t(language,'publicSourceDelayed'):'',sourceDetails].filter(Boolean).join(' '),
     sourceUpdatedText:Number.isFinite(sourceStamp)&&sourceStamp<=now?t(language,'publicSourceTime',{time:formatCompactLocalDate(sourceStamp,timeZone,language,now)}):'',
     lastFetchedText:Number.isFinite(stamp)&&stamp<=now?t(language,'lastFetched',{time:formatCompactLocalDate(stamp,timeZone,language,now)}):''};
 }
@@ -239,7 +250,7 @@ if(typeof document!=='undefined') {
       item.append(icon(row.kind));
       const content=document.createElement('div');content.className='announcement-content';
       const display=row.display,headingLine=document.createElement('div');headingLine.className='announcement-heading';
-      const label=document.createElement('span');label.className='record-type';label.textContent=display.label;
+      const label=document.createElement('span');label.className='record-type';label.textContent=[display.category,display.label].filter(Boolean).join(' · ');
       const heading=document.createElement('h3');heading.textContent=display.title;headingLine.append(label,heading);
       const sourceLink=(url,text)=>{const link=document.createElement('a');link.href=url;link.target='_blank';link.rel='noopener noreferrer';link.textContent=text;return link;};
       if(row.sourceUrl){const link=sourceLink(row.sourceUrl,row.sourceLabel);link.className='announcement-source';headingLine.append(link);}

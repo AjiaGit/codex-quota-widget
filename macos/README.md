@@ -22,7 +22,7 @@ Only run one copy. The service uses `127.0.0.1:39224`.
 - The Dock icon shows remaining weekly quota, or `—` when data is unavailable. Clicking it reopens the widget.
 - **Your quota has recovered** appears in the same list as public reset news, with the local detection time; before/after percentages are shown in **About this record**. After 24 hours it is archived and remains in the same activity list. Tracking starts when enabled and persists across restarts; a personal recovery does not confirm a global reset.
 
-Quota and cache checks run every 60 seconds. Refresh, reopening, and wake trigger a prompt update. Temporary failures retry at 15/30/60 seconds; public data refreshes separately every 10 minutes.
+Quota and cache checks run every 60 seconds. Refresh, reopening, and wake trigger a prompt update. Temporary failures retry at 15/30/60 seconds; public data normally refreshes every 10 minutes, accelerating to 2 minutes for a recent pending message (up to 2 hours).
 
 ## Update, quit, and uninstall
 

@@ -7,13 +7,13 @@ const now = Date.parse('2026-10-11T12:00:00Z');
 const preUrl = 'https://x.com/thsottiaux/status/1000000000000000001';
 const doneUrl = 'https://x.com/thsottiaux/status/1000000000000000002';
 const pre = { id: '1000000000000000001', url: preUrl, text: 'Global reset by EOD.', at: '2026-10-10T22:16:20Z', declared_at: '2026-10-10T22:16:20Z', kind: 'signal' };
-const done = { id: '1000000000000000002', url: doneUrl, text: 'Put the reset in the bag. All propagated.', at: '2026-10-11T04:01:09Z', kind: 'signal' };
+const done = { id: '1000000000000000002', url: doneUrl, text: 'Put the reset in the bag. All propagated.', at: '2026-10-11T04:01:09Z', kind: 'signal', in_reply_to_tweet_id: pre.id, replying_to: 'thsottiaux' };
 const feed = (tweets = [], extra = {}) => ({ version: 1, fetched_at: '2026-10-11T11:50:00Z', stale: false, profile: { handle: 'thsottiaux' }, tweets, events: [], ...extra });
-const record = (extra = {}) => ({ id: 'cr-1000000000000000002', type: 'global_reset', status: 'recorded', source_url: doneUrl, announced_at: '2026-10-11T04:01:09Z', effective_at: '2026-10-11T04:01:09Z', retrieved_at: '2026-10-11T11:45:00Z', time_basis: 'announcement', source_author: '@thsottiaux (archived by Codex Resets)', evidence_text: 'All propagated.', origin: 'codex_resets', ...extra });
+const record = (extra = {}) => ({ id: 'cr-1000000000000000002', type: 'global_reset', status: 'recorded', source_url: doneUrl, announced_at: '2026-10-11T04:01:09Z', effective_at: '2026-10-11T04:01:09Z', retrieved_at: '2026-10-11T11:45:00Z', time_basis: 'announcement', source_author: '@thsottiaux (archived by Codex Resets)', evidence_text: 'All propagated.', origin: 'codex_resets', in_reply_to_tweet_id: pre.id, replying_to: 'thsottiaux', ...extra });
 const history = (events = []) => ({ events, count: events.length, coverage: 'partial', timezone: 'UTC' });
 const query = (primary, backup = history()) => queryExternal({ now, fetchFn: async (url, options) => {
   assert.match(options.headers['User-Agent'], /^codex-quota-widget\//);
-  const data = url === 'https://codex-reset.com/api/feed' ? primary : url === 'https://codexreset.dev/api/history' ? backup : new Error('Unexpected provider');
+  const data = url === 'https://codex-reset.com/api/feed' ? primary : url === 'https://codexreset.dev/api/status' ? backup : new Error('Unexpected provider');
   if (data instanceof Error) throw data;
   return { ok: true, json: async () => data };
 } });

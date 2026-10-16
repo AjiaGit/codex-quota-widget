@@ -71,20 +71,32 @@ export function createQuotaCache({query=()=>queryAppServer(),now=Date.now,recove
   };
   return {get state(){return state;},refresh,settle:()=>pending?.catch(()=>{}),refreshIfDue:()=>now()>=nextDue?refresh():Promise.resolve(state)};
 }
+export function externalRefreshDelay(state, now=Date.now(), failures=1) {
+  const feed=state?.announcements;
+  const active=(feed?.items||[]).some(item=>!item.deliveredAt&&!item.sourceWithdrawn&&
+    (item.certainty==='announced'||['active','recent'].includes(item.sourceHint))&&
+    Date.parse(item.announcedAt)<=now&&now-Date.parse(item.announcedAt)<2*3600000);
+  const health=feed?.providerHealth||[];
+  const cooldown=health.length&&health.every(provider=>provider.retryAfterMs>0)?Math.min(...health.map(provider=>provider.retryAfterMs)):0;
+  const allFailed=health.length&&health.every(provider=>provider.status==='unavailable');
+  return Math.max(allFailed?Math.min(600000,60000*2**Math.max(0,Math.min(failures-1,4))):active?120000:600000,cooldown);
+}
 export async function startMonitor({port=PORT,settingsFile=settingsPath(),query,externalQuery=queryExternal}={}) {
   const recoveryStore=await createRecoveryStore({file:join(dirname(settingsFile),'quota-recovery.json')});
   const cache=createQuotaCache({query,recoveryStore});
   const announcements=await createAnnouncementStore({file:join(dirname(settingsFile),'announcements.json')});
-  let externalState={status:'loading',lastGlobal:null},externalPending=null,externalPublishing=false,lastExternalFetch=0;
+  const externalBackoff=new Map();
+  let externalState={status:'loading',lastGlobal:null},externalPending=null,externalPublishing=false,lastExternalFetch=0,nextExternalAt=0,externalFailures=0;
   const refreshExternal=(force=false,retry=false)=>{
     if(externalPending)return externalPending;
     if(force&&!retry&&Date.now()-lastExternalFetch<60000)return Promise.resolve(externalState);
     lastExternalFetch=Date.now();externalPending=Promise.resolve().then(async()=>{
-      try{const next=await externalQuery();externalPublishing=true;await announcements.update(next.announcements);externalState=next;}
+      try{const next=await externalQuery({backoff:externalBackoff});externalPublishing=true;await announcements.update(next.announcements);externalState=next;}
       // Publish the failure only after the snapshot write has settled. Otherwise
       // an immediate visible retry can coalesce with that unfinished old fetch.
       catch{externalPublishing=true;await announcements.update({status:'unavailable'});externalState={...externalState,status:'unavailable'};}
-      finally{externalPublishing=false;externalPending=null;}return {...externalState,announcements:announcements.state};
+      finally{externalFailures=(externalState.announcements?.providerHealth||[]).every(provider=>provider.status==='unavailable')?externalFailures+1:0;
+        nextExternalAt=Date.now()+externalRefreshDelay(externalState,Date.now(),externalFailures);externalPublishing=false;externalPending=null;}return {...externalState,announcements:announcements.state};
     });return externalPending;
   };
   const files=new Map([['/',['index.html','text/html']],['/app.css',['app.css','text/css']],['/app.mjs',['app.mjs','text/javascript']],['/i18n.mjs',['i18n.mjs','text/javascript']]]);
@@ -124,7 +136,7 @@ export async function startMonitor({port=PORT,settingsFile=settingsPath(),query,
     }catch{if(!response.headersSent)response.writeHead(500);response.end();}
   });
   await new Promise((resolveListen,reject)=>{server.once('error',reject);server.listen(port,HOST,resolveListen);});cache.refresh();refreshExternal();
-  const timer=setInterval(()=>cache.refreshIfDue(),5000),externalTimer=setInterval(()=>refreshExternal(),600000);
+  const timer=setInterval(()=>cache.refreshIfDue(),5000),externalTimer=setInterval(()=>{if(Date.now()>=nextExternalAt)refreshExternal();},5000);
   const stop=async()=>{
     clearInterval(timer);clearInterval(externalTimer);
     const finishingExternal=externalPending;

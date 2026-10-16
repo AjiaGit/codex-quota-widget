@@ -96,7 +96,7 @@ test('last successful public fetch survives a failed refresh and restart, separa
     let clock=now;
     const file=join(dir,'announcements.json');
     let store=await createAnnouncementStore({file,now:()=>clock});
-    await store.update({status:'ok',stale:false,sourceUpdatedAt:new Date(now-3600000).toISOString(),items:[item('saved',180000)],history:[]});
+    await store.update({status:'ok',stale:false,sourceUpdatedAt:new Date(now-1200000).toISOString(),items:[item('saved',180000)],history:[]});
     assert.equal(store.state.lastFetchedAt,now);
     clock+=60000;
     await store.update({status:'unavailable'});
@@ -106,7 +106,7 @@ test('last successful public fetch survives a failed refresh and restart, separa
     const notice=derivePublicNotice({status:'unavailable',announcements:store.state},clock,'Asia/Shanghai','en');
     assert.equal(notice.hasCache,true);
     assert.match(notice.lastFetchedText,/12:00/);
-    assert.ok(!notice.lastFetchedText.includes('11:00'),'Source generation time is not represented as retrieval time');
+    assert.ok(!notice.lastFetchedText.includes('11:40'),'Source generation time is not represented as retrieval time');
   }finally{await rm(dir,{recursive:true,force:true});}
 });
 
@@ -137,8 +137,8 @@ test('source-reported completion remains distinct from confirmed delivery',()=>{
   const row=presentation.deriveAnnouncementsView(feed,now,'Asia/Shanghai','zh-CN').rows[0];
   assert.ok(row.display,'Public records have compact display facts');
   assert.equal(row.phase,'unconfirmed');
-  assert.equal(row.display.title,'额度重置相关消息：进展尚不明确');
-  assert.equal(row.display.completionMissing,true);
+  assert.equal(row.display.title,'额度重置消息待核实');
+  assert.equal(row.display.completionMissing,false);
   assert.match(row.display.facts[0],/发布.*11:59/);
   assert.match(row.display.scope,/(?:网站|来源)标注/);
 });
@@ -165,6 +165,6 @@ test('negated and conditional source summaries never turn into visible claims of
     const row=presentation.deriveAnnouncementsView({items:[item('conditional',60000,{summary})],history:[]},now,'UTC','en').rows[0];
     assert.equal(row.phase,'unconfirmed');
     assert.doesNotMatch(row.display.title,/was reset|completed|delivered/i);
-    assert.equal(row.display.completionMissing,true);
+    assert.equal(row.display.completionMissing,false);
   }
 });

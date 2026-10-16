@@ -23,7 +23,7 @@ The widget installer is unsigned, so Windows may display an unknown-publisher or
 
 The Windows interface follows the accepted macOS layout: ring and countdown, the Plus-only five-hour row, inline banked-reset details, one unified activity list, data sources, and refresh cadence. The list starts with five recent records and appends five on demand; **Show latest 5** collapses it. Expand **Message details** or **Data sources** in place. Announcement time and scheduled/delivered time remain separate; the local UTC offset is shown above the activity list.
 
-Quota and cache checks run every 60 seconds. Manual refresh, reopening, and wake trigger a prompt update. Temporary failures retry at 15/30/60 seconds. Public reset data refreshes every 10 minutes.
+Quota and cache checks run every 60 seconds. Manual refresh, reopening, and wake trigger a prompt update. Temporary failures retry at 15/30/60 seconds. Public reset data normally refreshes every 10 minutes, accelerating to 2 minutes for a recent pending message (up to 2 hours).
 
 ## Update and uninstall
 

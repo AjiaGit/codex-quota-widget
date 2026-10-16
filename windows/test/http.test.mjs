@@ -154,7 +154,7 @@ test('external API restores confirmed announcements after a service restart and 
 });
 
 test('public data is queried on the ten-minute timer and polling the cache does not query the provider',async(context)=>{
-  context.mock.timers.enable({apis:['setInterval']});
+  context.mock.timers.enable({apis:['setInterval','Date'],now:Date.now()});
   const directory=await mkdtemp(join(tmpdir(),'quota-public-cadence-'));
   let queries=0,running;
   try {

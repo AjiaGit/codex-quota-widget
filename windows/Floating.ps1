@@ -933,7 +933,7 @@ function New-AnnouncementControl($row) {
     $heading=New-Label $view.title 36 30 346 22 11.25 $true;$heading.Tag='strong'
     $fact=New-Label $view.fact 36 54 346 22 10.5;$fact.Visible=[bool]$view.fact;$statusLine=New-Label $view.status 36 80 346 22 9.75;$statusLine.Visible=[bool]$view.status
     $missing=if ($view.missing) {New-Label (T 'completionNotProvided') 36 80 346 22 10.5} else {$null}
-    $sourceLink=if ($row.sourceUrl) {New-ActivityLink (T $(if ($row.sourceHint) {'viewSource'} else {'announcementSource'})) $row.sourceUrl} else {$null}
+    $sourceLink=if ($row.sourceUrl) {New-ActivityLink (T $(if ($row.statementBasis -eq 'observation') {'viewWebsiteRecord'} elseif ($row.sourceHint) {'viewSource'} else {'announcementSource'})) $row.sourceUrl} else {$null}
     $monitorLink=if ($row.monitorSourceUrl) {New-ActivityLink (T 'siteHintSource') $row.monitorSourceUrl} else {$null}
     $more=$null;$extraPanel=$null;$key=if ($row.key) {[string]$row.key} else {[string]$row.sortAt+'/'+[string]$row.title}
     if ($view.extra -or $row.deliverySourceUrl) {
