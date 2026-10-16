@@ -276,6 +276,11 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
  }
  Test-Case 'local recovery summary stays in the hero in both languages and cannot inherit public messages' {
   $oldData=$script:data;$oldLanguage=$script:languageSetting;$oldSize=$form.ClientSize;$oldAuto=$script:automaticDetailHeight
+  # Set-Language updates native menu controls as well as the visible labels.
+  # Build the real menu fixture before using the production language path.
+  $menuStart=$source.IndexOf('$menu = New-Object System.Windows.Forms.ContextMenu')
+  $menuEnd=$source.IndexOf('$form.ContextMenu = $menu',$menuStart)
+  Invoke-Expression $source.Substring($menuStart,$menuEnd-$menuStart)
   try {
    $script:automaticDetailHeight=$false
    $recovery=[pscustomobject]@{observedFrom=$now.AddMinutes(-3).ToUnixTimeMilliseconds();detectedAt=$now.AddMinutes(-2).ToUnixTimeMilliseconds();beforePercent=20;afterPercent=80}
@@ -293,7 +298,7 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
    }
    $script:data=[pscustomobject]@{status='unavailable';recoveryHistory=$script:data.recoveryHistory};Show-Quota
    if($latestRecovery.Text -match [regex]::Escape((Format-WidgetCompactDate $now.AddMinutes(-2) $script:language))){throw 'Failed account query exposed an old account recovery time'}
-  }finally{$script:data=$oldData;$script:languageSetting=$oldLanguage;$script:automaticDetailHeight=$oldAuto;$form.ClientSize=$oldSize;Set-Language;Show-Quota}
+  }finally{$script:data=$oldData;$script:languageSetting=$oldLanguage;$script:automaticDetailHeight=$oldAuto;$form.ClientSize=$oldSize;Set-Language;Show-Quota;$menu.Dispose()}
  }
  Test-Case 'the new recovery label participates in the production detail drag registration' {
   $oldDrag=$drag;$script:dragTestOrigins=@()
