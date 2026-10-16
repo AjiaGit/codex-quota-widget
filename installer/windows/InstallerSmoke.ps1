@@ -618,8 +618,9 @@ http.createServer(async(req,res)=>{
             $fact=(Get-WidgetText $factKey $language @((Format-WidgetCompactDate ([DateTimeOffset]$stamp) $language)))+' · '+(Get-WidgetText $(if ($source.scope -eq 'paid') {'paid'} else {'all'}) $language)
             $titleKey=$(if ($completed) {'delivered'} else {'upcoming'})+$(if ($source.kind -eq 'banked') {'GrantTitle'} else {'ResetTitle'})
             # These legacy-shaped fixtures have no recorded collecting site.
-            $expectedTitle=Get-WidgetText 'siteRecords' $language @((Get-WidgetText 'monitorRecord' $language),(Get-WidgetText $titleKey $language))
-            [pscustomobject]@{id=$id;fact=$fact;title=$expectedTitle;label=(Get-WidgetText 'unknownAttribution' $language)}
+            $expectedTitle=Get-WidgetText $(if ($completed) {'publisherSays'} else {'publisherAnnounces'}) $language @((Get-WidgetText 'monitorRecord' $language),(Get-WidgetText $titleKey $language))
+            $expectedLabel=(Get-WidgetText $(if ($completed) {'categoryComplete'} else {'categoryPreview'}) $language)+' · '+(Get-WidgetText 'unknownAttribution' $language)
+            [pscustomobject]@{id=$id;fact=$fact;title=$expectedTitle;label=$expectedLabel}
         })
         Wait-Until {
             $script:layoutNames=Get-VisibleText $handle $ui.Id
