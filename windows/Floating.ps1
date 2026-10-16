@@ -334,7 +334,7 @@ $script:colors = @{}
 $script:layoutPlus = $null
 $script:layoutBusy = $false
 $script:detailDragging = $false
-$script:activityLimit = 5
+$script:activityLimit = 3
 $script:activityRecordKeys = @{}
 $script:visibleActivityView = $null
 $script:announcementRenderKey = ''
@@ -548,8 +548,9 @@ $caption=New-Label (T 'untilReset') 160 10 250 26 12
 $countdown=New-Label (T 'reading') 160 42 250 40 22.5 $true;$countdown.Tag='strong'
 $reset=New-Label (T 'resetUnknown') 160 85 250 24 10.5
 $updated=New-Label '' 160 113 250 24 10.5
+$latestRecovery=New-Label '' 0 0 346 22 9.75;$latestRecovery.Name='latest-recovery'
 $heroDivider=New-Object Windows.Forms.Panel;$heroDivider.Tag='line'
-foreach ($control in @($ring,$caption,$countdown,$reset,$updated,$heroDivider)){[void]$heroPanel.Controls.Add($control)}
+foreach ($control in @($ring,$caption,$countdown,$reset,$updated,$latestRecovery,$heroDivider)){[void]$heroPanel.Controls.Add($control)}
 $fiveDivider=New-Object Windows.Forms.Panel;$fiveDivider.Tag='line';$fiveIcon=New-SectionIcon 'fiveHour'
 $fiveTitle=New-Label (T 'fiveHour') 36 10 240 26 10.5 $true;$fiveTitle.Tag='strong'
 $fiveValue=New-Label '' 270 10 70 26 10.5 $true;$fiveValue.Tag='strong';$fiveValue.TextAlign=[Drawing.ContentAlignment]::MiddleRight
@@ -572,8 +573,8 @@ $publicStatusPanel.Add_Paint({param($sender,$e);$pen=[Drawing.Pen]::new($script:
 $activityRowsPanel=New-Object Windows.Forms.Panel
 $activityEmpty=New-Label '' 0 0 346 22 10.5
 $recoveryWarning=New-Label '' 0 0 346 22 10.5
-$activityMore=New-DisclosureButton '' 'activity-more';$activityMore.Add_Click({$script:activityLimit+=5;Show-External})
-$activityLess=New-DisclosureButton '' 'activity-less';$activityLess.Add_Click({$script:activityLimit=5;Show-External;$body.ScrollControlIntoView($activityHeading)})
+$activityMore=New-DisclosureButton '' 'activity-more';$activityMore.Add_Click({$script:activityLimit+=3;Show-External})
+$activityLess=New-DisclosureButton '' 'activity-less';$activityLess.Add_Click({$script:activityLimit=3;Show-External;$body.ScrollControlIntoView($activityHeading)})
 foreach ($button in @($activityMore,$activityLess)) {$oldFont=$button.Font;$button.Font=[Drawing.Font]::new('Segoe UI',9.75,[Drawing.FontStyle]::Underline);$oldFont.Dispose();$button.Tag='muted';$button.ShowChevron=$false}
 foreach ($control in @($activityHeading,$localTimeNote,$publicStatusPanel,$recoveryWarning,$activityRowsPanel,$activityMore,$activityLess,$activityEmpty)){[void]$announcementPanel.Controls.Add($control)}
 $sourcesButton=New-DisclosureButton 'sources' 'data-sources-toggle';$sourcesButton.Add_Click({Toggle-DataSources});[void]$sourcesPanel.Controls.Add($sourcesButton)
@@ -663,7 +664,7 @@ function Layout-AnnouncementRows($parent, $rows, [int]$width, [int]$startY=0) {
         if ($parts.source -and -not $stacked) {Set-ControlBox $parts.source ($width-$sourceWidth) $insideY $sourceWidth $titleHeight}
         $insideY+=$titleHeight+2
         if ($parts.source -and $stacked) {$insideY+=(Set-WrappedBox $parts.source $left $insideY $mainWidth 20)+2}
-        foreach ($control in @($parts.monitor,$parts.fact,$parts.missing,$parts.status) | Where-Object {$_ -and $_.Text}) {$insideY+=(Set-WrappedBox $control $left $insideY $mainWidth 20)+2}
+        foreach ($control in @($parts.monitor,$parts.fact,$parts.attribution,$parts.missing,$parts.status) | Where-Object {$_ -and $_.Text}) {$insideY+=(Set-WrappedBox $control $left $insideY $mainWidth 20)+2}
         if ($parts.more) {
             Set-ControlBox $parts.more $left $insideY ([Math]::Min(180,$mainWidth)) 26;$insideY+=26
             $expanded=[bool]$script:recordExpanded[$parts.key];$parts.more.Expanded=$expanded;$parts.extraPanel.Visible=$expanded
@@ -735,7 +736,8 @@ function Update-ResponsiveLayout {
             $countHeight=Set-WrappedBox $countdown $copyX 42 $copyWidth 38
             $resetY=42+$countHeight+4;$copyBottom=$resetY+(Set-WrappedBox $reset $copyX $resetY $copyWidth 22)
             if ($updated.Visible) {$copyBottom+=8+(Set-WrappedBox $updated $copyX ($copyBottom+8) $copyWidth 22)}
-            $heroPanel.Height=[Math]::Max($metrics.ring+24,$copyBottom+14);Set-ControlBox $heroDivider $metrics.dividerX 10 1 ($heroPanel.Height-24)
+            $heroMainHeight=[Math]::Max($metrics.ring+24,$copyBottom+14)
+            $heroPanel.Height=$heroMainHeight+(Set-WrappedBox $latestRecovery 0 $heroMainHeight $cw 20)+10;Set-ControlBox $heroDivider $metrics.dividerX 10 1 ($heroMainHeight-24)
             Set-ControlBox $fiveIcon 0 10 24 24
             if ($width -gt 520) {
                 $resetWidth=[Windows.Forms.TextRenderer]::MeasureText($fiveReset.Text,$fiveReset.Font).Width+6
@@ -929,7 +931,8 @@ function New-ActivityLink([string]$label, [string]$url) {
 }
 function New-AnnouncementControl($row) {
     $view=Get-WidgetActivityPresentation $row $script:language;$panel=[Windows.Forms.Panel]::new()
-    $icon=New-SectionIcon $row.kind;$label=New-Label $view.label 36 10 346 20 9
+    $icon=New-SectionIcon $row.kind;$label=New-Label $(if ($view.recordLabel) {$view.recordLabel} else {$view.label}) 36 10 346 20 9
+    $recordAttribution=if ($view.recordLabel) {New-Label $view.label 36 80 346 20 9} else {$null}
     $heading=New-Label $view.title 36 30 346 22 11.25 $true;$heading.Tag='strong'
     $fact=New-Label $view.fact 36 54 346 22 10.5;$fact.Visible=[bool]$view.fact;$statusLine=New-Label $view.status 36 80 346 22 9.75;$statusLine.Visible=[bool]$view.status
     $missing=if ($view.missing) {New-Label (T 'completionNotProvided') 36 80 346 22 10.5} else {$null}
@@ -943,9 +946,9 @@ function New-AnnouncementControl($row) {
         if ($view.extra){$extra=New-Label $view.extra 0 0 346 24 9.75;[void]$extraPanel.Controls.Add($extra)}
         if ($row.deliverySourceUrl){[void]$extraPanel.Controls.Add((New-ActivityLink (T 'deliverySource') $row.deliverySourceUrl))}
     }
-    foreach ($control in @($icon,$label,$heading,$fact,$statusLine,$missing,$sourceLink,$monitorLink,$more,$extraPanel) | Where-Object {$_}){[void]$panel.Controls.Add($control)}
+    foreach ($control in @($icon,$label,$heading,$fact,$recordAttribution,$statusLine,$missing,$sourceLink,$monitorLink,$more,$extraPanel) | Where-Object {$_}){[void]$panel.Controls.Add($control)}
     $panel.Add_Paint({param($sender,$e);$pen=[Drawing.Pen]::new($script:colors.line,1);try{$e.Graphics.DrawLine($pen,0,$sender.Height-1,$sender.Width,$sender.Height-1)}finally{$pen.Dispose()}})
-    $panel.Tag=@{key=$key;icon=$icon;label=$label;title=$heading;fact=$fact;status=$statusLine;missing=$missing;source=$sourceLink;monitor=$monitorLink;more=$more;extraPanel=$extraPanel};return $panel
+    $panel.Tag=@{key=$key;icon=$icon;label=$label;title=$heading;fact=$fact;attribution=$recordAttribution;status=$statusLine;missing=$missing;source=$sourceLink;monitor=$monitorLink;more=$more;extraPanel=$extraPanel};return $panel
 }
 function Get-ControlOwnedFonts($control) {
     if ($control -is [Windows.Forms.Label] -or $control -is [Windows.Forms.Button]) {$control.Font}
@@ -965,6 +968,7 @@ function Show-External {
         $script:activityInputKey=$activityInputKey
     }
     $view=$script:cachedActivityView
+    $latestRecovery.Text=$view.latestRecoveryText
     $notice=Get-WidgetPublicNoticeView $script:externalData $script:language $now
     $renderKey=@{language=$script:language;view=$view;notice=$notice;limit=$script:activityLimit;
         recoveryStatus=$script:data.recoveryHistory.status;pending=[bool]$script:externalTask;retrying=[bool]($script:externalTask -and -not $script:externalTask.IsCompleted)} | ConvertTo-Json -Depth 12 -Compress
@@ -1199,7 +1203,7 @@ function Start-ModeTransition([string]$nextMode) {
     if ($script:animating -or $script:mode -eq $nextMode) { return }
     [WidgetOutsideClick]::Disable()
     $compact = $nextMode -eq 'Compact'
-    if (-not $compact) {$script:activityLimit=5;Show-External}
+    if (-not $compact) {$script:activityLimit=3;Show-External}
     $size = if ($compact) { $script:compactSize } else { [System.Drawing.Size]::new($script:detailSize.Width, ($script:detailSize.Height + $(if ($script:layoutPlus) { 62 } else { 0 }))) }
     if ($script:mode -ne 'Detail' -or -not $script:automaticDetailHeight -or -not $script:modePositions.Detail) {
         $script:modePositions[$script:mode] = [pscustomobject]@{ x = $form.Left; y = $form.Top }
@@ -1534,7 +1538,7 @@ $timer.Add_Tick({
 
 $form.Add_VisibleChanged({
     if ($form.Visible) {
-        if ($script:mode -eq 'Detail' -and -not $script:animating) { $script:activityLimit=5;Show-External;$body.AutoScrollPosition=[Drawing.Point]::Empty }
+        if ($script:mode -eq 'Detail' -and -not $script:animating) { $script:activityLimit=3;Show-External;$body.AutoScrollPosition=[Drawing.Point]::Empty }
         Update-ResponsiveLayout; $form.Invalidate($true); Start-AnnouncementRead
     }
     Update-OutsideClickMonitor

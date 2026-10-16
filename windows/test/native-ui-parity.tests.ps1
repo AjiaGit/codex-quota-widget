@@ -46,14 +46,14 @@ Test-Case 'expired and failed quota cannot expose cached reset details' {
   if($view.note -notmatch '过期'){throw 'Missing stale detail explanation'}
  }
 }
-Test-Case 'unified records follow the Mac chronological five-row policy' {
+Test-Case 'unified records follow the Mac chronological three-row policy' {
  $rows=@(0..5 | ForEach-Object {[pscustomobject]@{key=('p'+$_);id=('p'+$_);kind='regular';sortAt=(10-$_)}})
  $activity=[pscustomobject]@{active=$rows[0..2];history=$rows[3..5]}
  $view=Get-WidgetVisibleActivityView $activity
- Assert-Equal ($view.active.key -join ',') 'p0,p1,p2,p3,p4' 'Current and archive share the first five'
+ Assert-Equal ($view.active.key -join ',') 'p0,p1,p2' 'Current and archive share the first three'
  $alerts=[pscustomobject]@{ids=@($rows.id)}
- Assert-Equal ((Get-WidgetAnnouncementReadIds $alerts $view $true) -join ',') 'p0,p1,p2,p3,p4' 'Unloaded record remains unread'
- $expanded=Get-WidgetVisibleActivityView $activity 10
+ Assert-Equal ((Get-WidgetAnnouncementReadIds $alerts $view $true) -join ',') 'p0,p1,p2' 'Unloaded records remain unread'
+ $expanded=Get-WidgetVisibleActivityView $activity 6
  Assert-Equal ((Get-WidgetAnnouncementReadIds $alerts $expanded $true) -join ',') 'p0,p1,p2,p3,p4,p5' 'Loaded record can be acknowledged'
 }
  Test-Case 'public status uses the Mac cache and source freshness rules' {
@@ -167,7 +167,7 @@ try {
  Test-Case 'auto-height displays the default content and expanded sources when the screen fits' {
   $oldSize=$form.ClientSize;$oldAuto=$script:automaticDetailHeight
   try {
-   $script:automaticDetailHeight=$true;$script:creditsExpanded=$false;$script:activityLimit=5;$script:sourcesExpanded=$false
+   $script:automaticDetailHeight=$true;$script:creditsExpanded=$false;$script:activityLimit=3;$script:sourcesExpanded=$false
    foreach($expanded in @($false,$true)) {
     $script:sourcesExpanded=$expanded;$form.ClientSize=[Drawing.Size]::new(606,390);Show-Quota;Update-ResponsiveLayout
     $screen=[Windows.Forms.Screen]::FromControl($form).WorkingArea
@@ -270,9 +270,30 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
   $control=New-AnnouncementControl $row
   try {
    Assert-Equal $control.Tag.fact.Visible $false 'An absent date/fact remains hidden'
-   Assert-Equal $control.Tag.status.Visible $true 'Unverified evidence explanation is required text'
-   Assert-Equal $control.Tag.status.Text (T 'unverifiedHelp') 'Unverified update retains the approved explanation'
+   Assert-Equal $control.Tag.status.Visible $false 'Verification help belongs in the disclosure'
+   if ($null -eq $control.Tag.more -or $control.Tag.extraPanel.Controls[0].Text -notmatch [regex]::Escape((T 'unverifiedHelp'))) {throw 'Unverified update lost its explanation disclosure'}
   }finally{$control.Dispose()}
+ }
+ Test-Case 'local recovery summary stays in the hero in both languages and cannot inherit public messages' {
+  $oldData=$script:data;$oldLanguage=$script:languageSetting;$oldSize=$form.ClientSize;$oldAuto=$script:automaticDetailHeight
+  try {
+   $script:automaticDetailHeight=$false
+   $recovery=[pscustomobject]@{observedFrom=$now.AddMinutes(-3).ToUnixTimeMilliseconds();detectedAt=$now.AddMinutes(-2).ToUnixTimeMilliseconds();beforePercent=20;afterPercent=80}
+   $script:data=[pscustomobject]@{status='ok';plan='pro';updatedAt=$now.ToUnixTimeMilliseconds();resetsAt=$now.AddDays(4).ToUnixTimeSeconds();remainingPercent=74;resetCards=2;recoveryHistory=[pscustomobject]@{status='ok';records=@($recovery)}}
+   foreach ($lang in @('en','zh-CN')) {
+    $script:languageSetting=$lang;Set-Language
+    foreach($width in @(404,606)) {
+     $form.ClientSize=[Drawing.Size]::new($width,700);Show-Quota;Update-ResponsiveLayout
+     if(-not $latestRecovery.Visible -or $latestRecovery.Parent -ne $heroPanel){throw 'Recovery summary is missing from the quota area'}
+     if($latestRecovery.Text -notmatch $(if($lang -eq 'en'){'^Last quota recovery noticed:'}else{'^最近检测到额度恢复：'})){throw 'Recovery summary is untranslated'}
+     if($latestRecovery.Top -lt [Math]::Max($ring.Bottom,$reset.Bottom) -or $latestRecovery.Right -gt $heroPanel.Width -or $latestRecovery.Bottom -gt $heroPanel.Height){throw 'Recovery summary overlaps the hero or is clipped'}
+     $before=$latestRecovery.Text;Show-External
+     Assert-Equal $latestRecovery.Text $before 'External refresh cannot change the account recovery time'
+    }
+   }
+   $script:data=[pscustomobject]@{status='unavailable';recoveryHistory=$script:data.recoveryHistory};Show-Quota
+   if($latestRecovery.Text -match [regex]::Escape((Format-WidgetCompactDate $now.AddMinutes(-2) $script:language))){throw 'Failed account query exposed an old account recovery time'}
+  }finally{$script:data=$oldData;$script:languageSetting=$oldLanguage;$script:automaticDetailHeight=$oldAuto;$form.ClientSize=$oldSize;Set-Language;Show-Quota}
  }
  Test-Case 'recent recovery disclosure retains the previous observation time' {
   $state=[pscustomobject]@{status='ok';recoveryHistory=[pscustomobject]@{status='ok';records=@([pscustomobject]@{beforePercent=39;afterPercent=74;observedFrom=$now.AddMinutes(-3).ToUnixTimeMilliseconds();detectedAt=$now.AddMinutes(-2).ToUnixTimeMilliseconds()})}}
@@ -351,7 +372,7 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
  Test-Case 'unified rows remain displayed after a hidden-window refresh and reopening' {
   $oldExternal=$script:externalData
   try {
-   $script:activityLimit=5
+   $script:activityLimit=3
    $script:externalData=[pscustomobject]@{status='ok';announcements=[pscustomobject]@{status='ok';sourceUpdatedAt=$now.ToString('o');stale=$false;items=@();history=@()}}
    foreach($i in @(1,2)) {
     $script:externalData.announcements.items+=,[pscustomobject]@{id=('https://example.invalid/FABRICATED-hidden-'+$i+'#regular');kind='regular';certainty='announced';announcedAt=$now.AddMinutes(-$i).ToString('o');deliveredAt=$now.AddMinutes(-$i).ToString('o');sourceUrl=('https://example.invalid/FABRICATED-hidden-'+$i);scope='paid'}
@@ -360,7 +381,7 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
    Assert-Equal $script:announcementRows.Count 2 'Both records stay in one list'
    $renderedIds=@($script:announcementRows | ForEach-Object {$_.Tag.key})
    foreach($record in $script:visibleActivityView.active){if($record.key -notin $renderedIds){throw 'Read view includes an undisplayed record'}}
-  }finally{$script:externalData=$oldExternal;$script:activityLimit=5;$script:announcementRenderKey='';$form.Show();Show-External}
+  }finally{$script:externalData=$oldExternal;$script:activityLimit=3;$script:announcementRenderKey='';$form.Show();Show-External}
  }
  Test-Case 'loaded activity restores the user anchor when the remaining content fits' {
   $oldExternal=$script:externalData;$oldPosition=$script:modePositions;$oldPath=$script:positionPath;$oldAuto=$script:automaticDetailHeight;$oldBounds=$form.Bounds
@@ -369,7 +390,7 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
    $screen=[Windows.Forms.Screen]::AllScreens[-1].WorkingArea
    $anchor=[pscustomobject]@{x=$screen.Left+55;y=$screen.Top+80}
    $script:positionPath=$temp;$script:modePositions=@{Detail=$anchor;Compact=[pscustomobject]@{x=$screen.Left+10;y=$screen.Top+100}}
-   $script:automaticDetailHeight=$true;$script:activityLimit=5;$script:creditsExpanded=$false;$script:sourcesExpanded=$false
+   $script:automaticDetailHeight=$true;$script:activityLimit=3;$script:creditsExpanded=$false;$script:sourcesExpanded=$false
    $form.Bounds=[Drawing.Rectangle]::new($anchor.x,$anchor.y,644,700)
    $script:externalData=[pscustomobject]@{status='ok';announcements=[pscustomobject]@{status='ok';sourceUpdatedAt=$now.ToString('o');stale=$false;items=@();history=@()}}
    Show-External
@@ -382,37 +403,37 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
    Save-WindowPosition
    Assert-Equal (Read-WidgetJson $temp).detailY $anchor.y 'Temporary screen fitting must not overwrite the user anchor'
    $activityLess.PerformClick()
-   Assert-Equal $script:announcementRows.Count 5 'Collapse returns to the first page'
+   Assert-Equal $script:announcementRows.Count 3 'Collapse returns to the first page'
    $script:externalData.announcements.history=@();Show-External
    Assert-Equal $form.Top $anchor.y 'Fitting content returns to the user anchor'
    Save-WindowPosition
    Assert-Equal (Get-WidgetModePosition (Read-WidgetJson $temp) 'Detail').y $anchor.y 'Restart keeps the original anchor'
   }finally {
-   $script:externalData=$oldExternal;$script:modePositions=$oldPosition;$script:positionPath=$oldPath;$script:automaticDetailHeight=$oldAuto;$script:activityLimit=5;$form.Bounds=$oldBounds
+   $script:externalData=$oldExternal;$script:modePositions=$oldPosition;$script:positionPath=$oldPath;$script:automaticDetailHeight=$oldAuto;$script:activityLimit=3;$form.Bounds=$oldBounds
    if(Test-Path -LiteralPath $temp){Remove-Item -LiteralPath $temp -Force};Show-External
   }
  }
  Test-Case 'unified pagination materializes only loaded rows and reuses unchanged native controls' {
   $oldExternal=$script:externalData
   try {
-   $script:activityLimit=5;$script:announcementRenderKey=''
+   $script:activityLimit=3;$script:announcementRenderKey=''
    $script:externalData=[pscustomobject]@{status='ok';announcements=[pscustomobject]@{status='ok';sourceUpdatedAt=$now.ToString('o');stale=$false;items=@();history=@()}}
    foreach($i in 1..50){$script:externalData.announcements.history+=,[pscustomobject]@{id=('https://example.invalid/FABRICATED-lazy-'+$i+'#regular');kind='regular';sourceUrl='https://example.invalid/FABRICATED';certainty='announced';announcedAt=$now.AddDays(-$i).ToString('o');deliveredAt=$now.AddDays(-$i).ToString('o')}}
    Show-External
-   Assert-Equal $activityRowsPanel.Controls.Count 5 'First page does not create fifty sets of native controls'
+   Assert-Equal $activityRowsPanel.Controls.Count 3 'First page does not create fifty sets of native controls'
    Show-External
-   Assert-Equal $script:announcementRows.Count 5 'History initially creates only five recent records'
+   Assert-Equal $script:announcementRows.Count 3 'History initially creates only three recent records'
    $first=$script:announcementRows[0];$activityMore.PerformClick()
-   Assert-Equal $script:announcementRows.Count 10 'More history appends five records'
+   Assert-Equal $script:announcementRows.Count 6 'More history appends three records'
    if(-not [object]::ReferenceEquals($first,$script:announcementRows[0])){throw 'Appending history rebuilt previously shown controls'}
    while($script:visibleActivityView.nextCount -gt 0){$activityMore.PerformClick()}
    Assert-Equal $script:announcementRows.Count 50 'Every stored record is still accessible in batches'
    Assert-Equal $script:visibleActivityView.nextCount 0 'No more action at the end'
    $activityLess.PerformClick()
-   Assert-Equal $script:announcementRows.Count 5 'Reopening history starts with five records again'
+   Assert-Equal $script:announcementRows.Count 3 'Reopening history starts with three records again'
    $first=$script:announcementRows[0];Show-External
    if(-not [object]::ReferenceEquals($first,$script:announcementRows[0])){throw 'An unchanged refresh rebuilt the history controls'}
-  }finally{$script:externalData=$oldExternal;$script:activityLimit=5;$script:announcementRenderKey='';Show-External}
+  }finally{$script:externalData=$oldExternal;$script:activityLimit=3;$script:announcementRenderKey='';Show-External}
  }
  Test-Case 'unchanged theme checks do not invalidate the visible native text tree' {
   Set-Theme
@@ -515,21 +536,24 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
  Test-Case 'current and archived rows share one native list without old disclosure entries' {
   $oldExternal=$script:externalData
   try {
-   $script:activityLimit=5;$script:announcementRenderKey=''
+   $script:activityLimit=3;$script:announcementRenderKey=''
    $script:externalData=[pscustomobject]@{status='ok';announcements=[pscustomobject]@{status='ok';sourceUpdatedAt=$now.ToString('o');stale=$false;history=@();items=@()}}
    foreach($i in 1..8){
     $row=[pscustomobject]@{id=('https://example.invalid/FABRICATED-unified-'+$i+'#regular');kind='regular';sourceUrl=('https://example.invalid/FABRICATED-unified-'+$i);certainty='announced';announcedAt=$now.AddHours(-$i).ToString('o');deliveredAt=$now.AddHours(-$i).ToString('o')}
     if($i -le 2){$script:externalData.announcements.items+=,$row}else{$script:externalData.announcements.history+=,$row}
    }
    Show-External
-   Assert-Equal $script:announcementRows.Count 5 'First five records share the list'
+   Assert-Equal $script:announcementRows.Count 3 'First three records share the list'
    Assert-Equal $activityMore.Visible $true 'More is available'
    Assert-Equal $form.Controls.Find('earlier-updates-toggle',$true).Length 0 'No earlier entry'
    Assert-Equal $form.Controls.Find('announcement-history-toggle',$true).Length 0 'No separate history entry'
    $activityMore.PerformClick()
-   Assert-Equal $script:announcementRows.Count 8 'Next batch loads the remaining records'
+   Assert-Equal $script:announcementRows.Count 6 'Next batch appends three records'
+   Assert-Equal $activityMore.Visible $true 'More remains available for the final batch'
+   $activityMore.PerformClick()
+   Assert-Equal $script:announcementRows.Count 8 'Final batch loads the remaining records'
    Assert-Equal $activityMore.Visible $false 'More hides at the end'
-  }finally{$script:externalData=$oldExternal;$script:activityLimit=5;$script:announcementRenderKey='';Show-External}
+  }finally{$script:externalData=$oldExternal;$script:activityLimit=3;$script:announcementRenderKey='';Show-External}
  }
  Test-Case 'clicking the detail drag surface without moving preserves a temporary-fit anchor' {
   $oldPositions=$script:modePositions;$oldBounds=$form.Bounds;$oldAuto=$script:automaticDetailHeight
@@ -615,7 +639,7 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
     for($i=0;$i -lt 180;$i++){$wheel.Invoke($body,@([Windows.Forms.MouseEventArgs]::new([Windows.Forms.MouseButtons]::None,0,20,20,-120)))}
     Assert-Equal $script:announcementRows[-1].Visible $true 'Actual mouse-wheel scrolling realizes the final record'
    }finally{if($event){$body.Remove_MouseWheel($handler)}}
-  }finally{if($script:announcementReadContent -and $script:announcementReadContent -ne $oldReadContent){$script:announcementReadContent.Dispose()};$script:client=$oldClient;$script:noticeView=$oldNotice;$script:announcementReadTask=$oldReadTask;$script:announcementReadContent=$oldReadContent;$script:externalData=$oldExternal;$script:activityLimit=5;$script:announcementRenderKey='';$script:automaticDetailHeight=$oldAuto;$form.Bounds=$oldBounds;$body.AutoScrollPosition=[Drawing.Point]::Empty;Show-External}
+  }finally{if($script:announcementReadContent -and $script:announcementReadContent -ne $oldReadContent){$script:announcementReadContent.Dispose()};$script:client=$oldClient;$script:noticeView=$oldNotice;$script:announcementReadTask=$oldReadTask;$script:announcementReadContent=$oldReadContent;$script:externalData=$oldExternal;$script:activityLimit=3;$script:announcementRenderKey='';$script:automaticDetailHeight=$oldAuto;$form.Bounds=$oldBounds;$body.AutoScrollPosition=[Drawing.Point]::Empty;Show-External}
  }
  Test-Case 'a fast repeated public retry failure restores the retry action' {
   Add-Type -AssemblyName System.Net.Http
@@ -659,7 +683,7 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
    $languageRecords=@(1..50 | ForEach-Object {[pscustomobject]@{id=('https://example.invalid/FABRICATED-language-'+$_+'#regular');kind='regular';certainty='announced';announcedAt=$now.AddDays(-$_).ToString('o');sourceUrl=('https://example.invalid/FABRICATED-language-'+$_);summary='FABRICATED TEST DATA - Long history for language switching';summaryZh='虚构测试数据 - 语言切换长历史';deliveredAt=$now.AddDays(-$_).AddHours(1).ToString('o')}})
    $script:externalData=[pscustomobject]@{status='ok';announcements=[pscustomobject]@{status='ok';stale=$false;sourceUpdatedAt=$now.ToString('o');lastFetchedAt=$now.ToUnixTimeMilliseconds();items=@();history=$languageRecords}}
    Show-External
-   $script:activityLimit=5;Show-External;Start-ModeTransition 'Compact'
+   $script:activityLimit=3;Show-External;Start-ModeTransition 'Compact'
    foreach($setting in @('en','zh-CN','auto')) {
     $script:languageFailure=$null;Save-WidgetLanguage $setting;if($script:languageFailure){throw $script:languageFailure}
     Assert-Equal $script:mode 'Compact' 'Changing language keeps the current mode'
@@ -667,12 +691,12 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
     Start-ModeTransition 'Detail'
     if($form.ClientSize.Width -lt 404 -or $form.ClientSize.Height -lt 390){throw 'Expanded detail kept compact dimensions'}
     Show-External
-    Assert-Equal $script:announcementRows.Count 5 'History still opens in batches after language switching'
+    Assert-Equal $script:announcementRows.Count 3 'History still opens in batches after language switching'
     while ($script:visibleActivityView.nextCount -gt 0) {$activityMore.PerformClick()}
     Assert-Equal $script:announcementRows.Count 50 'All history survives language switching'
     Assert-Equal $title.Text (T 'app') 'Title translated'
     Assert-Equal $cadence.Text (T 'refreshCadence') 'Footer translated'
-    $script:activityLimit=5;Show-External;Start-ModeTransition 'Compact'
+    $script:activityLimit=3;Show-External;Start-ModeTransition 'Compact'
    }
   }finally{$script:languageSetting=$oldLanguage;$script:externalData=$oldExternal;$script:activityLimit=$oldLimit;Set-Language;Start-ModeTransition 'Detail';$menu.Dispose()}
  }

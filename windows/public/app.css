@@ -26,6 +26,7 @@ svg { fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; st
 .countdown { margin:8px 0 4px; font-size:32px; font-weight:750; line-height:1.2; font-variant-numeric:tabular-nums; }
 .reset-line { color:var(--muted); font-size:14px; }
 .caption { color:var(--muted); font-size:14px; margin-top:8px; }
+.latest-recovery { color:var(--muted); font-size:13px; margin:12px 0; overflow-wrap:anywhere; }
 h2 { margin:0; color:var(--text); font-size:16px; line-height:1.4; font-weight:650; }
 .section-icon { width:24px; height:24px; flex-shrink:0; color:var(--text); }
 .five-hour { display:grid; grid-template-columns:32px minmax(0,1fr) auto auto; align-items:center; gap:8px 12px; padding:14px 0; border-bottom:1px solid var(--line); }
@@ -55,6 +56,7 @@ details p { color:var(--muted); font-size:13px; margin:8px 0; }
 .announcement-heading { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:baseline; column-gap:12px; row-gap:2px; }
 .announcement h3 { grid-column:1; grid-row:2; margin:0; font-size:15px; font-weight:650; line-height:1.5; }
 .record-type { grid-column:1 / -1; color:var(--muted); font-size:12px; }
+.announcement .record-attribution { font-size:12px; overflow-wrap:anywhere; }
 .announcement-heading .announcement-source { grid-column:2; grid-row:2; font-size:13px; }
 .announcement p { color:var(--muted); margin:2px 0; font-size:14px; line-height:1.5; }
 .announcement .phase { color:var(--muted); font-size:13px; font-weight:600; }

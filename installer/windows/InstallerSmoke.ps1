@@ -383,7 +383,7 @@ function Assert-ActivityPage([IntPtr]$window, [int]$processId, $allRecords, $exp
         $expected=@($allRecords | Where-Object {$_.fact -ceq $fact})
         Assert-True ($expected.Count -eq 1) 'Fixture record facts were not unique.'
         $rowText=Get-ActivityRecordText $window $processId $fact
-        Assert-True ($rowText.Contains($expected[0].title) -and $rowText.Contains($expected[0].label) -and $rowText.Contains((Get-WidgetText 'announcementSource' $language))) 'Activity record lost its localized title, attribution or announcement source.'
+        Assert-True ($rowText.Contains($expected[0].title) -and $rowText.Contains($expected[0].label) -and $rowText.Contains($expected[0].attribution) -and $rowText.Contains((Get-WidgetText 'announcementSource' $language))) 'Activity record lost its localized title, attribution or announcement source.'
     }
 }
 function Assert-InlineWindow([IntPtr]$window, [int]$processId, [string]$language) {
@@ -605,7 +605,8 @@ http.createServer(async(req,res)=>{
         $element = [Windows.Automation.AutomationElement]::FromHandle($handle)
         $creditText=if ($language -eq 'en') {'Available resets 2'} else {'可用重置卡 2 张'}
         $moreText=Get-WidgetText 'moreMessage' $language
-        $activityMoreText=Get-WidgetText 'activityMore' $language @(2)
+        $activityMoreText=Get-WidgetText 'activityMore' $language @(3)
+        $activityFinalMoreText=Get-WidgetText 'activityMore' $language @(1)
         $activityLessText=Get-WidgetText 'activityLess' $language
         $sourcesText=Get-WidgetText 'dataSources' $language
         $expectedIds=@('fixture-announcement-regular-id','fixture-announcement-banked-id','fixture-history-recent-id','fixture-earlier-id','fixture-history-id','fixture-history-older-id','fixture-history-oldest-id')
@@ -619,8 +620,8 @@ http.createServer(async(req,res)=>{
             $titleKey=$(if ($completed) {'delivered'} else {'upcoming'})+$(if ($source.kind -eq 'banked') {'GrantTitle'} else {'ResetTitle'})
             # These legacy-shaped fixtures have no recorded collecting site.
             $expectedTitle=Get-WidgetText $(if ($completed) {'publisherSays'} else {'publisherAnnounces'}) $language @((Get-WidgetText 'monitorRecord' $language),(Get-WidgetText $titleKey $language))
-            $expectedLabel=(Get-WidgetText $(if ($completed) {'categoryComplete'} else {'categoryPreview'}) $language)+' · '+(Get-WidgetText 'unknownAttribution' $language)
-            [pscustomobject]@{id=$id;fact=$fact;title=$expectedTitle;label=$expectedLabel}
+            $expectedLabel=(Get-WidgetText 'publicType' $language)+' · '+(Get-WidgetText $(if ($completed) {'categoryComplete'} else {'categoryPreview'}) $language)
+            [pscustomobject]@{id=$id;fact=$fact;title=$expectedTitle;label=$expectedLabel;attribution=(Get-WidgetText 'unknownAttribution' $language)}
         })
         Wait-Until {
             $script:layoutNames=Get-VisibleText $handle $ui.Id
@@ -653,7 +654,10 @@ http.createServer(async(req,res)=>{
         Assert-True (-not $script:layoutNames.Contains('Sample grant / 示例发放') -and -not $script:layoutNames.Contains('codex-resets.com') -and -not $script:layoutNames.Contains('codexreset.dev')) 'A disclosure was expanded by default.'
         $completedExpected=@($uiExpected.announcements.items | Where-Object {$_.id -eq 'fixture-announcement-regular-id'})[0]
         $completedFact=$allRecords[0].fact
+        $latestRecoveryText=Get-WidgetText 'latestRecovery' $language @((Get-WidgetText 'unavailable' $language))
+        $latestRecoveryBounds=(Find-SnapshotControl $initialSnapshot $latestRecoveryText).Bounds
         $creditBounds=$creditControl.Bounds
+        Assert-True ($latestRecoveryBounds.Bottom -le $creditBounds.Top) 'Local recovery summary left the quota area.'
         $activityBounds=(Find-SnapshotControl $initialSnapshot (Get-WidgetText 'activityHeading' $language)).Bounds
         $moreBounds=(Find-SnapshotControl $initialSnapshot $activityMoreText).Bounds
         $sourcesBounds=(Find-SnapshotControl $initialSnapshot $sourcesText).Bounds
@@ -709,22 +713,28 @@ http.createServer(async(req,res)=>{
         # Current and historical rows form one chronological list. Each scan
         # walks the actual viewport so offscreen virtualization cannot hide a
         # missing row, a duplicate completed record, or an incorrect page size.
-        Assert-ActivityPage $handle $ui.Id $allRecords @($allRecords | Select-Object -First 5) $language 'activity-first-5'
+        Assert-ActivityPage $handle $ui.Id $allRecords @($allRecords | Select-Object -First 3) $language 'activity-first-3'
         Assert-True (@(Get-VisibleControls $handle $ui.Id | Where-Object {$_.Text -ceq $activityLessText}).Count -eq 0) 'Collapse was offered before loading more records.'
         Invoke-UiButton $handle $handle $ui.Id $activityMoreText
         Wait-Until {
             $text=Get-VisibleText $handle $ui.Id
-            $text.Contains($activityLessText) -and -not $text.Contains($activityMoreText)
-        } 'Loading the final two unified activity records did not update pagination.'
+            $text.Contains($activityLessText) -and $text.Contains($activityFinalMoreText) -and -not $text.Contains($activityMoreText)
+        } 'Loading the second three-record batch did not update pagination.'
         Assert-InlineWindow $handle $ui.Id $language
+        Assert-ActivityPage $handle $ui.Id $allRecords @($allRecords | Select-Object -First 6) $language 'activity-next-6'
+        Invoke-UiButton $handle $handle $ui.Id $activityFinalMoreText
+        Wait-Until {
+            $text=Get-VisibleText $handle $ui.Id
+            $text.Contains($activityLessText) -and -not $text.Contains($activityFinalMoreText) -and -not $text.Contains($activityMoreText)
+        } 'Loading the final record did not reach the end of the list.'
         Assert-ActivityPage $handle $ui.Id $allRecords $allRecords $language 'activity-all-7'
         Invoke-UiButton $handle $handle $ui.Id $activityLessText
         Wait-Until {
             $text=Get-VisibleText $handle $ui.Id
             $text.Contains($activityMoreText) -and -not $text.Contains($activityLessText)
-        } 'Unified activity did not collapse to the latest five records.'
+        } 'Unified activity did not collapse to the latest three records.'
         Assert-InlineWindow $handle $ui.Id $language
-        Assert-ActivityPage $handle $ui.Id $allRecords @($allRecords | Select-Object -First 5) $language 'activity-back-to-5'
+        Assert-ActivityPage $handle $ui.Id $allRecords @($allRecords | Select-Object -First 3) $language 'activity-back-to-3'
 
         Invoke-UiButton $handle $handle $ui.Id $sourcesText
         Wait-Until {(Get-VisibleText $handle $ui.Id).Contains('codexreset.dev')} 'Data sources did not expand inline.'

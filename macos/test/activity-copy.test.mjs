@@ -58,9 +58,9 @@ test('withdrawal preserves completed evidence and waiting never asserts non-deli
 test('site hints never guess an event kind and unknown historical messages never become future promises',()=>{
   for(const kind of ['banked','regular']){
     const hint=view(record({kind,kindKnown:false,certainty:'unconfirmed',sourceHint:'active'}));
-    assert.equal(hint.display.title,'重置相关消息待核实');
+    assert.equal(hint.display.title,'重置相关消息');
     assert.match(hint.display.label,/收录网站未记录/);
-    assert.match(hint.display.status,/暂无法判断具体事项/);
+    assert.match(hint.display.help,/暂无法判断具体事项/);
     assert.equal(hint.display.completionMissing,false);
     const historical=view(record({kind}),true);
     assert.doesNotMatch(historical.display.title,/将赠送|将重置/);

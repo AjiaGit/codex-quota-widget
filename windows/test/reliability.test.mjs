@@ -95,7 +95,7 @@ test('categorized archive plus context-only short completion stays visible and u
   assert.equal(rows(result).length, 1);
   assert.equal(rows(result)[0].deliveredAt, null);
   assert.equal(view(rows(result)[0]).display.category, '待核实消息');
-  assert.match(view(rows(result)[0]).display.title, /额度重置消息待核实/);
+  assert.match(view(rows(result)[0]).display.title, /额度重置相关消息/);
   const store = await baseline();
   await store.update(result.announcements);
   assert.equal(store.alerts.unread.length, 1);
@@ -166,7 +166,7 @@ test('three presentation categories preserve preview, completion and unresolved 
     assert.equal(preview.display.category, '预告');
     assert.equal(completed.display.category, '完成消息');
     assert.equal(pending.display.category, '待核实消息');
-    assert.match(pending.display.status, /暂无法判断是预告还是完成消息/);
+    assert.match(pending.display.help, /暂无法判断是预告还是完成消息/);
     assert.equal(pending.display.completionMissing, false, 'Do not add a redundant unknown-completion line');
     assert.equal(deriveAnnouncementsView({ items: [item] }, now, 'UTC', 'en').rows[0].display.category, 'Advance notice');
   }
@@ -176,8 +176,8 @@ test('unknown-kind hints do not guess reset-credit or quota-reset titles', async
   const entry = post('118', 'More details soon');
   const result = await query(feed([entry], { events: [{ url: entry.url, group: 'reset' }] }));
   const row = view(rows(result)[0]);
-  assert.equal(row.display.title, '重置相关消息待核实');
-  assert.match(row.display.status, /具体事项/);
+  assert.equal(row.display.title, '重置相关消息');
+  assert.match(row.display.help, /具体事项/);
 });
 
 test('website event-only records are retained as attributed unverified updates rather than dropped or promoted', async () => {

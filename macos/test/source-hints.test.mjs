@@ -88,12 +88,12 @@ test('a source headline displays a subjectless reply without confirming a reset 
   assert.equal(item.scheduledAt, null);
   assert.equal(result.lastGlobal, null, 'A site hint is not the latest confirmed public reset');
   for (const [language, title, status] of [
-    ['zh-CN', '重置相关消息待核实', '暂无法判断具体事项，以及是预告还是完成消息。'],
-    ['en', 'Reset update awaiting verification', 'The event type and whether this is an advance notice or a completion message are unclear.'],
+    ['zh-CN', '重置相关消息', '暂无法判断具体事项，以及是预告还是完成消息。'],
+    ['en', 'Reset-related news', 'The event type and whether this is an advance notice or a completion message are unclear.'],
   ]) {
     const row = deriveAnnouncementsView(result.announcements, now, 'Asia/Shanghai', language).rows[0];
     assert.equal(row.display.title, title);
-    assert.equal(row.display.status, status);
+    assert.equal(row.display.help, status);
     assert.equal(row.monitorSourceUrl, 'https://codex-reset.com/');
     assert.equal(row.sourceUrl, reply.url);
     assert.equal(row.summary, reply.text);
@@ -157,7 +157,7 @@ test('new hints notify once, survive restart unread, and stay read after viewing
   const restored = await createAnnouncementStore({ file, now: () => clock });
   await restored.update(incoming);
   assert.equal(restored.state.items.length, 1);
-  assert.equal(deriveAnnouncementsView(restored.state, clock, 'UTC', 'en').rows[0].display.title, 'Reset update awaiting verification');
+  assert.equal(deriveAnnouncementsView(restored.state, clock, 'UTC', 'en').rows[0].display.title, 'Reset-related news');
   assert.deepEqual(restored.alerts.unread, expected);
   assert.equal(restored.state.items[0].certainty, 'unconfirmed');
   assert.equal(restored.state.items[0].deliveredAt, null);
@@ -204,7 +204,7 @@ test('offline refresh and archival preserve unread hints until the visible recor
   assert.deepEqual(store.alerts.unread, []);
 });
 
-test('reading the first unified page leaves the sixth hint unread until more is loaded', async () => {
+test('reading the first three records leaves later hints unread until more is loaded', async () => {
   const { store } = await trackedStore();
   const newer=Array.from({length:5},(_,i)=>({...reply,id:'100000000000000012'+i,url:'https://x.com/thsottiaux/status/100000000000000012'+i,at:`2026-10-15T05:0${i}:00Z`}));
   await store.update((await query(feed([...newer,reply],{signal:headline(newer[4])}))).announcements);
@@ -212,11 +212,11 @@ test('reading the first unified page leaves the sixth hint unread until more is 
   const visible=visibleAnnouncementView(activity);
   assert.deepEqual(announcementIdsForReading(store.alerts,visible,false),[]);
   const viewed=announcementIdsForReading(store.alerts,visible,true);
-  assert.equal(viewed.length,5);
+  assert.equal(viewed.length,3);
   assert.equal(viewed.includes(reply.url+'#regular'),false);
   await store.acknowledge(viewed);
-  assert.deepEqual(store.alerts.unread.map(item=>item.id),[reply.url+'#regular']);
-  await store.acknowledge(announcementIdsForReading(store.alerts,visibleAnnouncementView(activity,{limit:10}),true));
+  assert.deepEqual(store.alerts.unread.map(item=>item.id).sort(),[newer[0].url+'#regular',newer[1].url+'#regular',reply.url+'#regular'].sort());
+  await store.acknowledge(announcementIdsForReading(store.alerts,visibleAnnouncementView(activity,{limit:6}),true));
   assert.deepEqual(store.alerts.unread,[]);
 });
 

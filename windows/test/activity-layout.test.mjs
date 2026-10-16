@@ -85,8 +85,8 @@ test('unified activity keeps chronological records and pages current and pending
   const original=JSON.stringify([quota,feed]);
   const view=deriveResetActivityView(quota,feed,now,'Asia/Shanghai','en');
   assert.deepEqual(view.rows.map(row=>row.id||row.detectedAt),['latest',now-60000,now-120000,'older','grant','reset']);
-  assert.equal(presentation.visibleAnnouncementView(view).rows.length,5);
-  assert.equal(presentation.visibleAnnouncementView(view,{limit:10}).rows.length,6);
+  assert.equal(presentation.visibleAnnouncementView(view).rows.length,3);
+  assert.equal(presentation.visibleAnnouncementView(view,{limit:6}).rows.length,6);
   assert.equal(JSON.stringify([quota,feed]),original,'Presentation does not mutate or erase stored records');
 });
 
@@ -137,7 +137,7 @@ test('source-reported completion remains distinct from confirmed delivery',()=>{
   const row=presentation.deriveAnnouncementsView(feed,now,'Asia/Shanghai','zh-CN').rows[0];
   assert.ok(row.display,'Public records have compact display facts');
   assert.equal(row.phase,'unconfirmed');
-  assert.equal(row.display.title,'额度重置消息待核实');
+  assert.equal(row.display.title,'额度重置相关消息');
   assert.equal(row.display.completionMissing,false);
   assert.match(row.display.facts[0],/发布.*11:59/);
   assert.match(row.display.scope,/(?:网站|来源)标注/);
@@ -156,7 +156,7 @@ test('unloaded batches remain unread while current and historical messages share
   const activity={rows:records.slice(0,3),history:records.slice(3)};
   const alerts={unread:records};
   assert.equal(presentation.announcementIdsForReading(alerts,presentation.visibleAnnouncementView(activity),false).length,0);
-  assert.deepEqual(presentation.announcementIdsForReading(alerts,presentation.visibleAnnouncementView(activity),true),records.slice(0,5).map(row=>row.id));
+  assert.deepEqual(presentation.announcementIdsForReading(alerts,presentation.visibleAnnouncementView(activity),true),records.slice(0,3).map(row=>row.id));
   assert.deepEqual(presentation.announcementIdsForReading(alerts,presentation.visibleAnnouncementView(activity,{limit:10}),true),records.map(row=>row.id));
 });
 

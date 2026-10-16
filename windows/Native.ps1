@@ -11,6 +11,7 @@ $script:WidgetStrings = @{
         categoryPreview = 'Advance notice'
         categoryComplete = 'Completion update'
         categoryUnverified = 'Unverified update'
+        latestRecovery = 'Last quota recovery noticed: {0}'; observationType = 'Website monitoring'; categoryUnverifiedShort = 'Unverified'; relatedUnknown = 'Reset-related news'
         unverifiedHelp = 'It is not yet clear whether this is an advance notice or a completion message.'
         unknownHintHelp = 'The event type and whether this is an advance notice or a completion message are unclear.'
         observedGrant = '{0} detected: monitoring accounts received reset credits'
@@ -41,9 +42,9 @@ $script:WidgetStrings = @{
         originalAttribution = 'Record collected by {0}'
         siteAttribution = 'Record collected by {0}'
         monitorRecord = 'Monitoring site'
-        activityHeading = 'Reset updates'
+        activityHeading = 'Messages and records'
         accountType = 'Your account'
-        publicType = 'Monitoring-site update'
+        publicType = 'Public message'
         recoveryRestored = 'Your quota has recovered'
         recoveryHelp = 'Observed from local quota readings. Detection time is not the exact recovery time and does not establish its cause.'
         earlierUpdates = 'Earlier updates ({0})'
@@ -75,7 +76,7 @@ $script:WidgetStrings = @{
         recoveryMore = 'About this record'
         publicRetrying = 'Fetching monitoring-site updates…'
         detailsPartial = 'Each reset credit is one manual quota-reset opportunity in Codex. Details may be incomplete; the available count above is authoritative.'
-        historyAttribution = 'Earlier historical records'; activityMore = 'Show {0} more'; activityLess = 'Show latest 5'
+        historyAttribution = 'Earlier historical records'; activityMore = 'Show {0} more'; activityLess = 'Show latest 3'
         resetLabel = 'Available resets'
         disclosureDetails = 'Details'
         recoveryCount = '{0} records'; recoveryNone = 'No records'; relatedBanked = 'Reset credit news'; relatedRegular = 'Quota-reset news'; phaseUnconfirmed = 'Tracker has no completion time'; sourceScope = 'Tracker scope: {0}'; postedOn = 'Posted: {0}'
@@ -133,6 +134,7 @@ $script:WidgetStrings = @{
         categoryPreview = '预告'
         categoryComplete = '完成消息'
         categoryUnverified = '待核实消息'
+        latestRecovery = '最近检测到额度恢复：{0}'; observationType = '网站监测'; categoryUnverifiedShort = '待核实'; relatedUnknown = '重置相关消息'
         unverifiedHelp = '暂无法判断是预告还是完成消息。'
         unknownHintHelp = '暂无法判断具体事项，以及是预告还是完成消息。'
         observedGrant = '{0} 检测到：监测账号收到重置卡'
@@ -163,9 +165,9 @@ $script:WidgetStrings = @{
         originalAttribution = '消息收录：{0}'
         siteAttribution = '消息收录：{0}'
         monitorRecord = '监控网站'
-        activityHeading = '重置动态'
+        activityHeading = '消息与记录'
         accountType = '我的账号'
-        publicType = '监控网站消息'
+        publicType = '公开消息'
         recoveryRestored = '本账号额度已恢复'
         recoveryHelp = '根据本机额度变化记录。发现时间不等于准确恢复时间，也不能确认恢复原因。'
         earlierUpdates = '较早消息（{0}）'
@@ -197,7 +199,7 @@ $script:WidgetStrings = @{
         recoveryMore = '记录说明'
         publicRetrying = '正在获取监控网站消息…'
         detailsPartial = '每张重置卡代表一次在 Codex 中手动重置额度的机会。明细可能不完整，可用数量以上方显示为准。'
-        historyAttribution = '早期历史记录'; activityMore = '再显示 {0} 条'; activityLess = '只看最近 5 条'
+        historyAttribution = '早期历史记录'; activityMore = '再显示 {0} 条'; activityLess = '收起，保留最近 3 条'
         resetLabel = '可用重置卡'
         disclosureDetails = '详情'
         recoveryCount = '{0} 条记录'; recoveryNone = '暂无记录'; relatedBanked = '重置卡相关消息'; relatedRegular = '额度重置相关消息'; phaseUnconfirmed = '网站未提供完成时间'; sourceScope = '网站标注：{0}'; postedOn = '消息发布 {0}'
@@ -356,10 +358,10 @@ function Get-WidgetResetDetailsView($data, [string]$language, [DateTimeOffset]$n
     }
     [pscustomobject]@{note=$note;rows=@($rows)}
 }
-function Get-WidgetVisibleActivityView($activity, [int]$limit=5) {
+function Get-WidgetVisibleActivityView($activity, [int]$limit=3) {
     $records=@(@($activity.active)+@($activity.history) | Where-Object {$_} | Sort-Object sortAt -Descending)
-    $shown=@($records | Select-Object -First ([Math]::Max(5,$limit)))
-    [pscustomobject]@{active=$shown;history=@();nextCount=[Math]::Min(5,$records.Count-$shown.Count);canCollapse=$shown.Count -gt 5}
+    $shown=@($records | Select-Object -First ([Math]::Max(3,$limit)))
+    [pscustomobject]@{active=$shown;history=@();nextCount=[Math]::Min(3,$records.Count-$shown.Count);canCollapse=$shown.Count -gt 3}
 }
 function Get-WidgetPublicNoticeView($external, [string]$language, [DateTimeOffset]$now=[DateTimeOffset]::UtcNow) {
     $feed=$external.announcements;$stamp=ConvertTo-WidgetTimestamp $feed.sourceUpdatedAt
@@ -413,25 +415,26 @@ function Get-WidgetActivityPresentation($row, [string]$language) {
     } elseif ($explicit) {
         $title=Get-WidgetText ('historical'+$kind+'Title') $language @($attribution.source)
     } else {
-        $title=Get-WidgetText $(if ($row.kindKnown -eq $false) {'siteHintTitle'} else {'unconfirmed'+$kind+'Title'}) $language
+        $title=Get-WidgetText $(if ($row.kindKnown -eq $false) {'relatedUnknown'} elseif ($row.kind -eq 'banked') {'relatedBanked'} else {'relatedRegular'}) $language
     }
     $completedText=if ($row.compactCompletedText) {$row.compactCompletedText} else {$row.completedText}
     $scheduledText=if ($row.compactScheduledText) {$row.compactScheduledText} else {$row.scheduledText}
     $announcedText=if ($row.compactAnnouncedText) {$row.compactAnnouncedText} else {$row.announcedText}
     $fact=if ($completedText) {$completedText} elseif ($scheduledText) {$scheduledText} else {$announcedText}
     $extra=@(@($scheduledText,$announcedText) | Where-Object {$_ -and $_ -ne $fact})
+    if (-not $explicit) {$extra+=Get-WidgetText $(if ($row.kindKnown -eq $false) {'unknownHintHelp'} else {'unverifiedHelp'}) $language}
     $extra+=@($row.scheduleNote,$row.summary,$row.retentionText) | Where-Object {$_}
     if ($completed) {$extra+=Get-WidgetText ('completionHelp'+$kind) $language}
     $status=if ($row.correction) {
         Get-WidgetText $(switch ($row.correction) {'not-complete' {'correctionNotice'} 'cancelled' {'cancelledNotice'} 'delayed' {'delayedNotice'}}) $language
     } elseif (-not $explicit) {
-        @($(if ($row.sourceHint -and ($row.withdrawn -or $row.phase -eq 'unknown')) {Get-WidgetText $(if ($row.withdrawn) {'siteHintInactive'} else {'siteHintExpired'}) $language}),
-          (Get-WidgetText $(if ($row.kindKnown -eq $false) {'unknownHintHelp'} else {'unverifiedHelp'}) $language)) | Where-Object {$_}
+        if ($row.sourceHint -and ($row.withdrawn -or $row.phase -eq 'unknown')) {Get-WidgetText $(if ($row.withdrawn) {'siteHintInactive'} else {'siteHintExpired'}) $language}
     } else {
         @($(if ($row.withdrawn) {Get-WidgetText 'sourceWithdrawn' $language}),
           $(if ($row.phase -eq 'waiting') {Get-WidgetText ('waiting'+$kind) $language})) | Where-Object {$_}
     }
-    [pscustomobject]@{title=$title;category=$category;label=($category+' · '+$attribution.label);fact=(@($fact,$row.scopeText) | Where-Object {$_}) -join ' · ';status=(@($status) -join ' ');extra=$extra -join [Environment]::NewLine;missing=$false}
+    $recordLabel=(Get-WidgetText $(if ($row.statementBasis -eq 'observation') {'observationType'} else {'publicType'}) $language)+' · '+$(if (-not $explicit) {Get-WidgetText 'categoryUnverifiedShort' $language} else {$category})
+    [pscustomobject]@{title=$title;category=$category;recordLabel=$recordLabel;label=$attribution.label;fact=(@($fact,$row.scopeText) | Where-Object {$_}) -join ' · ';status=(@($status) -join ' ');extra=$extra -join [Environment]::NewLine;missing=$false}
 
 }
 function Test-WidgetOutsideClick([string]$mode, [bool]$visible, [bool]$animating,
@@ -463,12 +466,19 @@ function Get-WidgetRecoveryView($data, [string]$language, [DateTimeOffset]$now =
     $ready=$history -and $history.status -in @('ok','unsaved')
     $rows=@()
     if ($ready) {
-        foreach ($row in @($history.records | Sort-Object detectedAt -Descending | Select-Object -First 50)) {
+        foreach ($row in @($history.records | Sort-Object detectedAt -Descending)) {
             try {
+                $valid=$true
+                foreach ($field in @('detectedAt','observedFrom','beforePercent','afterPercent')) {
+                    $number=$row.$field
+                    if ($null -eq $number -or $number -is [string] -or $number -is [bool] -or [double]::IsNaN([double]$number) -or [double]::IsInfinity([double]$number) -or [double]$number -ne [Math]::Floor([double]$number)) {$valid=$false;break}
+                }
+                if (-not $valid -or $row.detectedAt -le 0 -or $row.observedFrom -le 0) {continue}
                 $detected=[DateTimeOffset]::FromUnixTimeMilliseconds([long]$row.detectedAt)
                 $observed=[DateTimeOffset]::FromUnixTimeMilliseconds([long]$row.observedFrom)
                 if ($detected -gt $now -or $detected -le $observed -or $row.beforePercent -lt 0 -or $row.afterPercent -gt 100 -or $row.afterPercent -le $row.beforePercent) {continue}
                 $rows+=,[pscustomobject]@{kind='recovery';detectedAt=[long]$row.detectedAt;sortAt=[long]$row.detectedAt;title=((Get-WidgetText 'recoveryTitle' $language)+' · '+[string]$row.beforePercent+'% → '+[string]$row.afterPercent+'%'); details=(Get-WidgetText 'recoveryDetected' $language @((Format-WidgetAnnouncementDate $detected $language))); summary=(Get-WidgetText 'recoveryObserved' $language @((Format-WidgetAnnouncementDate $observed $language))); sourceUrl=$null; deliverySourceUrl=$null; retention=$null}
+                if ($rows.Count -ge 50) {break}
             }catch{}
         }
     }
@@ -477,7 +487,9 @@ function Get-WidgetRecoveryView($data, [string]$language, [DateTimeOffset]$now =
         try {$note+=' '+(Get-WidgetText 'recoveryTracking' $language @((Format-WidgetAnnouncementDate ([DateTimeOffset]::FromUnixTimeMilliseconds([long]$history.trackingSince)) $language)))}catch{}
     }
     if ($history -and $history.status -eq 'unsaved') {$note+=' '+(Get-WidgetText 'recoveryUnsaved' $language)}
-    [pscustomobject]@{rows=$rows;note=$note;empty=(Get-WidgetText $(if ($ready) {'recoveryEmpty'} else {'recoveryUnavailable'}) $language)}
+    $latestDetectedAt=if ($rows.Count) {$rows[0].detectedAt} else {$null}
+    $latestTime=if ($rows.Count) {Format-WidgetCompactDate ([DateTimeOffset]::FromUnixTimeMilliseconds($latestDetectedAt)) $language ([TimeZoneInfo]::Local) $now} else {Get-WidgetText $(if ($ready) {'recoveryNone'} else {'unavailable'}) $language}
+    [pscustomobject]@{rows=$rows;latestDetectedAt=$latestDetectedAt;latestText=(Get-WidgetText 'latestRecovery' $language @($latestTime));note=$note;empty=(Get-WidgetText $(if ($ready) {'recoveryEmpty'} else {'recoveryUnavailable'}) $language)}
 }
 function Get-WidgetDetailSectionOrder([bool]$plus) {
     'hero'
@@ -673,7 +685,7 @@ function Get-WidgetResetActivityView($data, $external, [string]$language, [DateT
     if ($data -and $data.status -eq 'ok' -and $data.recoveryHistory.status -eq 'unsaved') {
         $stale=(@($stale,(Get-WidgetText 'recoveryUnsaved' $language)) | Where-Object {$_}) -join ' · '
     }
-    [pscustomobject]@{active=@($active | Sort-Object sortAt -Descending);history=@($history | Sort-Object sortAt -Descending);emptyText=$public.emptyText;staleText=$stale;sourceUpdateText=$sourceUpdate}
+    [pscustomobject]@{active=@($active | Sort-Object sortAt -Descending);history=@($history | Sort-Object sortAt -Descending);latestRecoveryText=$recovery.latestText;emptyText=$public.emptyText;staleText=$stale;sourceUpdateText=$sourceUpdate}
 }
 function Merge-WidgetExternalData($previous, $incoming, [bool]$transportFailure = $false) {
     # Clone the public response so a failure cannot mutate a previously cached

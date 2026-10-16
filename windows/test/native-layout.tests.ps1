@@ -313,17 +313,17 @@ Test-Case 'hidden detail never acknowledges notices and newly arrived unseen IDs
     Assert-Equal (Get-WidgetAnnouncementReadIds $alerts $view $false).Count 0 'Compact and hidden state'
     Assert-Equal ((Get-WidgetAnnouncementReadIds $alerts $view $true) -join ',') 'shown' 'Only rendered IDs'
 }
-Test-Case 'archive-only unified pages expose five more rows without marking later pages read' {
+Test-Case 'archive-only unified pages expose three more rows without marking later pages read' {
     $rows=@(0..11 | ForEach-Object {[pscustomobject]@{id=('history-'+$_);key=('history-'+$_);sortAt=(12-$_)}})
     $activity=[pscustomobject]@{active=@();history=$rows}
     $alerts=[pscustomobject]@{ids=@($rows.id)}
     $first=Get-WidgetVisibleActivityView $activity
-    Assert-Equal ($first.active.id -join ',') 'history-0,history-1,history-2,history-3,history-4' 'Initial five recent records'
-    Assert-Equal $first.nextCount 5 'Next batch size'
-    Assert-Equal ((Get-WidgetAnnouncementReadIds $alerts $first $true) -join ',') 'history-0,history-1,history-2,history-3,history-4' 'Only shown records become read'
-    $second=Get-WidgetVisibleActivityView $activity 10
-    Assert-Equal $second.active.Count 10 'Second batch'
-    Assert-Equal $second.nextCount 2 'Final partial batch'
+    Assert-Equal ($first.active.id -join ',') 'history-0,history-1,history-2' 'Initial three recent records'
+    Assert-Equal $first.nextCount 3 'Next batch size'
+    Assert-Equal ((Get-WidgetAnnouncementReadIds $alerts $first $true) -join ',') 'history-0,history-1,history-2' 'Only shown records become read'
+    $second=Get-WidgetVisibleActivityView $activity 6
+    Assert-Equal $second.active.Count 6 'Second batch'
+    Assert-Equal $second.nextCount 3 'Next full batch'
     $all=Get-WidgetVisibleActivityView $activity 15
     Assert-Equal $all.active.Count 12 'Final page includes all remaining rows'
     Assert-Equal $all.nextCount 0 'No more button after the end'
@@ -331,16 +331,16 @@ Test-Case 'archive-only unified pages expose five more rows without marking late
 }
 
 
-Test-Case 'current and archived records share one chronological five-row page' {
+Test-Case 'current and archived records share one chronological three-row page' {
     $current=@(0..5 | ForEach-Object {[pscustomobject]@{id=('current-'+$_);key=('current-'+$_);sortAt=(120-$_*20)}})
     $archive=@(0..5 | ForEach-Object {[pscustomobject]@{id=('archive-'+$_);key=('archive-'+$_);sortAt=(110-$_*20)}})
     $activity=[pscustomobject]@{active=$current;featured=$current[0..1];earlier=$current[2..5];history=$archive}
     $first=Get-WidgetVisibleActivityView $activity
-    Assert-Equal ($first.active.id -join ',') 'current-0,archive-0,current-1,archive-1,current-2' 'One newest-first page'
-    Assert-Equal $first.nextCount 5 'Next batch'
-    $second=Get-WidgetVisibleActivityView $activity 10
-    Assert-Equal $second.active.Count 10 'Ten loaded records'
-    Assert-Equal $second.nextCount 2 'Last partial batch'
+    Assert-Equal ($first.active.id -join ',') 'current-0,archive-0,current-1' 'One newest-first page'
+    Assert-Equal $first.nextCount 3 'Next batch'
+    $second=Get-WidgetVisibleActivityView $activity 6
+    Assert-Equal $second.active.Count 6 'Six loaded records'
+    Assert-Equal $second.nextCount 3 'Next full batch'
     Assert-Equal $second.canCollapse $true 'Loaded pages can collapse'
     Assert-Equal $activity.history.Count 6 'Archive is not truncated'
 }
