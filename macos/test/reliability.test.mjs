@@ -376,3 +376,53 @@ test('upgrading a legacy cache does not replay a read linked completion',async()
     assert.deepEqual(upgraded.alerts.unread,[]);
   } finally {await rm(directory,{recursive:true,force:true});}
 });
+
+test('refetching the unchanged promise cannot undo a related correction, even after restart',async()=>{
+  const directory=await mkdtemp(join(tmpdir(),'quota-linked-correction-'));
+  try {
+    let clock=now-hour;
+    const file=join(directory,'cache.json'),store=await createAnnouncementStore({file,now:()=>clock});
+    await store.update({status:'ok',stale:false,sourceUpdatedAt:iso(clock),items:[],history:[]});
+    clock=now;
+    const promise=post('216','Global reset by EOD.',now-1200000);
+    const cancelled=post('217','Global reset is cancelled.',now-600000,{in_reply_to_tweet_id:promise.id});
+    await store.update((await query(feed([promise,cancelled]))).announcements);
+    await store.acknowledge(store.alerts.unread.map(item=>item.id));
+    clock+=60000;
+    const restarted=await createAnnouncementStore({file,now:()=>clock});
+    await restarted.update((await query(feed([promise],{fetched_at:iso(clock)}),history(),clock)).announcements);
+    const corrected=[...restarted.state.items,...restarted.state.history].find(item=>item.sourceUrl===promise.url);
+    assert.equal(corrected.correction,'cancelled');
+    assert.equal(corrected.sourceWithdrawn,true);
+    assert.equal(restarted.state.items.some(item=>item.sourceUrl===promise.url),false);
+    assert.deepEqual(restarted.alerts.unread,[]);
+    // A new, explicitly related completion can resolve the cancelled promise;
+    // neither rereading its old text nor an earlier completion can do so.
+    const done=post('218','Global reset is complete.',now-300000,{in_reply_to_tweet_id:promise.id});
+    await restarted.update((await query(feed([promise,cancelled,done],{fetched_at:iso(clock)}),history(),clock)).announcements);
+    const completed=restarted.state.items.find(item=>item.sourceUrl===promise.url);
+    assert.ok(completed?.deliveredAt);
+    assert.equal(completed.correction,null);
+    await restarted.acknowledge(restarted.alerts.unread.map(item=>item.id));
+    clock+=60000;
+    await restarted.update((await query(feed([promise,cancelled],{fetched_at:iso(clock)}),history(),clock)).announcements);
+    assert.ok(restarted.state.items.find(item=>item.sourceUrl===promise.url)?.deliveredAt,'Refetching an earlier cancellation cannot undo a later completion');
+    assert.deepEqual(restarted.alerts.unread,[]);
+  } finally {await rm(directory,{recursive:true,force:true});}
+});
+
+test('flat quote metadata must be consistent before invalid URLs or identifiers are discarded',async()=>{
+  const promise=post('219','Global reset by EOD.',now-1200000);
+  for(const relation of [
+    {quoted_url:'https://x.com/other_author/status/'+promise.id,quoted_tweet_id:promise.id},
+    {quoted_url:'https://example.invalid/status/'+promise.id,quoted_tweet_id:promise.id},
+    {quoted_url:url('220'),quoted_tweet_id:promise.id},
+    {quoted_url:promise.url,quoted_tweet_id:promise.id,quoted_status_id:'1000000000000000999'},
+    {quoted_url:promise.url,quoted_tweet_id:'not-a-post-id'},
+  ]) {
+    const done=post('221','Done and dusted',now-600000,relation);
+    assert.equal(rows(await query(feed([promise,done]))).some(item=>item.deliveredAt),false);
+  }
+  const valid=post('221','Done and dusted',now-600000,{quoted_url:promise.url,quoted_tweet_id:promise.id});
+  assert.ok(rows(await query(feed([promise,valid]))).find(item=>item.sourceUrl===promise.url)?.deliveredAt);
+});

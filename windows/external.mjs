@@ -73,6 +73,8 @@ function normalizedAnnouncement(raw, now, scheduled = false, persisted = false) 
     relatedUrls: persisted ? (Array.isArray(raw.relatedUrls) ? raw.relatedUrls : []).map(officialPostUrl).filter(Boolean).slice(0,5) : [],
     kindKnown: raw.kindKnown !== false,
     correction: persisted && ['not-complete','cancelled','delayed'].includes(raw.correction) ? raw.correction : null,
+    correctionSourceUrl: persisted ? officialPostUrl(raw.correctionSourceUrl) : null,
+    correctionAt: persisted ? timestamp(raw.correctionAt,now) : null,
     evidenceUpdatedAt: persisted ? timestamp(raw.evidenceUpdatedAt, now) : null,
     evidenceFresh: persisted && raw.evidenceFresh === false ? false : true,
     observationAt: persisted ? timestamp(raw.observationAt, now) : null,
@@ -102,6 +104,19 @@ function deduplicate(items, knownItems = []) {
     if (kind) item = { ...item, kind, id: item.sourceUrl + '#' + kind,
       kindBasis: originalKinds.has(item.sourceUrl) ? 'original' : item.kindBasis };
     const previous = map.get(item.id);
+    const resolvesLinkedCorrection=item.statementBasis==='original' && item.deliveredAt && item.completionTimeBasis==='announcement' &&
+      item.deliverySourceUrl!==item.sourceUrl && item.relatedUrls?.includes(item.sourceUrl) &&
+      (Date.parse(item.deliveredAt)>Date.parse(previous?.correctionAt) || item.deliverySourceUrl===previous?.correctionSourceUrl &&
+        Date.parse(item.evidenceUpdatedAt)>=Date.parse(previous?.evidenceUpdatedAt));
+    if(previous?.deliveredAt && item.correction && item.correctionSourceUrl && item.correctionSourceUrl!==item.sourceUrl &&
+      Date.parse(previous.deliveredAt)>Date.parse(item.correctionAt)) {
+      map.set(item.id,{...previous,sourceSites:sourceSites([...(previous.sourceSites||[]),...(item.sourceSites||[])])});continue;
+    }
+    // Fetching the old promise again is not a retraction of a separate later
+    // correction. Only new explicitly linked evidence can resolve that lifecycle.
+    if(previous?.correction && previous.correctionSourceUrl && previous.correctionSourceUrl!==item.sourceUrl && !item.correction && !resolvesLinkedCorrection) {
+      map.set(item.id,{...previous,sourceSites:sourceSites([...(previous.sourceSites||[]),...(item.sourceSites||[])])});continue;
+    }
     // A retrieved older original may improve provenance, but cannot reverse a
     // newer original statement (including an explicit withdrawal/correction).
     if(previous?.statementBasis==='original' && item.statementBasis==='original' &&
@@ -153,6 +168,7 @@ function deduplicate(items, knownItems = []) {
     if(item.deliveredAt && item.deliverySourceUrl!==item.sourceUrl && correction?.correction &&
       !(Date.parse(item.evidenceUpdatedAt)>Date.parse(correction.evidenceUpdatedAt))) {
       map.set(item.id,{...item,deliveredAt:null,deliverySourceUrl:null,completionTimeBasis:null,correction:correction.correction,
+        correctionSourceUrl:correction.sourceUrl,correctionAt:correction.announcedAt,
         evidenceUpdatedAt:correction.evidenceUpdatedAt,evidenceFresh:correction.evidenceFresh});
       continue;
     }
@@ -171,10 +187,11 @@ function linkCompletions(items) {
   for(const correction of records.filter(item=>item.correction && item.statementBasis==='original')) {
     const targets=records.filter(item=>item!==correction && officialPostUrl(item.sourceUrl) && item.kind===correction.kind &&
       item.announcedAt && correction.announcedAt && Date.parse(item.announcedAt)<Date.parse(correction.announcedAt) &&
-      !(Date.parse(item.evidenceUpdatedAt)>Date.parse(correction.evidenceUpdatedAt)) &&
+      !(Date.parse(item.deliveredAt || item.correctionAt)>Date.parse(correction.announcedAt)) &&
       correction.relatedUrls?.includes(item.sourceUrl) && (!item.scope || !correction.scope || item.scope===correction.scope));
     if(targets.length!==1)continue;
     Object.assign(targets[0],{certainty:'unconfirmed',correction:correction.correction,sourceWithdrawn:true,
+      correctionSourceUrl:correction.sourceUrl,correctionAt:correction.announcedAt,
       deliveredAt:null,deliverySourceUrl:null,completionTimeBasis:null,evidenceUpdatedAt:correction.evidenceUpdatedAt,
       evidenceFresh:correction.evidenceFresh});
     // Keep the separately dated correction post as the verifiable source. The
@@ -185,9 +202,11 @@ function linkCompletions(items) {
         completion.deliverySourceUrl !== completion.sourceUrl) continue;
     // Associate only one recent, same-kind promise with a later completion statement.
     // Ambiguous multiple promises stay separate rather than guessing a relationship.
-    const pending = records.filter(item => item !== completion && !item.deliveredAt && item.certainty === 'announced' &&
+    const pending = records.filter(item => item !== completion && !item.deliveredAt && (item.certainty === 'announced' || item.correction) &&
       officialPostUrl(item.sourceUrl) && item.kind === completion.kind && item.announcedAt &&
       Date.parse(item.announcedAt) < Date.parse(completion.deliveredAt) &&
+      (!item.correctionAt || Date.parse(completion.deliveredAt)>Date.parse(item.correctionAt) ||
+        completion.sourceUrl===item.correctionSourceUrl && Date.parse(completion.evidenceUpdatedAt)>=Date.parse(item.evidenceUpdatedAt)) &&
       (completion.relatedUrls || []).includes(item.sourceUrl) &&
       (!item.scope || !completion.scope || item.scope === completion.scope));
     if (pending.length !== 1) continue;
@@ -203,6 +222,8 @@ function linkCompletions(items) {
     item.sourceSites = sourceSites([...(item.sourceSites || []), ...(completion.sourceSites || [])]);
     item.sourceWithdrawn = false;
     item.correction = null;
+    item.correctionSourceUrl = null;
+    item.correctionAt = null;
     records.splice(records.indexOf(completion), 1);
   }
   return deduplicate(records);

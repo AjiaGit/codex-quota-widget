@@ -11,22 +11,25 @@ export function publicPostUrl(value) {
 }
 const idUrl = value => /^\d+$/.test(String(value || '')) ? `https://x.com/thsottiaux/status/${value}` : null;
 const author = value => typeof value === 'string' ? value.replace(/^@/, '').toLowerCase() : null;
+function quoteIdentities(post,quoted=null) {
+  const fields=[[post?.quoted_url,publicPostUrl],[post?.quoted_tweet_id,idUrl],[post?.quoted_status_id,idUrl],
+    [quoted?.url,publicPostUrl],[quoted?.id,idUrl],[quoted?.id_str,idUrl]];
+  const urls=fields.filter(([value])=>value!==undefined && value!==null && value!=='').map(([value,parse])=>parse(value));
+  return urls.some(url=>!url) || new Set(urls).size>1 ? null : urls;
+}
 function quotedPost(post) {
   const quoted = post?.quoted_tweet || post?.quoted_status;
   if (!quoted || typeof quoted !== 'object') return null;
   const handle = author(quoted.author?.screen_name || quoted.author?.username || quoted.user?.screen_name);
   if (handle && handle !== 'thsottiaux') return null;
-  const identities=[quoted.url && publicPostUrl(quoted.url),idUrl(quoted.id || quoted.id_str),
-    post.quoted_url && publicPostUrl(post.quoted_url),idUrl(post.quoted_tweet_id || post.quoted_status_id)].filter(Boolean);
-  if(quoted.url && !publicPostUrl(quoted.url) || post.quoted_url && !publicPostUrl(post.quoted_url) || new Set(identities).size>1)return null;
+  if(!quoteIdentities(post,quoted))return null;
   const url = publicPostUrl(quoted.url) || (handle === 'thsottiaux' ? idUrl(quoted.id || quoted.id_str) : null);
   return url ? { ...quoted, url } : null;
 }
 export function publicRelations(post) {
   const quoted = quotedPost(post), replyAuthor = author(post?.replying_to);
   const nested=post?.quoted_tweet || post?.quoted_status;
-  const flat=[publicPostUrl(post?.quoted_url),idUrl(post?.quoted_tweet_id || post?.quoted_status_id)].filter(Boolean);
-  const quoteUrls=nested ? [quoted?.url] : new Set(flat).size<=1 ? flat : [];
+  const quoteUrls=nested ? [quoted?.url] : quoteIdentities(post)||[];
   return [...new Set([
     ...quoteUrls,
     !replyAuthor || replyAuthor === 'thsottiaux' ? idUrl(post?.in_reply_to_tweet_id || post?.in_reply_to_status_id) : null,
