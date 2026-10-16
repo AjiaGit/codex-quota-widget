@@ -101,7 +101,7 @@ export function deriveAnnouncementsView(state,now=Date.now(),timeZone=Intl.DateT
       plannedText,completedText,announcedText,scopeText,retentionText:phase==='delivered'?t(language,'retention'):'',
       timeText:[completedText||plannedText||announcedText,scopeText].filter(Boolean).join(' · '),
       sourceUrl:safeSource(item.sourceUrl),sourceLabel:t(language,item.statementBasis==='observation'?'viewWebsiteRecord':explicit?'viewAnnouncement':'viewSource'),deliverySourceUrl:confirmed?safeSource(item.deliverySourceUrl):null,
-      monitorSourceUrl:sourceHint?'https://codex-reset.com/':null,
+      monitorSourceUrl:sourceHint?['codex-reset.com','codexreset.dev'].filter(site=>item.sourceSites?.includes(site)).map(site=>'https://'+site+'/')[0]||null:null,
       summary,
       display:{title:displayTitle,category,label:attribution.label,scope:scopeText,
         facts:[compactCompleted||compactPlanned||compactAnnounced].filter(Boolean),

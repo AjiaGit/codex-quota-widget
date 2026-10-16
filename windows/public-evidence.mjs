@@ -16,15 +16,19 @@ function quotedPost(post) {
   if (!quoted || typeof quoted !== 'object') return null;
   const handle = author(quoted.author?.screen_name || quoted.author?.username || quoted.user?.screen_name);
   if (handle && handle !== 'thsottiaux') return null;
+  const identities=[quoted.url && publicPostUrl(quoted.url),idUrl(quoted.id || quoted.id_str),
+    post.quoted_url && publicPostUrl(post.quoted_url),idUrl(post.quoted_tweet_id || post.quoted_status_id)].filter(Boolean);
+  if(quoted.url && !publicPostUrl(quoted.url) || post.quoted_url && !publicPostUrl(post.quoted_url) || new Set(identities).size>1)return null;
   const url = publicPostUrl(quoted.url) || (handle === 'thsottiaux' ? idUrl(quoted.id || quoted.id_str) : null);
   return url ? { ...quoted, url } : null;
 }
 export function publicRelations(post) {
   const quoted = quotedPost(post), replyAuthor = author(post?.replying_to);
+  const nested=post?.quoted_tweet || post?.quoted_status;
+  const flat=[publicPostUrl(post?.quoted_url),idUrl(post?.quoted_tweet_id || post?.quoted_status_id)].filter(Boolean);
+  const quoteUrls=nested ? [quoted?.url] : new Set(flat).size<=1 ? flat : [];
   return [...new Set([
-    quoted?.url,
-    publicPostUrl(post?.quoted_url),
-    idUrl(post?.quoted_tweet_id || post?.quoted_status_id),
+    ...quoteUrls,
     !replyAuthor || replyAuthor === 'thsottiaux' ? idUrl(post?.in_reply_to_tweet_id || post?.in_reply_to_status_id) : null,
   ].filter(Boolean))];
 }
@@ -41,6 +45,10 @@ export function publicPostIndex(posts) {
 const cleanText = value => typeof value === 'string' ? value.slice(0, 2000).replace(/https:\/\/\S+/g, '').trim() : '';
 const kindIn = value => /\bbanked resets?\b|\breset credits?\b/i.test(value) ? 'banked' :
   /\b(?:global|quota|codex) resets?\b|\breset (?:rate|usage) limits\b/i.test(value) ? 'regular' : null;
+const allKinds = value => [
+  /\b(?:global|quota|codex) resets?\b|\breset (?:rate|usage) limits\b/i.test(value) && 'regular',
+  /\bbanked resets?\b|\breset credits?\b/i.test(value) && 'banked',
+].filter(Boolean);
 const unsafe = value => /\?\s*$|\b(if|would|could|might|maybe|when|once|unless|until|assuming|provided|whether|never)\b|as long as/i.test(value);
 const negative = value => /\b(?:not|no)\b|n't\b/i.test(value);
 const future = value => /\b(will|going to|should|plan|planning|expect|tomorrow|tonight|soon|later|by)\b/i.test(value);
@@ -62,7 +70,7 @@ export function analyzePublicPost(post, index = new Map(), fallbackKind = null) 
   const mentioned = [...new Set(clauses.map(kindIn).filter(Boolean))];
   const related = relatedUrls.map(url => index.get(url)).filter(Boolean);
   const contextKinds = [...new Set(related.filter(value => !unsafe(cleanText(value.text)) && !negative(cleanText(value.text)))
-    .map(value => kindIn(cleanText(value.text))).filter(Boolean))];
+    .flatMap(value => allKinds(cleanText(value.text))))];
   const contextual = mentioned.length === 1 ? mentioned[0] : !mentioned.length && contextKinds.length === 1 ? contextKinds[0] : null;
   const rhetorical = clauses.some((clause, i) => i > 0 && /^it(?:['’]s| is) (?:done|complete|completed)[.!]?$/i.test(clause) &&
     /^what would you like with your side of (?:a |the )?(?:(?:global|banked) )?reset\?$/i.test(clauses[i - 1]));
@@ -74,8 +82,8 @@ export function analyzePublicPost(post, index = new Map(), fallbackKind = null) 
     const relevant = clauses.filter(clause => kindIn(clause) === kind || !kindIn(clause) &&
       (inferred === kind || samePostContext || exactArchiveCompletion));
     const correction = relevant.some(clause => !unsafe(clause) && negative(clause) && /\bcomplete|\bdone|\bprocessed|\bdelivered|\bgranted/i.test(clause)) ? 'not-complete' :
-      relevant.some(clause => !unsafe(clause) && /\b(cancelled|canceled)\b/i.test(clause)) ? 'cancelled' :
-      relevant.some(clause => !unsafe(clause) && /\b(postponed|delayed)\b/i.test(clause)) ? 'delayed' : null;
+      relevant.some(clause => !unsafe(clause) && !negative(clause) && /\b(cancelled|canceled)\b/i.test(clause)) ? 'cancelled' :
+      relevant.some(clause => !unsafe(clause) && !negative(clause) && /\b(postponed|delayed)\b/i.test(clause)) ? 'delayed' : null;
     const safeTopic = mentioned.length === 1 && clauses.some(clause => kindIn(clause) === kind && !unsafe(clause) && !negative(clause) && !future(clause) &&
       !/\b(ui|button|patch|interface|redesign)\b/i.test(clause));
     const stages = relevant.map(clause => stage(clause, contextKinds.includes(kind) || safeTopic || samePostContext || exactArchiveCompletion));

@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { queryExternal, createAnnouncementStore } from '../external.mjs';
 import { deriveAnnouncementsView, derivePublicNotice } from '../public/app.mjs';
+import { analyzePublicPost } from '../public-evidence.mjs';
 
 // Entirely FABRICATED public responses, identifiers, times and in-memory stores.
 const now = Date.parse('2026-10-16T06:00:00Z'), hour = 3600000;
@@ -275,4 +276,103 @@ test('explicit website observation in an archive event is shown with monitoring 
     const negative=await query(feed([], {events:[{...event,summary}]}));
     assert.equal(rows(negative).some(row=>row.deliveredAt),false);
   }
+});
+
+test('a stale stage cannot consume the first fresh stage notification, including after restart', async () => {
+  const directory=await mkdtemp(join(tmpdir(),'quota-fresh-stage-'));
+  try {
+    for(const [index,initial,next] of [[1,'Global reset by EOD.','Global reset is complete.'],[2,'More details soon','Global reset by EOD.']]) {
+      const file=join(directory,`${index}.json`),entry=post('201'+index,initial);
+      const store=await baseline(file),events=[{url:entry.url,group:'reset'}];
+      await store.update((await query(feed([entry],{events}))).announcements);
+      await store.acknowledge([entry.url+'#regular']);
+      await store.update((await query(feed([{...entry,text:next}],{events,stale:true}))).announcements);
+      assert.deepEqual(store.alerts.unread,[]);
+      const restarted=await createAnnouncementStore({file,now:()=>now});
+      const fresh=(await query(feed([{...entry,text:next}],{events}))).announcements;
+      await restarted.update(fresh);
+      assert.equal(restarted.alerts.unread.length,1,next);
+      await restarted.acknowledge([entry.url+'#regular']);
+      await restarted.update(fresh);
+      assert.deepEqual(restarted.alerts.unread,[]);
+    }
+  } finally {await rm(directory,{recursive:true,force:true});}
+});
+
+test('an older stale original cannot roll back a fresh explicit correction or its timestamp',async()=>{
+  const store=await baseline(),entry=post('202','Global reset is not complete. The earlier statement was incorrect.');
+  await store.update((await query(feed([entry]))).announcements);
+  await store.update((await query(feed([{...entry,text:'Global reset is complete.'}],{stale:true,fetched_at:iso(now-hour)}))).announcements);
+  const item=store.state.items.find(row=>row.sourceUrl===entry.url);
+  assert.equal(item.correction,'not-complete');
+  assert.equal(item.deliveredAt,null);
+  assert.equal(item.evidenceUpdatedAt,iso(now));
+});
+
+test('a bare completion reply to two different promised actions cannot choose either action',async()=>{
+  const promise=post('203','Global reset by EOD. We will give a banked reset tomorrow.',now-1200000);
+  const done=post('204','Done and dusted',now-600000,{in_reply_to_tweet_id:promise.id});
+  const result=await query(feed([promise,done]));
+  assert.equal(rows(result).some(row=>row.deliveredAt),false);
+  assert.equal(rows(result).filter(row=>row.certainty==='announced').length,2);
+});
+
+test('a correction about reset credits cannot erase a quota completion in the same post',async()=>{
+  const promise=post('205','Global reset by EOD.',now-1200000);
+  const done=post('206','Global reset is complete. No banked reset has been granted.',now-600000,{in_reply_to_tweet_id:promise.id});
+  const result=await query(feed([promise,done]));
+  assert.ok(rows(result).find(row=>row.sourceUrl===promise.url)?.deliveredAt);
+  assert.equal(rows(result).find(row=>row.kind==='banked')?.correction,'not-complete');
+});
+
+test('negating cancellation or delay is not itself a cancellation or delay correction',()=>{
+  for(const word of ['cancelled','canceled','delayed','postponed']) {
+    assert.equal(analyzePublicPost(post('207',`Global reset is not ${word}.`))[0].correction,null,word);
+    assert.equal(analyzePublicPost(post('207',`Global reset is ${word}.`))[0].correction,
+      ['cancelled','canceled'].includes(word)?'cancelled':'delayed',word);
+  }
+});
+
+test('conflicting nested quote identity cannot be rescued by a valid flat quote identifier',async()=>{
+  const promise=post('208','Global reset by EOD.',now-1200000);
+  for(const quoted of [
+    {...promise,author:{screen_name:'other_author'}},
+    {...promise,url:url('209'),author:{screen_name:'thsottiaux'}},
+    {...promise,id:'1000000000000000999',author:{screen_name:'thsottiaux'}},
+  ]) {
+    const done=post('210','Done and dusted',now-600000,{quoted_tweet:quoted,quoted_tweet_id:promise.id});
+    assert.equal(rows(await query(feed([promise,done]))).some(row=>row.deliveredAt),false);
+  }
+});
+
+test('an explicit related cancellation updates the original promise but unrelated corrections do not',async()=>{
+  const promise=post('211','Global reset by EOD.',now-1200000);
+  for(const [relation,expected] of [[promise.id,'cancelled'],['1000000000000000999',null]]) {
+    const correction=post('212','Global reset is cancelled.',now-600000,{in_reply_to_tweet_id:relation});
+    const result=await query(feed([promise,correction]));
+    assert.equal(rows(result).find(row=>row.sourceUrl===promise.url)?.correction,expected);
+  }
+});
+
+test('an unverified backup-only update opens the website that supplied it',async()=>{
+  const result=await query(feed(),history([archived('213','Global reset recorded.')]));
+  assert.equal(view(rows(result)[0]).monitorSourceUrl,'https://codexreset.dev/');
+});
+
+test('upgrading a legacy cache does not replay a read linked completion',async()=>{
+  const directory=await mkdtemp(join(tmpdir(),'quota-legacy-stage-'));
+  try {
+    const file=join(directory,'cache.json'),store=await baseline(file);
+    const promise=post('214','Global reset by EOD.',now-1200000);
+    const done=post('215','Global reset is complete.',now-600000,{in_reply_to_tweet_id:promise.id});
+    const fresh=(await query(feed([promise,done]))).announcements;
+    await store.update(fresh);
+    await store.acknowledge(store.alerts.unread.map(item=>item.id));
+    const saved=JSON.parse(await readFile(file,'utf8'));
+    delete saved.alertTracking.observedStages;
+    await writeFile(file,JSON.stringify(saved));
+    const upgraded=await createAnnouncementStore({file,now:()=>now});
+    await upgraded.update(fresh);
+    assert.deepEqual(upgraded.alerts.unread,[]);
+  } finally {await rm(directory,{recursive:true,force:true});}
 });

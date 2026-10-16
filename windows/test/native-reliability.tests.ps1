@@ -44,3 +44,7 @@ $failed=Merge-WidgetExternalData $merged $null $true
 Check $failed.announcements.items.Count 2 'Transport failure retains both cached actions'
 Check $failed.announcements.stale $true 'Transport failure remains visible'
 Write-Output 'PASS service-owned mixed actions and explicit corrections survive native cache/failure handling'
+
+$backup=[pscustomobject]@{id=($url+'#regular');kind='regular';sourceUrl=$url;announcedAt='2026-10-16T05:00:00Z';certainty='unconfirmed';sourceHint='recent';sourceSites=@('codexreset.dev')}
+Check (ConvertTo-WidgetAnnouncementRow $backup 'en' $now).monitorSourceUrl 'https://codexreset.dev/' 'Backup hints must open the supplying website'
+Write-Output 'PASS backup-only monitoring link preserves provenance'

@@ -624,7 +624,7 @@ function ConvertTo-WidgetAnnouncementRow($row, [string]$language, [DateTimeOffse
         summary=$summary;sourceHint=$sourceHint;hintStatus=$hintStatus
         completedEvidence=$completed;sourceSites=@($row.sourceSites);announcementBasis=$row.announcementBasis;completionTimeBasis=$row.completionTimeBasis
         statementBasis=$row.statementBasis;kindKnown=($row.kindKnown -ne $false);correction=$row.correction
-        monitorSourceUrl=$(if ($sourceHint) {'https://codex-reset.com/'} else {$null})
+        monitorSourceUrl=$(if ($sourceHint) { @('codex-reset.com','codexreset.dev') | Where-Object {$row.sourceSites -contains $_} | Select-Object -First 1 | ForEach-Object {'https://'+$_+'/'} } else {$null})
         retentionText=$(if ($phase -eq 'delivered') {Get-WidgetText 'retention' $language} else {''})
         sourceUrl=$(if (Test-WidgetHttpsUrl $row.sourceUrl) {[string]$row.sourceUrl} else {$null})
         deliverySourceUrl=$(if ($completed -and (Test-WidgetHttpsUrl $row.deliverySourceUrl)) {[string]$row.deliverySourceUrl} else {$null})

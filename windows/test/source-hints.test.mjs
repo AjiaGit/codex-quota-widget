@@ -232,7 +232,7 @@ test('source hint category corrections migrate unread identity without alerting 
   assert.deepEqual(store.alerts.unread, []);
 });
 
-test('a stale confirmation updates an existing unread hint type without reviving a read notice', async () => {
+test('a stale confirmation stays quiet until the first fresh promise, which notifies once', async () => {
   for (const alreadyRead of [false, true]) {
     const { store } = await trackedStore();
     const id = reply.url + '#regular';
@@ -244,7 +244,7 @@ test('a stale confirmation updates an existing unread hint type without reviving
       await store.update((await query(feed([promise], { signal: headline(promise), stale }))).announcements);
       assert.equal(store.state.items[0].certainty, 'announced');
       assert.equal(store.state.items[0].sourceHint, null);
-      assert.deepEqual(store.alerts.unread, alreadyRead ? [] : [{ id, kind: 'regular' }]);
+      assert.deepEqual(store.alerts.unread, alreadyRead && stale ? [] : [{ id, kind: 'regular' }]);
     }
     await store.acknowledge([id]);
     await store.update((await query(feed([promise], { signal: headline(promise) }))).announcements);

@@ -89,7 +89,8 @@ function deduplicate(items, knownItems = []) {
     if(!originalKindSets.has(item.sourceUrl)||!item.multiKind)originalKindSets.set(item.sourceUrl,new Set());
     originalKindSets.get(item.sourceUrl).add(item.kind);
   }
-  const originalKinds = new Map([...originalKindSets].filter(([,kinds])=>kinds.size===1).map(([url,kinds])=>[url,[...kinds][0]]));
+  const multiKindUrls=new Set(candidates.filter(item=>item.multiKind).map(item=>item.sourceUrl));
+  const originalKinds = new Map([...originalKindSets].filter(([url,kinds])=>kinds.size===1 && !multiKindUrls.has(url)).map(([url,kinds])=>[url,[...kinds][0]]));
   // A display-only hint and a mirror's generic record refer to the same post.
   // Resolve their category once; confirmed evidence still takes precedence.
   const hintKinds = new Map(candidates.filter(item => item.sourceHint).map(item => [item.sourceUrl, item.kind]));
@@ -101,6 +102,12 @@ function deduplicate(items, knownItems = []) {
     if (kind) item = { ...item, kind, id: item.sourceUrl + '#' + kind,
       kindBasis: originalKinds.has(item.sourceUrl) ? 'original' : item.kindBasis };
     const previous = map.get(item.id);
+    // A retrieved older original may improve provenance, but cannot reverse a
+    // newer original statement (including an explicit withdrawal/correction).
+    if(previous?.statementBasis==='original' && item.statementBasis==='original' &&
+      Date.parse(previous.evidenceUpdatedAt)>Date.parse(item.evidenceUpdatedAt)) {
+      map.set(item.id,{...previous,sourceSites:sourceSites([...(previous.sourceSites||[]),...(item.sourceSites||[])])});continue;
+    }
     // Missing/cropped mirror data cannot reverse an explicit original correction.
     if(previous?.correction && previous.statementBasis === 'original' && item.statementBasis !== 'original')continue;
     if(item.correction && item.statementBasis === 'original') {
@@ -136,10 +143,17 @@ function deduplicate(items, knownItems = []) {
   }
   // If the original completion post proves a different type, release an older
   // inferred pairing instead of retaining its completion fields through merging.
-  const corrections = new Map(candidates.filter(item=>item.statementBasis==='original').map(item=>[item.sourceUrl,item.correction]));
+  const corrections = new Map();
+  for(const item of candidates.filter(item=>item.statementBasis==='original')) {
+    const key=item.sourceUrl+'#'+item.kind,previous=corrections.get(key);
+    if(!previous || !(Date.parse(previous.evidenceUpdatedAt)>Date.parse(item.evidenceUpdatedAt)))corrections.set(key,item);
+  }
   for (const item of map.values()) {
-    if(item.deliveredAt && item.deliverySourceUrl!==item.sourceUrl && corrections.get(item.deliverySourceUrl)) {
-      map.set(item.id,{...item,deliveredAt:null,deliverySourceUrl:null,completionTimeBasis:null,correction:corrections.get(item.deliverySourceUrl)});
+    const correction=corrections.get(item.deliverySourceUrl+'#'+item.kind);
+    if(item.deliveredAt && item.deliverySourceUrl!==item.sourceUrl && correction?.correction &&
+      !(Date.parse(item.evidenceUpdatedAt)>Date.parse(correction.evidenceUpdatedAt))) {
+      map.set(item.id,{...item,deliveredAt:null,deliverySourceUrl:null,completionTimeBasis:null,correction:correction.correction,
+        evidenceUpdatedAt:correction.evidenceUpdatedAt,evidenceFresh:correction.evidenceFresh});
       continue;
     }
     const completionKind = originalKinds.get(item.deliverySourceUrl);
@@ -154,6 +168,18 @@ function deduplicate(items, knownItems = []) {
 
 function linkCompletions(items) {
   const records = deduplicate(items).map(item=>({...item})).sort((a,b) => Date.parse(a.announcedAt || 0) - Date.parse(b.announcedAt || 0));
+  for(const correction of records.filter(item=>item.correction && item.statementBasis==='original')) {
+    const targets=records.filter(item=>item!==correction && officialPostUrl(item.sourceUrl) && item.kind===correction.kind &&
+      item.announcedAt && correction.announcedAt && Date.parse(item.announcedAt)<Date.parse(correction.announcedAt) &&
+      !(Date.parse(item.evidenceUpdatedAt)>Date.parse(correction.evidenceUpdatedAt)) &&
+      correction.relatedUrls?.includes(item.sourceUrl) && (!item.scope || !correction.scope || item.scope===correction.scope));
+    if(targets.length!==1)continue;
+    Object.assign(targets[0],{certainty:'unconfirmed',correction:correction.correction,sourceWithdrawn:true,
+      deliveredAt:null,deliverySourceUrl:null,completionTimeBasis:null,evidenceUpdatedAt:correction.evidenceUpdatedAt,
+      evidenceFresh:correction.evidenceFresh});
+    // Keep the separately dated correction post as the verifiable source. The
+    // original promise remains in history, visibly corrected rather than live.
+  }
   for (const completion of [...records]) {
     if (!completion.deliveredAt || completion.completionTimeBasis !== 'announcement' ||
         completion.deliverySourceUrl !== completion.sourceUrl) continue;
@@ -343,7 +369,7 @@ export function normalizeAnnouncements(data, now = Date.now()) {
 export async function createAnnouncementStore({ file, now = Date.now } = {}) {
   let snapshot = emptyAnnouncements(), writes = Promise.resolve();
   let baselineAt = null;
-  const observed = new Set(), unread = new Map();
+  const observed = new Set(), observedStages = new Map(), unread = new Map();
   const alertIdentity = id => {
     if(typeof id !== 'string')return null;
     const kind = id.endsWith('#banked') ? 'banked' : id.endsWith('#regular') ? 'regular' : null;
@@ -362,6 +388,18 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
     if(tracking?.version === 1 && Number.isFinite(tracking.baselineAt) && tracking.baselineAt <= now()) {
       baselineAt = tracking.baselineAt;
       for(const id of (Array.isArray(tracking.observed) ? tracking.observed : []).slice(-500))if(alertIdentity(id))observed.add(id);
+      if(Array.isArray(tracking.observedStages)) {
+        for(const entry of tracking.observedStages.slice(-500))if(Array.isArray(entry) && alertIdentity(entry[0]) &&
+          (['announced','unconfirmed','correction:not-complete','correction:cancelled','correction:delayed'].includes(entry[1]) ||
+            typeof entry[1]==='string' && entry[1].startsWith('complete:') && safeHttpsUrl(entry[1].slice(9))))observedStages.set(...entry.slice(0,2));
+      } else {
+        // Migrate older caches without replaying their already-observed stages.
+        for(const item of [...snapshot.history,...snapshot.items]) {
+          if(observed.has(item.id))observedStages.set(item.id,noticeStage(item));
+          const alias=item.deliverySourceUrl+'#'+item.kind;
+          if(item.completionTimeBasis==='announcement' && observed.has(alias))observedStages.set(alias,noticeStage(item));
+        }
+      }
       for(const entry of (Array.isArray(tracking.unread) ? tracking.unread : []).slice(0,100)) {
         const identity = alertIdentity(entry?.id);
         const record = identity && [...snapshot.items,...snapshot.history].find(item=>item.id===identity.id && noticeEligible(item));
@@ -380,7 +418,7 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
     writes = writes.catch(()=>{}).then(async()=>{
       await mkdir(dirname(file), { recursive: true }); const temp = file + '.' + process.pid + '.tmp';
       await writeFile(temp, JSON.stringify({ version:1, ...project(), alertTracking: {
-        version:1, baselineAt, observed:[...observed].slice(-500), unread:alerts().unread,
+        version:1, baselineAt, observed:[...observed].slice(-500), observedStages:[...observedStages].slice(-500), unread:alerts().unread,
       } }), { mode:0o600 }); await rename(temp,file);
     });
     // Storage failure must not erase confirmed live data or unread notices.
@@ -414,24 +452,29 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
       if(fresh) {
         if(baselineAt !== null)for(const item of freshItems.filter(eligible)) {
           const completionId = item.deliverySourceUrl + '#' + item.kind;
+          const priorStage=observedStages.get(item.id) ?? observedStages.get(completionId);
           const newCompletion = item.completionTimeBasis === 'announcement' && item.deliveredAt &&
-            !observed.has(completionId) && known.get(item.id)?.deliverySourceUrl !== item.deliverySourceUrl;
+            observedStages.get(completionId)!==noticeStage(item);
           const publication = newCompletion ? item.deliveredAt : item.announcedAt;
           const prior = known.get(item.id);
-          const stageChanged = prior && noticeStage(prior) !== noticeStage(item);
+          const stageChanged = priorStage!==undefined && priorStage !== noticeStage(item);
           const newConfirmed = confirmedAnnouncement(item) &&
-            (newCompletion || !observed.has(item.id) || stageChanged || prior && !confirmedAnnouncement(prior));
+            (newCompletion || !observed.has(item.id) || stageChanged || priorStage==='unconfirmed');
           const seenPost = observed.has(item.id) || observed.has(item.sourceUrl + (item.kind === 'banked' ? '#regular' : '#banked'));
           const newHint = sourceHintNotice(item) && hintEvidence.has(item.sourceUrl) &&
             (!seenPost || prior && !prior.sourceHint && !confirmedAnnouncement(prior));
-          const newCorrection = item.correction && (!prior || prior.correction !== item.correction);
+          const newCorrection = item.correction && priorStage!==noticeStage(item);
           if((newConfirmed || newHint || newCorrection) && publication && Date.parse(publication) >= baselineAt)
             unread.set(item.id,noticeEntry(item));
         }
         else baselineAt = now();
         for(const item of [...freshHistory,...freshItems].filter(eligible)) {
           observed.add(item.id);
-          if(item.completionTimeBasis === 'announcement' && item.deliverySourceUrl)observed.add(item.deliverySourceUrl + '#' + item.kind);
+          observedStages.set(item.id,noticeStage(item));
+          if(item.completionTimeBasis === 'announcement' && item.deliverySourceUrl) {
+            observed.add(item.deliverySourceUrl + '#' + item.kind);
+            observedStages.set(item.deliverySourceUrl+'#'+item.kind,noticeStage(item));
+          }
         }
       }
       for(const item of [...freshHistory,...freshItems])if(!noticeEligible(item))unread.delete(item.id);
@@ -458,6 +501,7 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
         if(item.multiKind)continue;
         const oldId = item.sourceUrl + (item.kind === 'banked' ? '#regular' : '#banked');
         if (observed.has(oldId)) observed.add(item.id);
+        if(observedStages.has(oldId) && !observedStages.has(item.id))observedStages.set(item.id,observedStages.get(oldId));
         if (unread.delete(oldId) && noticeEligible(item)) unread.set(item.id, noticeEntry(item));
       }
       for (const item of records) if (item.deliverySourceUrl && item.deliverySourceUrl !== item.sourceUrl) {
