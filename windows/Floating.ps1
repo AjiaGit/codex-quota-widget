@@ -1261,7 +1261,7 @@ $drag = {
         Update-ResponsiveLayout
     }
 }
-foreach ($control in @($form,$title,$status,$ring,$caption,$countdown,$reset,$updated,$heroPanel,$fiveTitle,$fiveValue,$fiveReset)) {
+foreach ($control in @($form,$title,$status,$ring,$caption,$countdown,$reset,$updated,$latestRecovery,$heroPanel,$fiveTitle,$fiveValue,$fiveReset)) {
     $control.Add_MouseDown($drag)
 }
 $compactDown = {

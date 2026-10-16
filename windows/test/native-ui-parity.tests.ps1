@@ -295,6 +295,19 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
    if($latestRecovery.Text -match [regex]::Escape((Format-WidgetCompactDate $now.AddMinutes(-2) $script:language))){throw 'Failed account query exposed an old account recovery time'}
   }finally{$script:data=$oldData;$script:languageSetting=$oldLanguage;$script:automaticDetailHeight=$oldAuto;$form.ClientSize=$oldSize;Set-Language;Show-Quota}
  }
+ Test-Case 'the new recovery label participates in the production detail drag registration' {
+  $oldDrag=$drag;$script:dragTestOrigins=@()
+  $drag=[Windows.Forms.MouseEventHandler]{param($sender,$event);$script:dragTestOrigins+=,$sender}
+  $binding=@($ast.EndBlock.Statements | Where-Object {$_ -is [Management.Automation.Language.ForEachStatementAst] -and $_.Extent.Text.Contains('.Add_MouseDown($drag)')})
+  Assert-Equal $binding.Count 1 'One production detail drag registration'
+  Invoke-Expression $binding[0].Extent.Text
+  try {
+   $raise=[Windows.Forms.Control].GetMethod('OnMouseDown',([Reflection.BindingFlags]::Instance -bor [Reflection.BindingFlags]::NonPublic))
+   [void]$raise.Invoke($latestRecovery,@([Windows.Forms.MouseEventArgs]::new([Windows.Forms.MouseButtons]::Left,1,1,1,0)))
+   Assert-Equal $script:dragTestOrigins.Count 1 'Dragging from the new label reaches the registered handler'
+   if(-not [object]::ReferenceEquals($script:dragTestOrigins[0],$latestRecovery)){throw 'Drag origin is not the recovery label'}
+  }finally{Invoke-Expression ($binding[0].Extent.Text.Replace('.Add_MouseDown($drag)','.Remove_MouseDown($drag)'));$drag=$oldDrag;Remove-Variable dragTestOrigins -Scope Script -ErrorAction SilentlyContinue}
+ }
  Test-Case 'recent recovery disclosure retains the previous observation time' {
   $state=[pscustomobject]@{status='ok';recoveryHistory=[pscustomobject]@{status='ok';records=@([pscustomobject]@{beforePercent=39;afterPercent=74;observedFrom=$now.AddMinutes(-3).ToUnixTimeMilliseconds();detectedAt=$now.AddMinutes(-2).ToUnixTimeMilliseconds()})}}
   $view=Get-WidgetResetActivityView $state $script:externalData 'en' $now
