@@ -14,7 +14,7 @@ function New-Event([string]$id, [string]$kind = 'banked') {
     [pscustomobject]@{ id=$id; kind=$kind; certainty='announced'; announcedAt='2026-09-29T12:00:00Z'; scheduledAt=$null; scheduledDate=$null; deliveredAt=$null; scope='paid'; scopeLabel=$null; sourceUrl='https://example.org/announcement'; deliverySourceUrl=$null; summary='Confirmed announcement'; summaryZh='已确认公告' }
 }
 function New-External($items = @(), $history = @(), [string]$status = 'ok') {
-    [pscustomobject]@{ status='ok'; announcements=[pscustomobject]@{ status=$status; items=@($items); history=@($history); sourceUpdatedAt='2026-09-30T11:00:00Z'; stale=$false } }
+    [pscustomobject]@{ status='ok'; announcements=[pscustomobject]@{ status=$status; items=@($items); history=@($history); sourceUpdatedAt=$now.AddMinutes(-5).ToString('o'); stale=$false } }
 }
 Test-Case 'outside clicks collapse only a visible settled detail window' {
     $frame=[Drawing.Rectangle]::new(-606,100,606,585)
@@ -109,6 +109,16 @@ Test-Case 'two kinds stay separate and empty/unavailable feeds use one muted sta
     Assert-Equal $view.active[1].title 'Quota reset announced' 'Regular title'
     Assert-Equal (Get-WidgetAnnouncementView (New-External) 'zh-CN' $now).emptyText '监控网站暂无新的重置动态记录' 'Merged empty state'
     Assert-Equal (Get-WidgetAnnouncementView (New-External @() @() 'unavailable') 'en' $now).emptyText 'Monitoring-site updates unavailable' 'Unavailable state'
+}
+Test-Case 'empty public feeds distinguish the thirty minute freshness boundary' {
+    foreach ($minutes in @(29,31)) {
+        $external=New-External
+        $external.announcements.sourceUpdatedAt=$now.AddMinutes(-$minutes).ToString('o')
+        $notice=Get-WidgetPublicNoticeView $external 'en' $now
+        Assert-Equal $notice.visible ($minutes -gt 30) 'Old data must not masquerade as a successful empty feed'
+        $view=Get-WidgetAnnouncementView $external 'en' $now
+        Assert-Equal $view.emptyText $(if ($minutes -gt 30) {'Monitoring-site updates unavailable'} else {'Monitored sites have no new reset-update records'}) 'Fresh-empty and stale-empty states stay distinct'
+    }
 }
 Test-Case 'rendering archives delivered rows locally even without another fetch' {
     $row=New-Event 'completed'; $row.deliveredAt=$now.AddHours(-23).ToString('o')
@@ -251,7 +261,8 @@ Test-Case 'inventory and evidence link terminology match the approved bilingual 
     Assert-Equal (Get-WidgetText 'deliverySource' 'en') 'Completion evidence' 'Evidence link'
     foreach ($language in @('en','zh-CN')) {
         $cadence=Get-WidgetText 'refreshCadence' $language
-        if (-not $cadence.Contains('1') -or -not $cadence.Contains('10')) { throw 'Quota/public cadence omitted' }
+        $expected=if ($language -eq 'en') {'Auto-refresh: quota every 1 min · public updates adapt to activity'} else {'自动刷新：额度每1分钟 · 公开消息按进展刷新'}
+        Assert-Equal $cadence $expected 'Quota interval and adaptive public cadence must both be explicit'
     }
 }
 Test-Case 'completed results explain their 24 hour retention in both languages' {
