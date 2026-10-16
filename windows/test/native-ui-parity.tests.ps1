@@ -263,9 +263,16 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
   $record=[pscustomobject]@{title='FABRICATED TEST DATA';description='';granted='Granted: Not provided';expires='Expires: Not provided'}
   $control=New-ResetCreditControl $record
   try {if($control.Tag.description.Visible){throw 'Empty description still paints an opaque label over the grant date'}}finally{$control.Dispose()}
-  $row=[pscustomobject]@{key='FABRICATED-empty';kind='regular';phase='unconfirmed';explicit=$false;scopeText='';summary='';retentionText=''}
+  $row=[pscustomobject]@{key='FABRICATED-empty';kind='regular';phase='announced';explicit=$true;scopeText='';summary='';retentionText=''}
   $control=New-AnnouncementControl $row
   try {if($control.Tag.fact.Visible -or $control.Tag.status.Visible){throw 'Empty activity labels still paint at skipped default positions'}}finally{$control.Dispose()}
+  $row.phase='unconfirmed';$row.explicit=$false
+  $control=New-AnnouncementControl $row
+  try {
+   Assert-Equal $control.Tag.fact.Visible $false 'An absent date/fact remains hidden'
+   Assert-Equal $control.Tag.status.Visible $true 'Unverified evidence explanation is required text'
+   Assert-Equal $control.Tag.status.Text (T 'unverifiedHelp') 'Unverified update retains the approved explanation'
+  }finally{$control.Dispose()}
  }
  Test-Case 'recent recovery disclosure retains the previous observation time' {
   $state=[pscustomobject]@{status='ok';recoveryHistory=[pscustomobject]@{status='ok';records=@([pscustomobject]@{beforePercent=39;afterPercent=74;observedFrom=$now.AddMinutes(-3).ToUnixTimeMilliseconds();detectedAt=$now.AddMinutes(-2).ToUnixTimeMilliseconds()})}}
