@@ -46,5 +46,8 @@ Check $failed.announcements.stale $true 'Transport failure remains visible'
 Write-Output 'PASS service-owned mixed actions and explicit corrections survive native cache/failure handling'
 
 $backup=[pscustomobject]@{id=($url+'#regular');kind='regular';sourceUrl=$url;announcedAt='2026-10-16T05:00:00Z';certainty='unconfirmed';sourceHint='recent';sourceSites=@('codexreset.dev')}
-Check (ConvertTo-WidgetAnnouncementRow $backup 'en' $now).monitorSourceUrl 'https://codexreset.dev/' 'Backup hints must open the supplying website'
-Write-Output 'PASS backup-only monitoring link preserves provenance'
+$backupRow=ConvertTo-WidgetAnnouncementRow $backup 'en' $now
+Check $backupRow.sourceUrl $url 'Backup hint keeps its original post as the single evidence action'
+Check $backupRow.monitorSourceUrl $null 'Backup hint does not add a second monitoring-site action'
+Check (Get-WidgetActivityAttribution $backupRow 'en').source 'codexreset.dev' 'Backup website attribution remains visible'
+Write-Output 'PASS backup-only hint retains one original action and the supplying website attribution'
