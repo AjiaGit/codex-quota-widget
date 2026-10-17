@@ -261,8 +261,8 @@ Test-Case 'inventory and evidence link terminology match the approved bilingual 
     Assert-Equal (Get-WidgetText 'deliverySource' 'en') 'Completion evidence' 'Evidence link'
     foreach ($language in @('en','zh-CN')) {
         $cadence=Get-WidgetText 'refreshCadence' $language
-        $expected=if ($language -eq 'en') {'Auto-refresh: quota every 1 min · public updates adapt to activity'} else {'自动刷新：额度每1分钟 · 公开消息按进展刷新'}
-        Assert-Equal $cadence $expected 'Quota interval and adaptive public cadence must both be explicit'
+        $expected=if ($language -eq 'en') {'Auto-refresh: quota and reset previews every 1 min'} else {'自动刷新：额度与重置预告每 1 分钟'}
+        Assert-Equal $cadence $expected 'Quota and reset-preview minute cadence must both be explicit'
     }
 }
 Test-Case 'completed results explain their 24 hour retention in both languages' {
