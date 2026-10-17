@@ -98,7 +98,9 @@ export function analyzePublicPost(post, index = new Map(), fallbackKind = null) 
       !/\b(ui|button|patch|interface|redesign)\b/i.test(clause));
     const stages = relevant.map(clause => stage(clause, contextKinds.includes(kind) || safeTopic || samePostContext || exactArchiveCompletion));
     const claim = correction ? 'unconfirmed' : stages.includes('complete') ? 'complete' : stages.includes('announced') ? 'announced' : 'unconfirmed';
-    return { kind, claim, correction, relatedUrls, multiKind: mentioned.length > 1, kindKnown: Boolean(mentioned.includes(kind) || inferred),
+    return { kind, claim, correction, relatedUrls, timeText:relevant.filter(clause=>!unsafe(clause)&&!negative(clause)).join('\n'),
+      previewContextUrls:kind==='regular'?related.filter(campaignReset).map(value=>publicPostUrl(value.url)).filter(Boolean):[],
+      multiKind: mentioned.length > 1, kindKnown: Boolean(mentioned.includes(kind) || inferred),
       originalKind: mentioned.includes(kind), contextValidated: Boolean(contextKinds.includes(kind)),
       // Generic archive completions remain the website's interpretation.
       originalStatement: Boolean(mentioned.includes(kind) || contextual || rhetorical) };

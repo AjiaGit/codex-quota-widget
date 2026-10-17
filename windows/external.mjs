@@ -201,19 +201,24 @@ function linkCompletions(items) {
   for(const update of [...records]) {
     if(update.kind!=='regular'||update.certainty!=='announced'||update.deliveredAt||update.correction||update.statementBasis!=='original')continue;
     const parents=records.filter(item=>item!==update&&item.kind===update.kind&&(item.certainty==='announced'||item.correction)&&!item.deliveredAt&&
-      update.relatedUrls?.includes(item.sourceUrl)&&Date.parse(item.announcedAt)<Date.parse(update.announcedAt)&&
-      (item.previewAliases?.includes(update.sourceUrl)||!item.scope||!update.scope||item.scope===update.scope));
+      update.relatedUrls?.some(url=>[item.sourceUrl,item.previewSourceUrl,...(item.previewAliases||[])].includes(url))&&Date.parse(item.announcedAt)<Date.parse(update.announcedAt)&&
+      (item.previewAliases?.includes(update.sourceUrl)||!item.scope||!update.scope||item.scope===update.scope||
+        /\b(?:replaces?|supersedes?) (?:the )?(?:previous|earlier|old) (?:time|scope|announcement|notice)\b/i.test(update.summary||'')));
     if(parents.length!==1)continue;
     const parent=parents[0];
     if(parent.correction&&Date.parse(parent.correctionAt)>=Date.parse(update.announcedAt)){records.splice(records.indexOf(update),1);continue;}
-    if(Date.parse(parent.previewUpdatedAt)>Date.parse(update.announcedAt))continue;
+    if(Date.parse(parent.previewUpdatedAt)>Date.parse(update.announcedAt)){
+      if(parent.previewAliases?.includes(update.sourceUrl))records.splice(records.indexOf(update),1);
+      continue;
+    }
     const baseScope=parent.previewSourceUrl?parent.previewBaseScope:parent.scope;
     const baseScopeLabel=parent.previewSourceUrl?parent.previewBaseScopeLabel:parent.scopeLabel;
     const scope=update.scope||(parent.previewSourceUrl===update.sourceUrl?baseScope:parent.scope);
-    Object.assign(parent,{...parsePreviewTime(update.summary,update.announcedAt),summary:update.summary,scope,
+    Object.assign(parent,{scheduledAt:update.scheduledAt,scheduledFrom:update.scheduledFrom,scheduleText:update.scheduleText,
+      schedulePrecision:update.schedulePrecision,scheduledDate:update.scheduledDate,scheduledTimeZone:update.scheduledTimeZone,summary:update.summary,scope,
       scopeLabel:update.scopeLabel||(parent.previewSourceUrl===update.sourceUrl?baseScopeLabel:parent.scopeLabel),
       previewBaseScope:baseScope,previewBaseScopeLabel:baseScopeLabel,
-      previewAliases:[...new Set([...(parent.previewAliases||[]),parent.previewSourceUrl,update.sourceUrl].filter(Boolean))].slice(-10),
+      previewAliases:[...new Set([...(parent.previewAliases||[]),...(update.previewAliases||[]),parent.previewSourceUrl,update.sourceUrl].filter(Boolean))].slice(-10),
       previewSourceUrl:update.sourceUrl,previewUpdatedAt:update.announcedAt,evidenceUpdatedAt:update.evidenceUpdatedAt,
       evidenceFresh:update.evidenceFresh,sourceSites:sourceSites([...(parent.sourceSites||[]),...(update.sourceSites||[])])});
     records.splice(records.indexOf(update),1);
@@ -272,14 +277,14 @@ function officialPostUrl(value) {
     /^\/thsottiaux\/status\/\d+$/.test(url.pathname) ? 'https://x.com' + url.pathname : null;
 }
 
-function publicRecord({kind, url, at, summary, claim, scope = null, kindBasis = null, sourceSite, ...metadata}) {
+function publicRecord({kind, url, at, summary, timeText = summary, claim, scope = null, kindBasis = null, sourceSite, ...metadata}) {
   if (!kind || !url) return null;
   const announcedAt = at;
   const deliveredAt = claim === 'complete' && at ? at : null;
   return { id: url + '#' + kind, kind, sourceUrl: url, announcedAt, deliveredAt,
     deliverySourceUrl: deliveredAt ? url : null, completionTimeBasis: deliveredAt ? 'announcement' : null,
     certainty: claim === 'announced' || deliveredAt ? 'announced' : 'unconfirmed',
-    ...parsePreviewTime(claim === 'announced' ? summary : null,at), scheduledDate: null, scheduledTimeZone: null, scope, scopeLabel: null, kindBasis,
+    ...parsePreviewTime(claim === 'announced' ? timeText : null,at), scheduledDate: null, scheduledTimeZone: null, scope, scopeLabel: null, kindBasis,
     summary: text(summary), summaryZh: null, sourceHint: null, sourceWithdrawn: false,
     sourceSites: sourceSites([sourceSite]), announcementBasis: claim === 'announced' && metadata.statementBasis === 'original' ? 'original' : null,
     ...metadata };
@@ -319,9 +324,9 @@ function normalizeCodexFeed(data, now, archiveKinds) {
       const headline=data.signal,matches=headline?.kind==='signal'&&officialPostUrl(headline.url)===url&&String(headline.tweet_id)===String(post.id);
       const hint=evidence.claim==='unconfirmed'&&!evidence.correction?(matches&&headline.active===false?'inactive':matches&&headline.active===true?'active':'recent'):null;
       const statementBasis=evidence.originalStatement?'original':'site';
-      records.push(publicRecord({kind:evidence.kind,url,at,summary,claim:evidence.claim,scope:scopeOf(summary),
+      records.push(publicRecord({kind:evidence.kind,url,at,summary,timeText:evidence.timeText,claim:evidence.claim,scope:scopeOf(evidence.timeText),
         sourceSite:'codex-reset.com',kindBasis:evidence.originalKind?'original':null,statementBasis,
-        relatedUrls:evidence.relatedUrls,multiKind:evidence.multiKind,kindKnown:evidence.kindKnown||archiveKinds.has(url),correction:evidence.correction,
+        relatedUrls:evidence.relatedUrls,previewAliases:evidence.previewContextUrls,multiKind:evidence.multiKind,kindKnown:evidence.kindKnown||archiveKinds.has(url),correction:evidence.correction,
         sourceHint:hint,sourceWithdrawn:hint==='inactive',evidenceUpdatedAt:data.fetched_at,evidenceFresh:fresh}));
     }
   }
@@ -376,7 +381,7 @@ function normalizeCodexHistory(data, now) {
     const post={url,text:event.evidence_text, ...event};
     const evidence=analyzePublicPost(post,new Map(),kind);
     for(const claim of evidence.length?evidence:[{kind,claim:'unconfirmed',relatedUrls:[],kindKnown:true}]) {
-      records.push(publicRecord({kind:claim.kind,url,at,summary,claim:claim.claim,scope:text(event.scope),sourceSite:'codexreset.dev',
+      records.push(publicRecord({kind:claim.kind,url,at,summary,timeText:claim.timeText,claim:claim.claim,scope:text(event.scope),sourceSite:'codexreset.dev',
         statementBasis:'site',kindKnown:true,relatedUrls:claim.relatedUrls,correction:null,
         sourceHint:claim.claim==='unconfirmed'&&at&&now-Date.parse(at)<MAX_AGE_MS?'recent':null,
         evidenceUpdatedAt:checked,evidenceFresh:sourceFresh(checked,now)}));

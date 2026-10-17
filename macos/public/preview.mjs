@@ -15,12 +15,17 @@ export function parsePreviewTime(value,publishedAt) {
   if(absolute&&Number.isFinite(stamp(absolute[1])))return {...empty,scheduleText:absolute[0],scheduledAt:new Date(stamp(absolute[1])).toISOString(),schedulePrecision:/^by/i.test(absolute[0])?'deadline':'instant'};
   const utc=text.match(/\b(?:at|by) ([01]?\d|2[0-3]):([0-5]\d) (UTC|GMT)\b/i);
   if(utc) {
-    const prefix=text.slice(0,utc.index),qualifier=prefix.match(/\b(tomorrow|today|on\s+[^.;!?]+|next\s+[^.;!?]+)\s*$/i);
-    if(qualifier&&!/^(?:tomorrow|today)\s*$/i.test(qualifier[1]))return {...empty,scheduleText:qualifier[0].trim()+' '+utc[0],schedulePrecision:'text'};
+    const prefix=text.slice(0,utc.index),suffix=text.slice(utc.index+utc[0].length);
+    const before=prefix.match(/\b(tomorrow|today|on\s+[^.;!?]+|next\s+[^.;!?]+)\s*$/i);
+    const after=suffix.match(/^\s+(tomorrow\b|today\b|on\s+[^.;!?]+|next\s+[^.;!?]+)/i);
+    const qualifiers=[before?.[1],after?.[1]].filter(Boolean).map(value=>value.trim());
+    const scheduleText=[before?.[0].trim(),utc[0],after?.[0].trim()].filter(Boolean).join(' ');
+    if(qualifiers.some(value=>!/^(?:tomorrow|today)$/i.test(value))||new Set(qualifiers.map(value=>value.toLowerCase())).size>1)
+      return {...empty,scheduleText,schedulePrecision:'text'};
     const date=new Date(published);
-    if(qualifier&&/^tomorrow/i.test(qualifier[1]))date.setUTCDate(date.getUTCDate()+1);
+    if(qualifiers.some(value=>/^tomorrow$/i.test(value)))date.setUTCDate(date.getUTCDate()+1);
     date.setUTCHours(Number(utc[1]),Number(utc[2]),0,0);
-    if(date.getTime()>=published)return {...empty,scheduleText:(qualifier?qualifier[0].trim()+' ':'')+utc[0],scheduledAt:date.toISOString(),schedulePrecision:/^by/i.test(utc[0])?'deadline':'instant'};
+    if(date.getTime()>=published)return {...empty,scheduleText,scheduledAt:date.toISOString(),schedulePrecision:/^by/i.test(utc[0])?'deadline':'instant'};
   }
   const vague=text.match(/\b(?:by EOD(?:\s+(?:PST|PDT|PT|UTC|GMT)(?: time)?)?|tomorrow|tonight|soon|later today)\b/i);
   return vague?{...empty,scheduleText:vague[0],schedulePrecision:'text'}:empty;

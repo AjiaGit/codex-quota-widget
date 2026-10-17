@@ -80,3 +80,56 @@ test('the sole source action follows the completion statement actually displayed
   const shown=deriveAnnouncementsView({items:[row]},now,'UTC','en').rows[0];
   assert.equal(shown.sourceUrl,c);
 });
+test('a tomorrow qualifier after a UTC clock uses the next date',()=>{
+  assert.equal(parsePreviewTime('Global reset at 07:00 UTC tomorrow.','2026-10-17T02:00:00Z').scheduledAt,'2026-10-18T07:00:00.000Z');
+});
+for(const suffix of ['on October 19','next Monday'])test(`a calendar qualifier after a UTC clock stays literal: ${suffix}`,()=>{
+  const result=parsePreviewTime(`Global reset at 07:00 UTC ${suffix}.`,'2026-10-17T02:00:00Z');
+  assert.equal(result.scheduledAt,null);
+  assert.equal(result.scheduleText,`at 07:00 UTC ${suffix}`);
+});
+test('a mixed original binds each reset kind to its own promised time',async()=>{
+  const f=await fixture(),a=post('320','We will grant a banked reset in 1 hour. Global reset at 07:00 UTC.');
+  await f.send([a]);
+  const rows=f.store.state.items;
+  assert.equal(rows.find(row=>row.kind==='banked').scheduledAt,'2026-10-17T02:59:00.000Z');
+  assert.equal(rows.find(row=>row.kind==='regular').scheduledAt,'2026-10-17T07:00:00.000Z');
+  assert.deepEqual(f.store.alerts.unread.map(row=>row.id),[a.url+'#regular']);
+});
+test('a mixed original keeps the account scope attached to its own reset kind',async()=>{
+  const f=await fixture(),a=post('329','We will grant a banked reset in 1 hour for paid accounts. Global reset at 07:00 UTC for all accounts.');
+  await f.send([a]);
+  assert.equal(f.store.state.items.find(row=>row.kind==='banked').scope,'paid');
+  assert.equal(f.store.state.items.find(row=>row.kind==='regular').scope,'all');
+});
+for(const partial of [false,true])test(`a chained time reply updates one canonical preview (${partial?'partial':'full'} feed)`,async()=>{
+  const f=await fixture(),a=post('321','We will perform a global reset.',now-180000),
+    b=post('322','Landing within the next 2 hours',now-120000,a),c=post('323','Global reset at 06:00 UTC.',now-60000,b);
+  await f.send([a,b]);await f.ack();await f.send(partial?[c]:[a,b,c]);
+  assert.equal(f.store.state.items.length,1);
+  assert.equal(f.store.state.items[0].scheduledAt,'2026-10-17T06:00:00.000Z');
+  assert.equal(f.store.state.items[0].previewSourceUrl,c.url);
+  assert.deepEqual(f.store.alerts.unread.map(row=>row.id),[a.url+'#regular']);
+  await f.ack();await f.send([a,b,c]);assert.deepEqual(f.store.alerts.unread,[]);
+});
+test('an explicitly replacing scope reply updates the original preview instead of leaving contradictory notices',async()=>{
+  const f=await fixture(),a=post('324','Global reset at 05:00 UTC for all accounts.',now-120000),
+    b=post('325','Global reset at 06:00 UTC for paid accounts only; this replaces the previous time and scope.',now-60000,a);
+  await f.send([a]);await f.ack();await f.send([a,b]);
+  assert.equal(f.store.state.items.length,1);assert.equal(f.store.state.items[0].scope,'paid');
+  assert.equal(f.store.state.items[0].scheduledAt,'2026-10-17T06:00:00.000Z');
+  assert.deepEqual(f.store.alerts.unread.map(row=>row.id),[a.url+'#regular']);
+  await f.ack();await f.send([a,b]);assert.deepEqual(f.store.alerts.unread,[]);
+});
+test('cancelling a verified campaign root retires its unique time reply and alerts once',async()=>{
+  const f=await fixture(),a=post('326','Day 13 / Reset',now-120000),
+    b=post('327','Landing within the next 2 hours',now-60000,a),c=post('328','Global reset cancelled.',now,a);
+  await f.send([a,b]);assert.equal(f.store.alerts.unread.length,1);await f.ack();
+  await f.send([a,c]);
+  const original=[...f.store.state.items,...f.store.state.history].find(row=>row.sourceUrl===b.url);
+  assert.equal(original.correction,'cancelled');assert.equal(original.scheduledAt,null);
+  assert.equal(f.store.state.items.some(row=>row.sourceUrl===b.url),false);
+  assert.deepEqual(f.store.alerts.unread.map(row=>row.id),[c.url+'#regular']);
+  await f.ack();await f.send([a,b,c]);assert.deepEqual(f.store.alerts.unread,[]);
+  assert.equal(f.store.state.items.some(row=>row.sourceUrl===b.url),false);
+});
