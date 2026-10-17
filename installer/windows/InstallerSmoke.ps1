@@ -570,7 +570,7 @@ http.createServer(async(req,res)=>{
   } else if(req.url==='/api/external') {
     const now=fixtureNow;
     res.end(JSON.stringify({status:'ok',lastGlobal:null,forecast:{next24h:12,next48h:25,next7d:61,sourceUpdatedAt:new Date(now).toISOString()},announcements:{status:'ok',stale:false,sourceUpdatedAt:new Date(now).toISOString(),history:[archiveOldest,completed,archived,archiveRecent,archiveOlder],items:[
-      {id:'fixture-announcement-banked-id',kind:'banked',certainty:'announced',announcedAt:new Date(now-86400000).toISOString(),scheduledAt:new Date(now+86400000).toISOString(),scheduledDate:null,deliveredAt:null,scope:'paid',scopeLabel:null,sourceUrl:'https://example.org/banked-announcement',deliverySourceUrl:null,summary:'Confirmed banked reset grant for paid accounts',summaryZh:'已确认向付费账号赠送重置次数'},
+      {id:'fixture-announcement-banked-id',kind:'banked',certainty:'announced',announcedAt:new Date(now-10800000).toISOString(),scheduledAt:new Date(now+86400000).toISOString(),scheduledDate:null,deliveredAt:null,scope:'paid',scopeLabel:null,sourceUrl:'https://example.org/banked-announcement',deliverySourceUrl:null,summary:'Confirmed banked reset grant for paid accounts',summaryZh:'已确认向付费账号赠送重置次数'},
       completed,earlier
     ]}}));
   }
@@ -605,9 +605,9 @@ http.createServer(async(req,res)=>{
         $element = [Windows.Automation.AutomationElement]::FromHandle($handle)
         $creditText=if ($language -eq 'en') {'Available resets 2'} else {'可用重置卡 2 张'}
         $moreText=Get-WidgetText 'moreMessage' $language
-        $activityMoreText=Get-WidgetText 'activityMore' $language @(3)
+        $activityMoreText=Get-WidgetText 'activityHistory' $language @(4)
         $activityFinalMoreText=Get-WidgetText 'activityMore' $language @(1)
-        $activityLessText=Get-WidgetText 'activityLess' $language
+        $activityLessText=Get-WidgetText 'historyCollapse' $language
         $sourcesText=Get-WidgetText 'dataSources' $language
         $expectedIds=@('fixture-announcement-regular-id','fixture-announcement-banked-id','fixture-history-recent-id','fixture-earlier-id','fixture-history-id','fixture-history-older-id','fixture-history-oldest-id')
         $allRecords=@(foreach ($id in $expectedIds) {
@@ -623,6 +623,8 @@ http.createServer(async(req,res)=>{
             $expectedLabel=(Get-WidgetText 'publicType' $language)+' · '+(Get-WidgetText $(if ($completed) {'categoryComplete'} else {'categoryPreview'}) $language)
             [pscustomobject]@{id=$id;fact=$fact;title=$expectedTitle;label=$expectedLabel;attribution=(Get-WidgetText 'unknownAttribution' $language)}
         })
+        $currentRecords=@($allRecords | Where-Object {$_.id -in @('fixture-announcement-regular-id','fixture-announcement-banked-id','fixture-earlier-id')})
+        $historicalRecords=@($allRecords | Where-Object {$_.id -notin $currentRecords.id})
         Wait-Until {
             $script:layoutNames=Get-VisibleText $handle $ui.Id
             $script:layoutNames.Contains($creditText) -and $script:layoutNames.Contains((Get-WidgetText 'activityHeading' $language))
@@ -706,31 +708,30 @@ http.createServer(async(req,res)=>{
         Assert-InlineWindow $handle $ui.Id $language
         Save-UiEvidence $element $language 'public-message-direct'
 
-        # Current and historical rows form one chronological list. Each scan
-        # walks the actual viewport so offscreen virtualization cannot hide a
-        # missing row, a duplicate completed record, or an incorrect page size.
-        Assert-ActivityPage $handle $ui.Id $allRecords @($allRecords | Select-Object -First 3) $language 'activity-first-3'
-        Assert-True (@(Get-VisibleControls $handle $ui.Id | Where-Object {$_.Text -ceq $activityLessText}).Count -eq 0) 'Collapse was offered before loading more records.'
+        # Current records remain visible; folded history materializes only loaded
+        # batches. Scan actual viewport controls and retain all order/dedup checks.
+        Assert-ActivityPage $handle $ui.Id $allRecords $currentRecords $language 'activity-current-3'
+        Assert-True (@(Get-VisibleControls $handle $ui.Id | Where-Object {$_.Text -ceq $activityLessText}).Count -eq 0) 'History collapse was offered while history was folded.'
         Invoke-UiButton $handle $handle $ui.Id $activityMoreText
         Wait-Until {
             $text=Get-VisibleText $handle $ui.Id
-            $text.Contains($activityLessText) -and $text.Contains($activityFinalMoreText) -and -not $text.Contains($activityMoreText)
-        } 'Loading the second three-record batch did not update pagination.'
+            $text.Contains($activityLessText) -and $text.Contains($activityFinalMoreText)
+        } 'History did not open with the first three archived records.'
         Assert-InlineWindow $handle $ui.Id $language
-        Assert-ActivityPage $handle $ui.Id $allRecords @($allRecords | Select-Object -First 6) $language 'activity-next-6'
+        Assert-ActivityPage $handle $ui.Id $allRecords @($currentRecords+@($historicalRecords | Select-Object -First 3)) $language 'history-first-3'
         Invoke-UiButton $handle $handle $ui.Id $activityFinalMoreText
         Wait-Until {
             $text=Get-VisibleText $handle $ui.Id
-            $text.Contains($activityLessText) -and -not $text.Contains($activityFinalMoreText) -and -not $text.Contains($activityMoreText)
-        } 'Loading the final record did not reach the end of the list.'
-        Assert-ActivityPage $handle $ui.Id $allRecords $allRecords $language 'activity-all-7'
+            $text.Contains($activityLessText) -and -not $text.Contains($activityFinalMoreText)
+        } 'The final historical record did not load.'
+        Assert-ActivityPage $handle $ui.Id $allRecords @($currentRecords+$historicalRecords) $language 'history-all-4'
         Invoke-UiButton $handle $handle $ui.Id $activityLessText
-        Wait-Until {
-            $text=Get-VisibleText $handle $ui.Id
-            $text.Contains($activityMoreText) -and -not $text.Contains($activityLessText)
-        } 'Unified activity did not collapse to the latest three records.'
+        Wait-Until {-not (Get-VisibleText $handle $ui.Id).Contains($activityLessText)} 'History did not collapse.'
         Assert-InlineWindow $handle $ui.Id $language
-        Assert-ActivityPage $handle $ui.Id $allRecords @($allRecords | Select-Object -First 3) $language 'activity-back-to-3'
+        Assert-ActivityPage $handle $ui.Id $allRecords $currentRecords $language 'history-folded'
+        Invoke-UiButton $handle $handle $ui.Id $activityMoreText
+        Assert-ActivityPage $handle $ui.Id $allRecords @($currentRecords+@($historicalRecords | Select-Object -First 3)) $language 'history-reopened-3'
+        Invoke-UiButton $handle $handle $ui.Id $activityLessText
 
         Invoke-UiButton $handle $handle $ui.Id $sourcesText
         Wait-Until {(Get-VisibleText $handle $ui.Id).Contains('codexreset.dev')} 'Data sources did not expand inline.'

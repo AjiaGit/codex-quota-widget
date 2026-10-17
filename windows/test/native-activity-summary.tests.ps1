@@ -34,14 +34,14 @@ $rows=@(0..6 | ForEach-Object {[pscustomobject]@{key=('p'+$_);id=('p'+$_);kind='
 $activity=[pscustomobject]@{active=@($rows[0],$rows[2],$rows[4]);history=@($rows[1],$rows[3],$rows[5],$rows[6])}
 foreach($limit in @(0,3)) {
     $first=Get-WidgetVisibleActivityView $activity $limit
-    Check ($first.active.id -join ',') 'p0,p1,p2' 'First page contains only the latest three'
-    Check $first.nextCount 3 'Next batch is bounded to three'
+    Check ($first.active.id -join ',') 'p0,p2,p4' 'Current messages exclude folded history'
+    Check $first.nextCount 0 'No more current records'
+    Check $first.history.Count 0 'History starts folded'
     Check $first.canCollapse $false 'First page cannot collapse further'
 }
-$second=Get-WidgetVisibleActivityView $activity 6
-Check $second.active.Count 6 'Second page appends three'
-Check $second.nextCount 1 'Last batch retains one remaining record'
-Check $second.canCollapse $true 'Expanded page can collapse'
-Check (Get-WidgetVisibleActivityView $activity 9).active.Count 7 'Every record remains accessible'
-Check (Get-WidgetVisibleActivityView $activity).active.Count 3 'Default returns to three'
-Write-Output 'PASS chronological 3, 6, 7 and collapse-to-3 pagination'
+$firstHistory=Get-WidgetVisibleActivityView $activity 3 $true 3
+Check ($firstHistory.history.id -join ',') 'p1,p3,p5' 'History starts at three'
+Check $firstHistory.historyNextCount 1 'Last batch retains one remaining record'
+Check (Get-WidgetVisibleActivityView $activity 3 $true 6).history.Count 4 'Every historical record remains accessible'
+Check (Get-WidgetVisibleActivityView $activity).history.Count 0 'Default folds history again'
+Write-Output 'PASS independent current records, historical 3/4 pagination and fold'

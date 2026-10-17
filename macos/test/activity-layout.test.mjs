@@ -151,13 +151,13 @@ test('compact planned times keep an explicit offset when a future event crosses 
   assert.doesNotMatch(row.display.detailFacts.join(' '),/UTC-07:00/);
 });
 
-test('unloaded batches remain unread while current and historical messages share the first page',()=>{
+test('folded historical batches remain unread until explicitly opened',()=>{
   const records=Array.from({length:6},(_,i)=>({id:'record-'+i,kind:'regular',announcedAt:6-i}));
   const activity={rows:records.slice(0,3),history:records.slice(3)};
   const alerts={unread:records};
   assert.equal(presentation.announcementIdsForReading(alerts,presentation.visibleAnnouncementView(activity),false).length,0);
   assert.deepEqual(presentation.announcementIdsForReading(alerts,presentation.visibleAnnouncementView(activity),true),records.slice(0,3).map(row=>row.id));
-  assert.deepEqual(presentation.announcementIdsForReading(alerts,presentation.visibleAnnouncementView(activity,{limit:10}),true),records.map(row=>row.id));
+  assert.deepEqual(presentation.announcementIdsForReading(alerts,presentation.visibleAnnouncementView(activity,{limit:10,historyOpen:true,historyLimit:10}),true),records.map(row=>row.id));
 });
 
 test('negated and conditional source summaries never turn into visible claims of completion',()=>{

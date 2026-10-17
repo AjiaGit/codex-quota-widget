@@ -70,7 +70,8 @@ Test-Case 'personal recoveries share reset news and move into the same history a
     Assert-Equal $view.active[1].phase 'announced' 'Personal recovery does not confirm public delivery'
     $later=Get-WidgetResetActivityView $data $feed 'en' ($now.AddHours(24))
     Assert-Equal $later.history[0].kind 'recovery' 'Older recovery shares history'
-    Assert-Equal $later.active.Count 1 'Pending public announcement remains active'
+    Assert-Equal $later.active.Count 0 'Old unresolved non-preview announcements archive quietly'
+    Assert-Equal $later.history.Count 2 'Both old records remain available without completion inference'
 }
 Test-Case 'confirmed announcements move from upcoming to waiting without inferred delivery' {
     $row = New-Event 'hidden-event-key'; $row.scheduledAt=$now.AddMinutes(1).ToString('o')

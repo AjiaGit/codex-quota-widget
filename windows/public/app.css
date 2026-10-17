@@ -121,3 +121,6 @@ body[data-embedded="true"] .source-footer { padding-top:10px; }
 }
 
 .announcement .message-body { color:var(--text); white-space:pre-line; overflow-wrap:anywhere; }
+
+.activity-history { padding:8px 0 0; border:0; }
+.activity-history > summary { display:inline-flex; font-size:13px; color:var(--muted); font-weight:400; text-decoration:underline; text-underline-offset:3px; }

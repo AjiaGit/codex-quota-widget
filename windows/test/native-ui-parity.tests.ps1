@@ -50,11 +50,11 @@ Test-Case 'unified records follow the Mac chronological three-row policy' {
  $rows=@(0..5 | ForEach-Object {[pscustomobject]@{key=('p'+$_);id=('p'+$_);kind='regular';sortAt=(10-$_)}})
  $activity=[pscustomobject]@{active=$rows[0..2];history=$rows[3..5]}
  $view=Get-WidgetVisibleActivityView $activity
- Assert-Equal ($view.active.key -join ',') 'p0,p1,p2' 'Current and archive share the first three'
+ Assert-Equal ($view.active.key -join ',') 'p0,p1,p2' 'Only current records occupy the first page'
  $alerts=[pscustomobject]@{ids=@($rows.id)}
- Assert-Equal ((Get-WidgetAnnouncementReadIds $alerts $view $true) -join ',') 'p0,p1,p2' 'Unloaded records remain unread'
- $expanded=Get-WidgetVisibleActivityView $activity 6
- Assert-Equal ((Get-WidgetAnnouncementReadIds $alerts $expanded $true) -join ',') 'p0,p1,p2,p3,p4,p5' 'Loaded record can be acknowledged'
+ Assert-Equal ((Get-WidgetAnnouncementReadIds $alerts $view $true) -join ',') 'p0,p1,p2' 'Folded records remain unread'
+ $expanded=Get-WidgetVisibleActivityView $activity 6 $true 3
+ Assert-Equal ((Get-WidgetAnnouncementReadIds $alerts $expanded $true) -join ',') 'p0,p1,p2,p3,p4,p5' 'Only loaded current and historical records can be acknowledged'
 }
  Test-Case 'public status uses the Mac cache and source freshness rules' {
  $external=[pscustomobject]@{status='ok';announcements=[pscustomobject]@{status='ok';stale=$false;sourceUpdatedAt=$now.ToString('o');lastFetchedAt=$now.ToUnixTimeMilliseconds();items=@();history=@()}}
@@ -418,13 +418,13 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
    Assert-Equal $form.Top $anchor.y 'Empty view starts at the user anchor'
    foreach($i in 1..50){$script:externalData.announcements.history+=,[pscustomobject]@{id=('https://example.invalid/FABRICATED-anchor-'+$i+'#regular');kind='regular';sourceUrl='https://example.invalid/FABRICATED';certainty='announced';announcedAt=$now.AddDays(-$i).ToString('o');deliveredAt=$now.AddDays(-$i).ToString('o')}}
    Show-External
-   Show-External
-   while($script:visibleActivityView.nextCount -gt 0){$activityMore.PerformClick()}
+   $historyToggle.PerformClick()
+   while($script:visibleActivityView.historyNextCount -gt 0){$historyMore.PerformClick()}
    Assert-Equal $form.Top $screen.Top 'Long history temporarily fits the full screen'
    Save-WindowPosition
    Assert-Equal (Read-WidgetJson $temp).detailY $anchor.y 'Temporary screen fitting must not overwrite the user anchor'
-   $activityLess.PerformClick()
-   Assert-Equal $script:announcementRows.Count 3 'Collapse returns to the first page'
+   $historyLess.PerformClick()
+   Assert-Equal $script:historyRows.Count 0 'Collapse unloads history and restores the anchor'
    $script:externalData.announcements.history=@();Show-External
    Assert-Equal $form.Top $anchor.y 'Fitting content returns to the user anchor'
    Save-WindowPosition
@@ -437,24 +437,28 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
  Test-Case 'unified pagination materializes only loaded rows and reuses unchanged native controls' {
   $oldExternal=$script:externalData
   try {
-   $script:activityLimit=3;$script:announcementRenderKey=''
+   $script:activityLimit=3;$script:historyLimit=3;$script:activityHistoryExpanded=$false;$script:announcementRenderKey=''
    $script:externalData=[pscustomobject]@{status='ok';announcements=[pscustomobject]@{status='ok';sourceUpdatedAt=$now.ToString('o');stale=$false;items=@();history=@()}}
    foreach($i in 1..50){$script:externalData.announcements.history+=,[pscustomobject]@{id=('https://example.invalid/FABRICATED-lazy-'+$i+'#regular');kind='regular';sourceUrl='https://example.invalid/FABRICATED';certainty='announced';announcedAt=$now.AddDays(-$i).ToString('o');deliveredAt=$now.AddDays(-$i).ToString('o')}}
    Show-External
-   Assert-Equal $activityRowsPanel.Controls.Count 3 'First page does not create fifty sets of native controls'
+   Assert-Equal $historyRowsPanel.Controls.Count 0 'Folded history creates no record controls'
+   Assert-Equal $activityEmpty.Text '暂无新消息' 'All archived records leave a clear empty message'
+   $historyToggle.PerformClick()
    Show-External
-   Assert-Equal $script:announcementRows.Count 3 'History initially creates only three recent records'
-   $first=$script:announcementRows[0];$activityMore.PerformClick()
-   Assert-Equal $script:announcementRows.Count 6 'More history appends three records'
-   if(-not [object]::ReferenceEquals($first,$script:announcementRows[0])){throw 'Appending history rebuilt previously shown controls'}
-   while($script:visibleActivityView.nextCount -gt 0){$activityMore.PerformClick()}
-   Assert-Equal $script:announcementRows.Count 50 'Every stored record is still accessible in batches'
-   Assert-Equal $script:visibleActivityView.nextCount 0 'No more action at the end'
-   $activityLess.PerformClick()
-   Assert-Equal $script:announcementRows.Count 3 'Reopening history starts with three records again'
-   $first=$script:announcementRows[0];Show-External
-   if(-not [object]::ReferenceEquals($first,$script:announcementRows[0])){throw 'An unchanged refresh rebuilt the history controls'}
-  }finally{$script:externalData=$oldExternal;$script:activityLimit=3;$script:announcementRenderKey='';Show-External}
+   Assert-Equal $script:historyRows.Count 3 'History initially creates only three recent records'
+   $first=$script:historyRows[0];$historyMore.PerformClick()
+   Assert-Equal $script:historyRows.Count 6 'More history appends three records'
+   if(-not [object]::ReferenceEquals($first,$script:historyRows[0])){throw 'Appending history rebuilt previously shown controls'}
+   while($script:visibleActivityView.historyNextCount -gt 0){$historyMore.PerformClick()}
+   Assert-Equal $script:historyRows.Count 50 'Every stored record is still accessible in batches'
+   Assert-Equal $script:visibleActivityView.historyNextCount 0 'No more action at the end'
+   $historyLess.PerformClick()
+   Assert-Equal $script:historyRows.Count 0 'Collapse removes historical controls'
+   $historyToggle.PerformClick()
+   Assert-Equal $script:historyRows.Count 3 'Reopening history starts with three records again'
+   $first=$script:historyRows[0];Show-External
+   if(-not [object]::ReferenceEquals($first,$script:historyRows[0])){throw 'An unchanged refresh rebuilt the history controls'}
+  }finally{$script:externalData=$oldExternal;$script:activityLimit=3;$script:historyLimit=3;$script:activityHistoryExpanded=$false;$script:announcementRenderKey='';Show-External}
  }
  Test-Case 'unchanged theme checks do not invalidate the visible native text tree' {
   Set-Theme
@@ -557,24 +561,43 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
  Test-Case 'current and archived rows share one native list without old disclosure entries' {
   $oldExternal=$script:externalData
   try {
-   $script:activityLimit=3;$script:announcementRenderKey=''
+   $script:activityLimit=3;$script:historyLimit=3;$script:activityHistoryExpanded=$false;$script:announcementRenderKey=''
    $script:externalData=[pscustomobject]@{status='ok';announcements=[pscustomobject]@{status='ok';sourceUpdatedAt=$now.ToString('o');stale=$false;history=@();items=@()}}
    foreach($i in 1..8){
     $row=[pscustomobject]@{id=('https://example.invalid/FABRICATED-unified-'+$i+'#regular');kind='regular';sourceUrl=('https://example.invalid/FABRICATED-unified-'+$i);certainty='announced';announcedAt=$now.AddHours(-$i).ToString('o');deliveredAt=$now.AddHours(-$i).ToString('o')}
     if($i -le 2){$script:externalData.announcements.items+=,$row}else{$script:externalData.announcements.history+=,$row}
    }
    Show-External
-   Assert-Equal $script:announcementRows.Count 3 'First three records share the list'
-   Assert-Equal $activityMore.Visible $true 'More is available'
+   Assert-Equal $script:announcementRows.Count 2 'Current messages remain visible outside history'
+   Assert-Equal $script:historyRows.Count 0 'History is folded initially'
+   $historyToggle.PerformClick()
+   Assert-Equal $script:historyRows.Count 3 'First three historical records load'
+   Assert-Equal $historyMore.Visible $true 'More is available'
    Assert-Equal $form.Controls.Find('earlier-updates-toggle',$true).Length 0 'No earlier entry'
-   Assert-Equal $form.Controls.Find('announcement-history-toggle',$true).Length 0 'No separate history entry'
-   $activityMore.PerformClick()
-   Assert-Equal $script:announcementRows.Count 6 'Next batch appends three records'
-   Assert-Equal $activityMore.Visible $true 'More remains available for the final batch'
-   $activityMore.PerformClick()
-   Assert-Equal $script:announcementRows.Count 8 'Final batch loads the remaining records'
-   Assert-Equal $activityMore.Visible $false 'More hides at the end'
-  }finally{$script:externalData=$oldExternal;$script:activityLimit=3;$script:announcementRenderKey='';Show-External}
+   Assert-Equal $form.Controls.Find('announcement-history-toggle',$true).Length 1 'One history entry inside activity'
+   $historyMore.PerformClick()
+   Assert-Equal $script:historyRows.Count 6 'Next historical batch appends three records'
+   Assert-Equal ($script:announcementRows.Count+$script:historyRows.Count) 8 'Every record remains accessible'
+   Assert-Equal $historyMore.Visible $false 'More hides at the end'
+  }finally{$script:externalData=$oldExternal;$script:activityLimit=3;$script:historyLimit=3;$script:activityHistoryExpanded=$false;$script:announcementRenderKey='';Show-External}
+ }
+ Test-Case 'current collapse preserves an independently expanded historical batch' {
+  $oldExternal=$script:externalData
+  try {
+   $script:activityLimit=3;$script:historyLimit=3;$script:activityHistoryExpanded=$false;$script:announcementRenderKey=''
+   $script:externalData=[pscustomobject]@{status='ok';announcements=[pscustomobject]@{status='ok';sourceUpdatedAt=$now.ToString('o');stale=$false;items=@();history=@()}}
+   foreach($i in 1..12){
+    $row=[pscustomobject]@{id=('https://example.invalid/FABRICATED-independent-'+$i+'#regular');kind='regular';sourceUrl=('https://example.invalid/FABRICATED-independent-'+$i);certainty='announced';announcedAt=$now.AddMinutes(-$i).ToString('o');deliveredAt=$now.AddMinutes(-$i).ToString('o')}
+    if($i -le 6){$script:externalData.announcements.items+=,$row}else{$script:externalData.announcements.history+=,$row}
+   }
+   Show-External;$activityMore.PerformClick();$historyToggle.PerformClick();$historyMore.PerformClick()
+   Assert-Equal $script:announcementRows.Count 6 'Current batch expanded to six'
+   Assert-Equal $script:historyRows.Count 6 'History independently expanded to six'
+   $activityLess.PerformClick()
+   Assert-Equal $script:announcementRows.Count 3 'Current collapse returns to three'
+   Assert-Equal $script:activityHistoryExpanded $true 'Current collapse leaves history open'
+   Assert-Equal $script:historyRows.Count 6 'Current collapse retains the loaded history batch'
+  }finally{$script:externalData=$oldExternal;$script:activityLimit=3;$script:historyLimit=3;$script:activityHistoryExpanded=$false;$script:announcementRenderKey='';Show-External}
  }
  Test-Case 'clicking the detail drag surface without moving preserves a temporary-fit anchor' {
   $oldPositions=$script:modePositions;$oldBounds=$form.Bounds;$oldAuto=$script:automaticDetailHeight
@@ -628,26 +651,26 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
    $form.ClientSize=[Drawing.Size]::new(606,500)
    $script:externalData=[pscustomobject]@{status='ok';announcements=[pscustomobject]@{status='ok';stale=$false;sourceUpdatedAt=$now.ToString('o');items=@();history=@()}}
    foreach($i in 1..50){$script:externalData.announcements.history+=,[pscustomobject]@{id=('https://example.invalid/FABRICATED-viewport-'+$i+'#regular');noticeVersion='FABRICATED-visible-version';kind='regular';sourceUrl='https://example.invalid/FABRICATED';certainty='announced';announcedAt=$now.AddDays(-$i).ToString('o');deliveredAt=$now.AddDays(-$i).ToString('o')}}
-   Show-External;while($script:visibleActivityView.nextCount -gt 0){$activityMore.PerformClick()};$body.AutoScrollPosition=[Drawing.Point]::Empty
+   Show-External;$historyToggle.PerformClick();while($script:visibleActivityView.historyNextCount -gt 0){$historyMore.PerformClick()};$body.AutoScrollPosition=[Drawing.Point]::Empty
    $node=$ast.Find({param($n) $n -is [Management.Automation.Language.InvokeMemberExpressionAst] -and $n.Expression.Extent.Text -eq '$body' -and $n.Member.Value -eq 'Add_Scroll'},$true)
    if(-not $node){throw 'Native scroll does not update the activity viewport'}
    & $node.Arguments[0].ScriptBlock.GetScriptBlock()
-   Assert-Equal $script:announcementRows.Count 50 'All fabricated records remain available'
-   Assert-Equal $script:announcementRows[-1].IsHandleCreated $false 'Offscreen history does not allocate hundreds of HWNDs on first expansion'
+   Assert-Equal $script:historyRows.Count 50 'All fabricated records remain available'
+   Assert-Equal $script:historyRows[-1].IsHandleCreated $false 'Offscreen history does not allocate hundreds of HWNDs on first expansion'
    if($body.AutoScrollMinSize.Height -le 6000){throw 'The full history scroll extent was truncated'}
    Add-Type -AssemblyName System.Net.Http
    $script:client=[pscustomobject]@{captured=@()}
    $script:client | Add-Member ScriptMethod PostAsync {param($url,$content);$this.captured=@(($content.ReadAsStringAsync().GetAwaiter().GetResult() | ConvertFrom-Json).ids | ForEach-Object {$_.id});[Threading.Tasks.Task]::FromResult(0)}
-   $script:noticeView=[pscustomobject]@{ids=@($script:visibleActivityView.active | ForEach-Object {$_.id});entries=@($script:visibleActivityView.active | ForEach-Object {[pscustomobject]@{id=$_.id;version=$_.noticeVersion}});hasUnread=$true}
+   $script:noticeView=[pscustomobject]@{ids=@($script:visibleActivityView.history | ForEach-Object {$_.id});entries=@($script:visibleActivityView.history | ForEach-Object {[pscustomobject]@{id=$_.id;version=$_.noticeVersion}});hasUnread=$true}
    $script:announcementReadTask=$null
    $nativeRead=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Start-AnnouncementRead'},$true)
    & $nativeRead.Body.GetScriptBlock()
-   $lastId=$script:visibleActivityView.active[-1].id
+   $lastId=$script:visibleActivityView.history[-1].id
    if($lastId -in $script:client.captured){throw 'An unshown final record was acknowledged before scrolling'}
    $body.AutoScrollPosition=[Drawing.Point]::new(0,$body.AutoScrollMinSize.Height)
    & $node.Arguments[0].ScriptBlock.GetScriptBlock()
-   Assert-Equal $script:announcementRows[-1].Visible $true 'The last record appears when scrolled into view'
-   Assert-Equal $script:announcementRows[0].Visible $false 'Rows scrolled out of view stop painting'
+   Assert-Equal $script:historyRows[-1].Visible $true 'The last record appears when scrolled into view'
+   Assert-Equal $script:historyRows[0].Visible $false 'Rows scrolled out of view stop painting'
    $script:announcementReadTask=$null
    if($script:announcementReadContent){$script:announcementReadContent.Dispose();$script:announcementReadContent=$null}
    & $nativeRead.Body.GetScriptBlock()
@@ -658,9 +681,9 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
    if($event){$handler=$event.Arguments[0].ScriptBlock.GetScriptBlock();$body.Add_MouseWheel($handler)}
    try {
     for($i=0;$i -lt 180;$i++){$wheel.Invoke($body,@([Windows.Forms.MouseEventArgs]::new([Windows.Forms.MouseButtons]::None,0,20,20,-120)))}
-    Assert-Equal $script:announcementRows[-1].Visible $true 'Actual mouse-wheel scrolling realizes the final record'
+    Assert-Equal $script:historyRows[-1].Visible $true 'Actual mouse-wheel scrolling realizes the final record'
    }finally{if($event){$body.Remove_MouseWheel($handler)}}
-  }finally{if($script:announcementReadContent -and $script:announcementReadContent -ne $oldReadContent){$script:announcementReadContent.Dispose()};$script:client=$oldClient;$script:noticeView=$oldNotice;$script:announcementReadTask=$oldReadTask;$script:announcementReadContent=$oldReadContent;$script:externalData=$oldExternal;$script:activityLimit=3;$script:announcementRenderKey='';$script:automaticDetailHeight=$oldAuto;$form.Bounds=$oldBounds;$body.AutoScrollPosition=[Drawing.Point]::Empty;Show-External}
+  }finally{if($script:announcementReadContent -and $script:announcementReadContent -ne $oldReadContent){$script:announcementReadContent.Dispose()};$script:client=$oldClient;$script:noticeView=$oldNotice;$script:announcementReadTask=$oldReadTask;$script:announcementReadContent=$oldReadContent;$script:externalData=$oldExternal;$script:activityLimit=3;$script:historyLimit=3;$script:activityHistoryExpanded=$false;$script:announcementRenderKey='';$script:automaticDetailHeight=$oldAuto;$form.Bounds=$oldBounds;$body.AutoScrollPosition=[Drawing.Point]::Empty;Show-External}
  }
  Test-Case 'a fast repeated public retry failure restores the retry action' {
   Add-Type -AssemblyName System.Net.Http

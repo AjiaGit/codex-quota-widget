@@ -91,7 +91,8 @@ test('active announcements show the newest publication first without changing th
   const original=JSON.stringify(state);
   for(const language of ['zh-CN','en']) {
     const result=view.deriveAnnouncementsView(state,time,'Asia/Shanghai',language);
-    assert.deepEqual(result.rows.map(row=>row.id),['oct7','oct5','unknown']);
+    assert.deepEqual(result.rows.map(row=>row.id),['oct7','unknown']);
+    assert.deepEqual(result.history.map(row=>row.id),['oct5']);
   }
   assert.equal(JSON.stringify(state),original);
 });
@@ -298,8 +299,9 @@ test('historical announcements without delivery evidence never imply they are st
     assert.equal(historical.history[0].completedText, '');
     assert.equal(historical.history[0].deliverySourceUrl, null);
     const active = view.deriveAnnouncementsView({ status: 'ok', items: [item], history: [] }, now, 'UTC', language);
-    assert.equal(active.rows[0].phase, 'announced', 'active announcements retain their pending state');
-    assert.equal(active.rows[0].status, locale.t(language, 'announcedWaiting'));
+    assert.equal(active.rows.length,0,'Old unresolved grants are automatically archived');
+    assert.equal(active.history[0].phase,'unknown');
+    assert.equal(active.history[0].status,status);
   }
 });
 
@@ -379,42 +381,46 @@ test('hidden compact details never acknowledge notices and a visible detail ackn
   assert.deepEqual(view.announcementIdsForReading(null, displayed, true), []);
 });
 
-test('current and archived records share one chronological three-row page and unread boundary', () => {
+test('current records page independently while archived records stay folded', () => {
   const current = Array.from({length:6}, (_,i)=>({id:`current-${i}`,kind:'regular',announcedAt:120-i*20}));
   const history = Array.from({length:6}, (_,i)=>({id:`archive-${i}`,kind:'banked',announcedAt:110-i*20}));
   const activity = {rows:current,history};
   const alerts = {unread:[...current,...history]};
   const first = view.visibleAnnouncementView(activity);
-  assert.deepEqual(first.rows.map(row=>row.id),['current-0','archive-0','current-1']);
+  assert.deepEqual(first.rows.map(row=>row.id),['current-0','current-1','current-2']);
   assert.equal(first.nextCount,3);
   assert.equal(first.canCollapse,false);
-  assert.deepEqual(view.announcementIdsForReading(alerts,first,true).sort(),['current-0','archive-0','current-1'].sort());
+  assert.deepEqual(view.announcementIdsForReading(alerts,first,true).sort(),['current-0','current-1','current-2'].sort());
   const second = view.visibleAnnouncementView(activity,{limit:6});
   assert.equal(second.rows.length,6);
-  assert.equal(second.nextCount,3);
+  assert.equal(second.nextCount,0);
   assert.equal(second.canCollapse,true);
   const all = view.visibleAnnouncementView(activity,{limit:12});
-  assert.equal(all.rows.length,12);
+  assert.equal(all.rows.length,6);
   assert.equal(all.nextCount,0);
+  assert.equal(all.historyTotal,6);
+  assert.deepEqual(all.history,[]);
   assert.equal(activity.rows.length,6);
   assert.equal(activity.history.length,6);
 });
 
-test('an archive-only unified list loads three at a time without marking later pages read', () => {
+test('an archive-only disclosure loads three at a time without marking later pages read', () => {
   const history = Array.from({length:12}, (_,i)=>({id:`history-${i}`,kind:'regular'}));
   const activity = {rows:[],history};
   const alerts = {unread:history};
-  const first = view.visibleAnnouncementView(activity);
-  assert.deepEqual(first.rows.map(row=>row.id),['history-0','history-1','history-2']);
-  assert.equal(first.nextCount,3);
-  assert.deepEqual(view.announcementIdsForReading(alerts,first,true),first.rows.map(row=>row.id));
-  const second = view.visibleAnnouncementView(activity,{limit:6});
-  assert.equal(second.rows.length,6);
-  assert.equal(second.nextCount,3);
+  const first = view.visibleAnnouncementView(activity,{historyOpen:true});
+  assert.deepEqual(first.history.map(row=>row.id),['history-0','history-1','history-2']);
+  assert.equal(first.historyNextCount,3);
+  assert.deepEqual(view.announcementIdsForReading(alerts,first,true),first.history.map(row=>row.id));
+  const second = view.visibleAnnouncementView(activity,{historyOpen:true,historyLimit:6});
+  assert.equal(second.history.length,6);
+  assert.equal(second.historyNextCount,3);
   assert.equal(view.announcementIdsForReading(alerts,second,true).includes('history-6'),false);
-  const all = view.visibleAnnouncementView(activity,{limit:12});
-  assert.equal(all.rows.length,12);
-  assert.equal(all.nextCount,0);
+  const all = view.visibleAnnouncementView(activity,{historyOpen:true,historyLimit:12});
+  assert.equal(all.history.length,12);
+  assert.equal(all.historyNextCount,0);
+  assert.equal(all.historyTotal,12);
+  assert.deepEqual(all.rows,[]);
   assert.equal(history.length,12,'Pagination never truncates stored history');
 });
 

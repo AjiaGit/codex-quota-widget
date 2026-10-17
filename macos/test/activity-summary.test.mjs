@@ -71,15 +71,16 @@ test('three-record batches preserve chronology, collapse and unread boundaries w
   const before=JSON.stringify(activity),alerts={unread:rows};
   for(const limit of [undefined,0,NaN,-1]) {
     const first=visibleAnnouncementView(activity,{limit});
-    assert.deepEqual(first.rows.map(row=>row.id),['row-0','row-1','row-2']);
-    assert.equal(first.nextCount,3);assert.equal(first.canCollapse,false);
-    assert.deepEqual(announcementIdsForReading(alerts,first,true),['row-0','row-1','row-2']);
+    assert.deepEqual(first.rows.map(row=>row.id),['row-0','row-2','row-4']);
+    assert.equal(first.nextCount,1);assert.equal(first.canCollapse,false);
+    assert.deepEqual(announcementIdsForReading(alerts,first,true),['row-0','row-2','row-4']);
   }
   const second=visibleAnnouncementView(activity,{limit:6});
-  assert.equal(second.rows.length,6);assert.equal(second.nextCount,1);assert.equal(second.canCollapse,true);
-  assert.equal(announcementIdsForReading(alerts,second,true).includes('row-6'),false);
+  assert.equal(second.rows.length,4);assert.equal(second.nextCount,0);assert.equal(second.canCollapse,true);
+  assert.equal(announcementIdsForReading(alerts,second,true).includes('row-1'),false);
   const all=visibleAnnouncementView(activity,{limit:9});
-  assert.equal(all.rows.length,7);assert.equal(all.nextCount,0);
+  assert.equal(all.rows.length,4);assert.equal(all.nextCount,0);
+  assert.equal(visibleAnnouncementView(activity,{historyOpen:true}).history.length,3);
   assert.equal(visibleAnnouncementView(activity,{limit:3}).rows.length,3);
   assert.equal(JSON.stringify(activity),before);
 });

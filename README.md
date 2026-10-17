@@ -57,6 +57,8 @@ Public reset announcements and delivery records from [codex-reset.com](https://c
 
 The footer states **Auto-refresh: quota every 1 min · public data every 10 min**. The widget reads structured tracker APIs; it does not search X or use an AI model. Phrase matching on the supplied original text is conservative and may miss unfamiliar wording. Provider records may be delayed or incomplete. See [terms and data sources](docs/TERMINOLOGY.md) for official reset names, translated labels and source boundaries.
 
+Messages and records automatically move older entries into folded history. All valid quota-reset previews stay visible; expired previews retain their uncertain completion status. History opens three records at a time and can collapse. With healthy sources and no current records, the section says **No new messages**. Important linked changes resurface and can remind again.
+
 ## Privacy and troubleshooting
 
 The local service uses the read-only `account/read` and `account/rateLimits/read` methods of [Codex App Server](https://learn.chatgpt.com/docs/app-server). It listens only on loopback. No OpenAI API key is required. Account quota and login information are not sent to the public reset sites; settings and logs stay on your computer.

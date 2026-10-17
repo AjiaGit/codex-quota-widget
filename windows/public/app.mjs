@@ -59,6 +59,17 @@ function announcementAttribution(item,confirmed,sourceHint,language) {
 }
 export function deriveAnnouncementsView(state,now=Date.now(),timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone,language='en') {
   const rows=[],history=[],seen=new Set();
+  const records=[...(state?.items||[]),...(state?.history||[])];
+  const linkedPreviewUpdate=item=>{
+    if(item.kind!=='regular'||item.statementBasis!=='original'||!['cancelled','delayed'].includes(item.correction))return false;
+    const recent=value=>Number.isFinite(value)&&value<=now&&now-value<PUBLIC_MAX_AGE;
+    const publishedRecently=recent(Date.parse(item.announcedAt));
+    const related=row=>(item.relatedUrls||[]).some(url=>[row.sourceUrl,row.previewSourceUrl,...(row.previewAliases||[])].includes(url));
+    const notifiedAt=state?.previewTrace?.find(trace=>trace.id===item.id)?.notifiedAt;
+    return item.previewPriority===true&&(publishedRecently||recent(notifiedAt)||records.some(row=>isResetPreview(row,now)&&related(row)))||
+      publishedRecently&&records.some(row=>row.announcementBasis==='original'&&related(row));
+  };
+  const keepCurrent=item=>!item.sourceWithdrawn&&(isResetPreview(item,now)||linkedPreviewUpdate(item));
   const renderItem=(item,historical=false)=>{
     if(!['banked','regular'].includes(item?.kind)||!safeSource(item.sourceUrl))return null;
     const delivered=Date.parse(item.deliveredAt),announced=Date.parse(item.announcedAt),scheduled=Date.parse(item.scheduledAt);
@@ -99,8 +110,7 @@ export function deriveAnnouncementsView(state,now=Date.now(),timeZone=Intl.DateT
       !historyCopy&&phase==='waiting'?t(language,'waiting'+kindKey):!confirmed&&(historyCopy||phase==='unknown')?t(language,'unknown'+kindKey):''].filter(Boolean).join(' ');
     let compactPlanned=!explicit?'':plannedDate?t(language,scheduleKey,{time:Number.isFinite(scheduled)?formatCompactLocalDate(scheduled,timeZone,language,now):plannedDate}):!confirmed&&!historical?t(language,unknownScheduleKey):'';
     const genuinePreview=isResetPreview(item,now);
-    const previewUpdate=item.kind==='regular'&&item.statementBasis==='original'&&['cancelled','delayed'].includes(item.correction)&&
-      (item.previewPriority===true || now-announced<PUBLIC_MAX_AGE&&(item.relatedUrls||[]).some(url=>[...(state?.items||[]),...(state?.history||[])].some(row=>[row.sourceUrl,...(row.previewAliases||[])].includes(url)&&row.announcementBasis==='original')));
+    const previewUpdate=linkedPreviewUpdate(item);
     const previewPriority=genuinePreview||previewUpdate;
     if(explicit&&!confirmed&&item.scheduleText) {
       const key=item.scheduledAt?(item.schedulePrecision==='window'||item.schedulePrecision==='deadline'?'previewBefore':'previewAround'):'previewLiteral';
@@ -126,11 +136,12 @@ export function deriveAnnouncementsView(state,now=Date.now(),timeZone=Intl.DateT
         status:expiredPreview?t(language,'previewExpired'):displayStatus,summary:''}};
   };
   for(const item of state?.items||[]){
-    const hintExpired=item.sourceHint&&item.certainty!=='announced'&&!item.deliveredAt&&now-Date.parse(item.announcedAt)>=PUBLIC_MAX_AGE;
-    const row=renderItem(item,Boolean(hintExpired));if(!row)continue;
-    if(row.phase==='archived'||hintExpired||item.sourceWithdrawn)history.push(row);else rows.push(row);seen.add(row.id);
+    const expired=!item.deliveredAt&&!keepCurrent(item)&&(now-Date.parse(item.announcedAt)>=PUBLIC_MAX_AGE||
+      item.kind==='regular'&&item.announcementBasis==='original'&&!item.correction&&previewDeadline(item)<=now);
+    const row=renderItem(item,Boolean(expired));if(!row)continue;
+    if(row.phase==='archived'||expired||item.sourceWithdrawn)history.push(row);else rows.push(row);seen.add(row.id);
   }
-  for(const item of state?.history||[]){const row=renderItem(item,true);if(row&&!seen.has(row.id)){history.push(row);seen.add(row.id);}}
+  for(const item of state?.history||[]){const current=keepCurrent(item),row=renderItem(item,!current);if(row&&!seen.has(row.id)){(current?rows:history).push(row);seen.add(row.id);}}
   const newestFirst=(a,b)=>a.announcedAt===b.announcedAt?0:(b.announcedAt??-Infinity)-(a.announcedAt??-Infinity);
   rows.sort(newestFirst);history.sort(newestFirst);
   return {rows,history,notice:state?.stale||state?.status!=='ok'||!publicSourceFresh(state,now)?t(language,rows.length?'informationPending':'announcementsUnavailable'):rows.length?'':t(language,'noAnnouncements')};
@@ -184,25 +195,29 @@ export function announcementReadsForReading(alerts,view,visible) {
   return (alerts?.unread||[]).filter(row=>rendered.has(row.id)&&typeof row.version==='string'&&row.version===rendered.get(row.id))
     .map(row=>({id:row.id,version:row.version}));
 }
-export function visibleAnnouncementView(activity,{limit=3}={}) {
+export function visibleAnnouncementView(activity,{limit=3,historyOpen=false,historyLimit=3}={}) {
   const count=Number.isFinite(limit)?Math.max(3,Math.floor(limit)):3;
-  const records=[...activity.rows,...activity.history].sort((a,b)=>Number(Boolean(b.previewPriority))-Number(Boolean(a.previewPriority))||(b.detectedAt??b.announcedAt??-Infinity)-(a.detectedAt??a.announcedAt??-Infinity));
-  const rows=records.slice(0,count);
-  return {rows,nextCount:Math.min(3,records.length-rows.length),canCollapse:rows.length>3};
+  const newestFirst=(a,b)=>(b.detectedAt??b.announcedAt??-Infinity)-(a.detectedAt??a.announcedAt??-Infinity);
+  const records=[...activity.rows].sort((a,b)=>Number(Boolean(b.previewPriority))-Number(Boolean(a.previewPriority))||newestFirst(a,b));
+  const firstCount=Math.max(3,records.filter(row=>row.previewPriority).length),rows=records.slice(0,firstCount+count-3);
+  const archived=[...activity.history].sort(newestFirst);
+  const history=historyOpen?archived.slice(0,Number.isFinite(historyLimit)?Math.max(3,Math.floor(historyLimit)):3):[];
+  return {rows,history,nextCount:Math.min(3,records.length-rows.length),canCollapse:rows.length>firstCount,
+    historyTotal:archived.length,historyNextCount:historyOpen?Math.min(3,archived.length-history.length):0};
 }
 if(typeof document!=='undefined') {
   document.body.dataset.embedded=String(new URLSearchParams(location.search).get('embedded')==='1');
   const byId=id=>document.getElementById(id),root=byId('card'),refreshButton=byId('refresh');
   let state={status:'loading'},externalState={status:'loading'},loading=false,retryingPublic=false,setting='auto';
   let detailVisible=document.body.dataset.embedded!=='true',acknowledging=false;
-  let activityLimit=3,activityRenderKeys=[],readAgain=false,readableView={rows:[]};
+  let activityLimit=3,historyLimit=3,activityRenderKeys=new Map(),readAgain=false,readableView={rows:[]};
   async function acknowledgeRenderedAnnouncements() {
     if(acknowledging){readAgain=true;return;}
-    const shown=new Set(Array.from(byId('announcement-list').children).filter(node=>{
+    const shown=new Set(['announcement-list','announcement-history-list'].flatMap(id=>Array.from(byId(id).children)).filter(node=>{
       const box=node.getBoundingClientRect();
       return node.getClientRects().length&&box.bottom>0&&box.top<innerHeight;
     }).map(node=>node.dataset.id));
-    const view={rows:readableView.rows.filter(row=>shown.has(row.id))};
+    const view={rows:[...readableView.rows,...(readableView.history||[])].filter(row=>shown.has(row.id))};
     const ids=announcementReadsForReading(externalState.announcementAlerts,view,detailVisible&&!document.hidden);
     if(!ids.length)return;
     acknowledging=true;
@@ -213,7 +228,7 @@ if(typeof document!=='undefined') {
   }
   window.addEventListener('quota-detail-visibility',event=>{
     const wasVisible=detailVisible;detailVisible=event.detail===true;
-    if(detailVisible){if(!wasVisible){activityLimit=3;render();window.scrollTo(0,0);}loadExternal();}
+    if(detailVisible){if(!wasVisible){activityLimit=3;historyLimit=3;byId('announcement-history').open=false;render();window.scrollTo(0,0);}loadExternal();}
   });
   const recordVisibility=new IntersectionObserver(()=>acknowledgeRenderedAnnouncements());
   window.addEventListener('scroll',()=>acknowledgeRenderedAnnouncements(),{passive:true});
@@ -239,6 +254,11 @@ if(typeof document!=='undefined') {
   byId('activity-less').addEventListener('click',()=>{
     activityLimit=3;render();byId('announcement-list').scrollIntoView({block:'start'});
   });
+  byId('history-more').addEventListener('click',()=>{historyLimit+=3;render();});
+  byId('history-less').addEventListener('click',()=>{
+    byId('announcement-history').open=false;historyLimit=3;render();byId('announcement-history').scrollIntoView({block:'nearest'});
+  });
+  byId('announcement-history').addEventListener('toggle',()=>{if(!byId('announcement-history').open){historyLimit=3;render();}});
   function render() {
     const lang=language(),view=deriveView(state,Date.now(),undefined,lang);
     document.documentElement.lang=lang;document.title=t(lang,'brand');
@@ -296,18 +316,26 @@ if(typeof document!=='undefined') {
       }
       item.append(content);return item;
     };
-    const visibleActivity=visibleAnnouncementView(activity,{limit:activityLimit});
-    const list=byId('announcement-list');
-    const keys=visibleActivity.rows.map(row=>JSON.stringify([lang,row]));
-    const appendOnly=activityRenderKeys.length>0&&activityRenderKeys.every((key,i)=>key===keys[i]);
-    const expanded=new Set(Array.from(list.children).filter(node=>node.querySelector('details')?.open).map(node=>node.dataset.id));
-    if(!appendOnly){for(const node of list.children)recordVisibility.unobserve(node);list.replaceChildren();}
-    for(const row of visibleActivity.rows.slice(appendOnly?activityRenderKeys.length:0)){
-      const node=announcementNode(row);const details=node.querySelector('details');
-      if(details&&expanded.has(node.dataset.id))details.open=true;
-      list.append(node);recordVisibility.observe(node);
-    }
-    activityRenderKeys=keys;
+    const visibleActivity=visibleAnnouncementView(activity,{limit:activityLimit,historyOpen:byId('announcement-history').open,historyLimit});
+    const renderActivityRows=(id,rows)=>{
+      const list=byId(id),keys=rows.map(row=>JSON.stringify([lang,row])),previous=activityRenderKeys.get(id)||[];
+      const appendOnly=previous.length>0&&previous.every((key,i)=>key===keys[i]);
+      const expanded=new Set(Array.from(list.children).filter(node=>node.querySelector('details')?.open).map(node=>node.dataset.id));
+      if(!appendOnly){for(const node of list.children)recordVisibility.unobserve(node);list.replaceChildren();}
+      for(const row of rows.slice(appendOnly?previous.length:0)){
+        const node=announcementNode(row);const details=node.querySelector('details');
+        if(details&&expanded.has(node.dataset.id))details.open=true;
+        list.append(node);recordVisibility.observe(node);
+      }
+      activityRenderKeys.set(id,keys);
+    };
+    renderActivityRows('announcement-list',visibleActivity.rows);
+    renderActivityRows('announcement-history-list',visibleActivity.history);
+    byId('announcement-history').hidden=!visibleActivity.historyTotal;
+    byId('announcement-history-label').textContent=t(lang,'activityHistory',{count:visibleActivity.historyTotal});
+    byId('history-more').hidden=!visibleActivity.historyNextCount;
+    byId('history-more').textContent=t(lang,'activityMore',{count:visibleActivity.historyNextCount});
+    byId('history-less').textContent=t(lang,'historyCollapse');
     byId('activity-more').hidden=!visibleActivity.nextCount;
     byId('activity-more').textContent=t(lang,'activityMore',{count:visibleActivity.nextCount});
     byId('activity-less').hidden=!visibleActivity.canCollapse;

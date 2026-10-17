@@ -338,6 +338,9 @@ $script:layoutPlus = $null
 $script:layoutBusy = $false
 $script:detailDragging = $false
 $script:activityLimit = 3
+$script:activityHistoryExpanded = $false
+$script:historyLimit = 3
+$script:historyRows = @()
 $script:activityRecordKeys = @{}
 $script:visibleActivityView = $null
 $script:announcementRenderKey = ''
@@ -578,8 +581,12 @@ $activityEmpty=New-Label '' 0 0 346 22 10.5
 $recoveryWarning=New-Label '' 0 0 346 22 10.5
 $activityMore=New-DisclosureButton '' 'activity-more';$activityMore.Add_Click({$script:activityLimit+=3;Show-External})
 $activityLess=New-DisclosureButton '' 'activity-less';$activityLess.Add_Click({$script:activityLimit=3;Show-External;$body.ScrollControlIntoView($activityHeading)})
-foreach ($button in @($activityMore,$activityLess)) {$oldFont=$button.Font;$button.Font=[Drawing.Font]::new('Segoe UI',9.75,[Drawing.FontStyle]::Underline);$oldFont.Dispose();$button.Tag='muted';$button.ShowChevron=$false}
-foreach ($control in @($activityHeading,$localTimeNote,$publicStatusPanel,$recoveryWarning,$activityRowsPanel,$activityMore,$activityLess,$activityEmpty)){[void]$announcementPanel.Controls.Add($control)}
+$historyToggle=New-DisclosureButton '' 'announcement-history-toggle';$historyToggle.Add_Click({$script:activityHistoryExpanded=-not $script:activityHistoryExpanded;$script:historyLimit=3;Show-External;if(-not $script:activityHistoryExpanded){$body.ScrollControlIntoView($historyToggle)}})
+$historyRowsPanel=New-Object Windows.Forms.Panel
+$historyMore=New-DisclosureButton '' 'history-more';$historyMore.Add_Click({$script:historyLimit+=3;Show-External})
+$historyLess=New-DisclosureButton '' 'history-less';$historyLess.Add_Click({$script:activityHistoryExpanded=$false;$script:historyLimit=3;Show-External;$body.ScrollControlIntoView($historyToggle)})
+foreach ($button in @($activityMore,$activityLess,$historyToggle,$historyMore,$historyLess)) {$oldFont=$button.Font;$button.Font=[Drawing.Font]::new('Segoe UI',9.75,[Drawing.FontStyle]::Underline);$oldFont.Dispose();$button.Tag='muted';$button.ShowChevron=$false}
+foreach ($control in @($activityHeading,$localTimeNote,$publicStatusPanel,$recoveryWarning,$activityRowsPanel,$activityMore,$activityLess,$activityEmpty,$historyToggle,$historyRowsPanel,$historyMore,$historyLess)){[void]$announcementPanel.Controls.Add($control)}
 $sourcesButton=New-DisclosureButton 'sources' 'data-sources-toggle';$sourcesButton.Add_Click({Toggle-DataSources});[void]$sourcesPanel.Controls.Add($sourcesButton)
 $sourceChecked=New-Label '' 0 0 346 24 9.75;[void]$sourcesPanel.Controls.Add($sourceChecked)
 $attribution=New-Object Windows.Forms.FlowLayoutPanel
@@ -686,7 +693,7 @@ function Layout-AnnouncementRows($parent, $rows, [int]$width, [int]$startY=0) {
 function Update-ActivityViewport {
     # Keep every logical record and the full scroll extent, but avoid creating
     # hundreds of offscreen HWNDs when a long inline disclosure first opens.
-    foreach ($group in @(@{panel=$activityRowsPanel;rows=$script:announcementRows})) {
+    foreach ($group in @(@{panel=$activityRowsPanel;rows=$script:announcementRows},@{panel=$historyRowsPanel;rows=$script:historyRows})) {
         if (-not $group.panel.Visible) {continue}
         $offset=$body.PointToClient($group.panel.PointToScreen([Drawing.Point]::Empty)).Y
         foreach ($row in $group.rows) {$row.Visible=$row.Top+$offset -lt $body.ClientSize.Height+80 -and $row.Bottom+$offset -gt -80}
@@ -694,7 +701,7 @@ function Update-ActivityViewport {
 }
 function Get-ActivityReadView {
     $shown=@{}
-    foreach ($row in @($script:announcementRows)) {
+    foreach ($row in @($script:announcementRows)+@($script:historyRows)) {
         if (-not $row -or -not $row.Visible) {continue}
         $top=$body.PointToClient($row.Parent.PointToScreen($row.Location)).Y
         if ($top -lt $body.ClientSize.Height -and $top+$row.Height -gt 0) {$shown[[string]$row.Tag.key]=$true}
@@ -776,6 +783,18 @@ function Update-ResponsiveLayout {
                 $half=[Math]::Max(1,[int](($cw-20)/2))
                 Set-ControlBox $activityMore 0 $aY $half 30
                 Set-ControlBox $activityLess $(if($activityMore.Visible){$half+20}else{0}) $aY $half 30
+                $aY+=38
+            }
+            $historyToggle.Visible=$script:visibleActivityView.historyTotal -gt 0
+            $historyRowsPanel.Visible=$script:activityHistoryExpanded -and $historyToggle.Visible
+            $historyMore.Visible=$historyRowsPanel.Visible -and $script:visibleActivityView.historyNextCount -gt 0
+            $historyLess.Visible=$historyRowsPanel.Visible
+            if ($historyToggle.Visible) {Set-ControlBox $historyToggle 0 $aY $cw 30;$aY+=34}
+            if ($historyRowsPanel.Visible) {
+                Set-ControlBox $historyRowsPanel 0 $aY $cw 1;$aY+=(Layout-AnnouncementRows $historyRowsPanel $script:historyRows $cw)
+                $half=[Math]::Max(1,[int](($cw-20)/2))
+                Set-ControlBox $historyMore 0 $aY $half 30
+                Set-ControlBox $historyLess $(if($historyMore.Visible){$half+20}else{0}) $aY $half 30
                 $aY+=38
             }
             $announcementPanel.Height=$aY+10
@@ -974,21 +993,21 @@ function Show-External {
     $view=$script:cachedActivityView
     $latestRecovery.Text=$view.latestRecoveryText
     $notice=Get-WidgetPublicNoticeView $script:externalData $script:language $now
-    $renderKey=@{language=$script:language;view=$view;notice=$notice;limit=$script:activityLimit;
+    $renderKey=@{language=$script:language;view=$view;notice=$notice;limit=$script:activityLimit;historyOpen=$script:activityHistoryExpanded;historyLimit=$script:historyLimit;
         recoveryStatus=$script:data.recoveryHistory.status;pending=[bool]$script:externalTask;retrying=[bool]($script:externalTask -and -not $script:externalTask.IsCompleted)} | ConvertTo-Json -Depth 12 -Compress
     if ($script:announcementRenderKey -ne '' -and $renderKey -ceq $script:externalRenderKey) {Update-AnnouncementIndicator;Start-AnnouncementRead;return}
     $paintBatch=[WidgetRenderBatch]::Pause($form)
     try {
     $script:activityView=$view
-    $script:visibleActivityView=Get-WidgetVisibleActivityView $view $script:activityLimit
+    $script:visibleActivityView=Get-WidgetVisibleActivityView $view $script:activityLimit $script:activityHistoryExpanded $script:historyLimit
     $key=$view | ConvertTo-Json -Depth 8 -Compress
     $force=$script:announcementRenderKey -eq ''
     if ($force) {
-        foreach ($panel in @($activityRowsPanel)) {Clear-PanelControls $panel}
-        $script:activityRenderKeys=@{};$script:activityRecordKeys=@{};$script:announcementRows=@()
+        foreach ($panel in @($activityRowsPanel,$historyRowsPanel)) {Clear-PanelControls $panel}
+        $script:activityRenderKeys=@{};$script:activityRecordKeys=@{};$script:announcementRows=@();$script:historyRows=@()
     }
     # Only materialize the loaded page and reuse existing rows when appending.
-    $groups=@(@{panel=$activityRowsPanel;records=@($script:visibleActivityView.active);enabled=$true;slot='announcementRows'})
+    $groups=@(@{panel=$activityRowsPanel;records=@($script:visibleActivityView.active);enabled=$true;slot='announcementRows'},@{panel=$historyRowsPanel;records=@($script:visibleActivityView.history);enabled=$true;slot='historyRows'})
     foreach ($group in $groups) {
         if (-not $group.enabled) {continue}
         $rowKey=@{language=$script:language;rows=@($group.records)} | ConvertTo-Json -Depth 8 -Compress
@@ -1017,6 +1036,9 @@ function Show-External {
     $script:activityIsEmpty=$script:visibleActivityView.active.Count -eq 0
     $activityHeading.Text=T 'activityHeading';$localTimeNote.Text=Get-WidgetLocalTimeNote $script:language
     $activityEmpty.Text=T 'activityEmpty'
+    $historyToggle.Text=T 'activityHistory' @($script:visibleActivityView.historyTotal);$historyToggle.AccessibleName=$historyToggle.Text;$historyToggle.Expanded=$script:activityHistoryExpanded
+    $historyMore.Text=T 'activityMore' @($script:visibleActivityView.historyNextCount);$historyMore.AccessibleName=$historyMore.Text
+    $historyLess.Text=T 'historyCollapse';$historyLess.AccessibleName=$historyLess.Text
     $publicStatusPanel.Visible=$notice.visible;$publicStatusTitle.Text=$notice.title
     $publicStatusText.Text=(@($notice.help,(T $(if ($notice.hasCache){'publicCache'}else{'publicNoCache'}))) | Where-Object {$_}) -join ' · '
     $publicStatusFetched.Text=(@($notice.sourceUpdatedText,$notice.lastFetchedText) | Where-Object {$_}) -join ' · ';$publicStatusFetched.Visible=[bool]$publicStatusFetched.Text;$sourceChecked.Text=$notice.lastFetchedText
@@ -1219,7 +1241,7 @@ function Start-ModeTransition([string]$nextMode) {
     if ($script:animating -or $script:mode -eq $nextMode) { return }
     [WidgetOutsideClick]::Disable()
     $compact = $nextMode -eq 'Compact'
-    if (-not $compact) {$script:activityLimit=3;Show-External}
+    if (-not $compact) {$script:activityLimit=3;$script:historyLimit=3;$script:activityHistoryExpanded=$false;Show-External}
     $size = if ($compact) { $script:compactSize } else { [System.Drawing.Size]::new($script:detailSize.Width, ($script:detailSize.Height + $(if ($script:layoutPlus) { 62 } else { 0 }))) }
     if ($script:mode -ne 'Detail' -or -not $script:automaticDetailHeight -or -not $script:modePositions.Detail) {
         $script:modePositions[$script:mode] = [pscustomobject]@{ x = $form.Left; y = $form.Top }
@@ -1554,7 +1576,7 @@ $timer.Add_Tick({
 
 $form.Add_VisibleChanged({
     if ($form.Visible) {
-        if ($script:mode -eq 'Detail' -and -not $script:animating) { $script:activityLimit=3;Show-External;$body.AutoScrollPosition=[Drawing.Point]::Empty }
+        if ($script:mode -eq 'Detail' -and -not $script:animating) { $script:activityLimit=3;$script:historyLimit=3;$script:activityHistoryExpanded=$false;Show-External;$body.AutoScrollPosition=[Drawing.Point]::Empty }
         Update-ResponsiveLayout; $form.Invalidate($true); Start-AnnouncementRead
     }
     Update-OutsideClickMonitor

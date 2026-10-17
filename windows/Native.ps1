@@ -54,7 +54,9 @@ $script:WidgetStrings = @{
         recoveryRestored = 'Your quota has recovered'
         recoveryHelp = 'Observed from local quota readings. Detection time is not the exact recovery time and does not establish its cause.'
         earlierUpdates = 'Earlier updates ({0})'
-        activityEmpty = 'No recent reset updates'
+        activityEmpty = 'No new messages'
+        activityHistory = 'View history ({0})'
+        historyCollapse = 'Collapse history'
         activityEmptyHelp = 'Expand to view older records.'
         localTimeNote = 'All times are local (currently {0})'
         publicRefreshFailed = 'Monitoring-site updates could not be fetched'
@@ -183,7 +185,9 @@ $script:WidgetStrings = @{
         recoveryRestored = '本账号额度已恢复'
         recoveryHelp = '根据本机额度变化记录。发现时间不等于准确恢复时间，也不能确认恢复原因。'
         earlierUpdates = '较早消息（{0}）'
-        activityEmpty = '最近没有新的重置动态'
+        activityEmpty = '暂无新消息'
+        activityHistory = '查看历史记录（{0}）'
+        historyCollapse = '收起历史记录'
         activityEmptyHelp = '可展开查看更多历史记录。'
         localTimeNote = '所有时间均为本地时间（当前 {0}）'
         publicRefreshFailed = '暂时无法更新消息'
@@ -370,10 +374,14 @@ function Get-WidgetResetDetailsView($data, [string]$language, [DateTimeOffset]$n
     }
     [pscustomobject]@{note=$note;rows=@($rows)}
 }
-function Get-WidgetVisibleActivityView($activity, [int]$limit=3) {
-    $records=@(@($activity.active)+@($activity.history) | Where-Object {$_} | Sort-Object @{Expression={[bool]$_.previewPriority};Descending=$true},@{Expression={$_.sortAt};Descending=$true})
-    $shown=@($records | Select-Object -First ([Math]::Max(3,$limit)))
-    [pscustomobject]@{active=$shown;history=@();nextCount=[Math]::Min(3,$records.Count-$shown.Count);canCollapse=$shown.Count -gt 3}
+function Get-WidgetVisibleActivityView($activity, [int]$limit=3, [bool]$historyOpen=$false, [int]$historyLimit=3) {
+    $records=@($activity.active | Where-Object {$_} | Sort-Object @{Expression={[bool]$_.previewPriority};Descending=$true},@{Expression={$_.sortAt};Descending=$true})
+    $firstCount=[Math]::Max(3,@($records | Where-Object previewPriority).Count)
+    $shown=@($records | Select-Object -First ($firstCount+[Math]::Max(3,$limit)-3))
+    $archived=@($activity.history | Where-Object {$_} | Sort-Object sortAt -Descending)
+    $history=@(if($historyOpen){$archived | Select-Object -First ([Math]::Max(3,$historyLimit))})
+    [pscustomobject]@{active=$shown;history=$history;nextCount=[Math]::Min(3,$records.Count-$shown.Count);canCollapse=$shown.Count -gt $firstCount;
+        historyTotal=$archived.Count;historyNextCount=$(if($historyOpen){[Math]::Min(3,$archived.Count-$history.Count)}else{0})}
 }
 function Get-WidgetPublicNoticeView($external, [string]$language, [DateTimeOffset]$now=[DateTimeOffset]::UtcNow) {
     $feed=$external.announcements;$stamp=ConvertTo-WidgetTimestamp $feed.sourceUpdatedAt
@@ -517,14 +525,41 @@ function ConvertTo-WidgetTimestamp($value) {
     if ([DateTimeOffset]::TryParse([string]$value,[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::None,[ref]$parsed)) { return $parsed }
     return $null
 }
+function Get-WidgetPreviewDeadline($row) {
+    $end=ConvertTo-WidgetTimestamp $row.scheduledAt
+    if($end){return $end}
+    if($row.scheduledDate -match '^\d{4}-\d{2}-\d{2}$'){$day=ConvertTo-WidgetTimestamp ($row.scheduledDate+'T00:00:00Z');if($day){return $day.AddDays(1)}}
+    $published=ConvertTo-WidgetTimestamp $row.announcedAt
+    if($published){return $published.AddHours(24)}
+    return $null
+}
 function Test-WidgetResetPreview($row,[DateTimeOffset]$now) {
     if($row.kind -ne 'regular' -or $row.certainty -ne 'announced' -or $row.deliveredAt -or $row.correction -or $row.sourceWithdrawn -or $row.announcementBasis -ne 'original' -or $row.sourceUrl -notmatch '^https://x\.com/thsottiaux/status/\d+$'){return $false}
     $published=ConvertTo-WidgetTimestamp $row.announcedAt
     if(-not $published -or $published -gt $now){return $false}
-    $end=ConvertTo-WidgetTimestamp $row.scheduledAt
-    if(-not $end){$end=$published.AddHours(24)}
-    if($row.scheduledDate -match '^\d{4}-\d{2}-\d{2}$'){$day=ConvertTo-WidgetTimestamp ($row.scheduledDate+'T00:00:00Z');if($day){$end=$day.AddDays(1)}}
-    return $end -gt $now
+    $end=Get-WidgetPreviewDeadline $row
+    return $end -and $end -gt $now
+}
+function Test-WidgetImportantPreviewChange($row,$feed,[DateTimeOffset]$now) {
+    $published=ConvertTo-WidgetTimestamp $row.announcedAt
+    if($row.kind -ne 'regular' -or $row.statementBasis -ne 'original' -or $row.correction -notin @('cancelled','delayed') -or -not $published -or $published -gt $now){return $false}
+    $publishedRecently=($now-$published).TotalHours -lt 24
+    if($row.previewPriority){
+        if($publishedRecently){return $true}
+        foreach($trace in @($feed.previewTrace)){
+            if($trace.id -eq $row.id -and $null -ne $trace.notifiedAt){
+                $age=$now.ToUnixTimeMilliseconds()-[double]$trace.notifiedAt
+                if($age -ge 0 -and $age -lt 86400000){return $true}
+            }
+        }
+    }
+    foreach($link in @($row.relatedUrls)) {
+        foreach($parent in @($feed.items)+@($feed.history)) {
+            if(-not $link -or $link -notin (@($parent.sourceUrl)+@($parent.previewSourceUrl)+@($parent.previewAliases))){continue}
+            if(($publishedRecently -and $parent.announcementBasis -eq 'original') -or ($row.previewPriority -and (Test-WidgetResetPreview $parent $now))){return $true}
+        }
+    }
+    return $false
 }
 function Get-WidgetAnnouncementPhase($row, [DateTimeOffset]$now = [DateTimeOffset]::UtcNow) {
     if ($row.sourceWithdrawn) { return 'unknown' }
@@ -646,8 +681,9 @@ function ConvertTo-WidgetAnnouncementRow($row, [string]$language, [DateTimeOffse
     if ($sourceHint) {$scope=''} elseif (-not $explicit) {$scope=Get-WidgetText 'sourceScope' $language @($scope)}
     $phaseKey=if ($row.sourceWithdrawn) {'sourceWithdrawn'} else {'phase'+(Get-Culture).TextInfo.ToTitleCase($phase)}
     $scheduleNote=if ($scheduled -and $row.scheduledTimeZone) {Get-WidgetText 'sourceTimeZoneNote' $language @([string]$row.scheduledTimeZone)} else {''}
-    $previewPriority=(Test-WidgetResetPreview $row $now) -or ([bool]$row.previewPriority -and [bool]$row.correction)
-    $previewExpired=$row.kind -eq 'regular' -and $row.announcementBasis -eq 'original' -and -not $completed -and -not $row.correction -and -not (Test-WidgetResetPreview $row $now)
+    $previewPriority=(Test-WidgetResetPreview $row $now) -or (Test-WidgetImportantPreviewChange $row $null $now)
+    $deadline=Get-WidgetPreviewDeadline $row
+    $previewExpired=$row.kind -eq 'regular' -and $row.announcementBasis -eq 'original' -and -not $completed -and -not $row.correction -and $deadline -and $deadline -le $now
     if($explicit -and -not $completed -and $row.scheduleText){
         $key=if($scheduled){if($row.schedulePrecision -in @('window','deadline')){'previewBefore'}else{'previewAround'}}else{'previewLiteral'}
         $value=if($scheduled){Format-WidgetCompactDate $scheduled $language $timeZone $now}else{[string]$row.scheduleText}
@@ -686,20 +722,21 @@ function Get-WidgetAnnouncementView($external, [string]$language, [DateTimeOffse
     $stamp=ConvertTo-WidgetTimestamp $feed.sourceUpdatedAt
     $stale=-not $feed -or $feed.stale -or $feed.status -ne 'ok' -or -not $stamp -or $stamp -gt $now.AddMinutes(5) -or ($now-$stamp).TotalMinutes -gt 30
     $seen=@{}
-    foreach ($row in @($feed.items)) {
-        if (-not $row -or $row.kind -notin @('banked','regular')) { continue }
-        $key=Get-WidgetAnnouncementKey $row
-        if ($seen.ContainsKey($key)) { continue }; $seen[$key]=$true
-        $posted=ConvertTo-WidgetTimestamp $row.announcedAt
-        $hintExpired=$row.sourceHint -and $row.certainty -ne 'announced' -and -not $row.deliveredAt -and $posted -and ($now-$posted).TotalHours -ge 24
-        $view=ConvertTo-WidgetAnnouncementRow $row $language $now ([bool]$hintExpired)
-        if ($view.phase -eq 'archived' -or $row.sourceWithdrawn -or $hintExpired) {$history.Add($view)} else {$active.Add($view)}
-    }
-    foreach ($row in @($feed.history)) {
-        if (-not $row -or $row.kind -notin @('banked','regular')) { continue }
-        $key=Get-WidgetAnnouncementKey $row
-        if ($seen.ContainsKey($key)) { continue }; $seen[$key]=$true
-        $history.Add((ConvertTo-WidgetAnnouncementRow $row $language $now $true))
+    foreach ($group in @(@{rows=@($feed.items);historical=$false},@{rows=@($feed.history);historical=$true})) {
+        foreach ($row in $group.rows) {
+            if (-not $row -or $row.kind -notin @('banked','regular')) { continue }
+            $key=Get-WidgetAnnouncementKey $row
+            if ($seen.ContainsKey($key)) { continue }; $seen[$key]=$true
+            $current=-not $row.sourceWithdrawn -and ((Test-WidgetResetPreview $row $now) -or (Test-WidgetImportantPreviewChange $row $feed $now))
+            $posted=ConvertTo-WidgetTimestamp $row.announcedAt
+            $deadline=Get-WidgetPreviewDeadline $row
+            $expired=-not $row.deliveredAt -and -not $current -and (($posted -and ($now-$posted).TotalHours -ge 24) -or
+                ($row.kind -eq 'regular' -and $row.announcementBasis -eq 'original' -and -not $row.correction -and $deadline -and $deadline -le $now))
+            $historical=($group.historical -and -not $current) -or $expired
+            $view=ConvertTo-WidgetAnnouncementRow $row $language $now ([bool]$historical)
+            $view.previewPriority=$current
+            if ($historical -or $view.phase -eq 'archived' -or $row.sourceWithdrawn) {$history.Add($view)} else {$active.Add($view)}
+        }
     }
     [pscustomobject]@{
         active=@($active.ToArray()); history=@($history.ToArray())
