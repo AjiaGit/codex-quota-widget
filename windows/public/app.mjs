@@ -332,7 +332,7 @@ if(typeof document!=='undefined') {
     renderActivityRows('announcement-list',visibleActivity.rows);
     renderActivityRows('announcement-history-list',visibleActivity.history);
     byId('announcement-history').hidden=!visibleActivity.historyTotal;
-    byId('announcement-history-label').textContent=t(lang,'activityHistory',{count:visibleActivity.historyTotal});
+    byId('announcement-history-label').textContent=t(lang,'activityHistory');
     byId('history-more').hidden=!visibleActivity.historyNextCount;
     byId('history-more').textContent=t(lang,'activityMore',{count:visibleActivity.historyNextCount});
     byId('history-less').textContent=t(lang,'historyCollapse');

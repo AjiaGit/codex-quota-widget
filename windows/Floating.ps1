@@ -1036,7 +1036,7 @@ function Show-External {
     $script:activityIsEmpty=$script:visibleActivityView.active.Count -eq 0
     $activityHeading.Text=T 'activityHeading';$localTimeNote.Text=Get-WidgetLocalTimeNote $script:language
     $activityEmpty.Text=T 'activityEmpty'
-    $historyToggle.Text=T 'activityHistory' @($script:visibleActivityView.historyTotal);$historyToggle.AccessibleName=$historyToggle.Text;$historyToggle.Expanded=$script:activityHistoryExpanded
+    $historyToggle.Text=T 'activityHistory';$historyToggle.AccessibleName=$historyToggle.Text;$historyToggle.Expanded=$script:activityHistoryExpanded
     $historyMore.Text=T 'activityMore' @($script:visibleActivityView.historyNextCount);$historyMore.AccessibleName=$historyMore.Text
     $historyLess.Text=T 'historyCollapse';$historyLess.AccessibleName=$historyLess.Text
     $publicStatusPanel.Visible=$notice.visible;$publicStatusTitle.Text=$notice.title
