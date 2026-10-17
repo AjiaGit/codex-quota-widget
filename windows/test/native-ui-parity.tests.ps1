@@ -266,12 +266,14 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
   $row=[pscustomobject]@{key='FABRICATED-empty';kind='regular';phase='announced';explicit=$true;scopeText='';summary='';retentionText=''}
   $control=New-AnnouncementControl $row
   try {if($control.Tag.fact.Visible -or $control.Tag.status.Visible){throw 'Empty activity labels still paint at skipped default positions'}}finally{$control.Dispose()}
-  $row.phase='unconfirmed';$row.explicit=$false
+  $row.phase='unconfirmed';$row.explicit=$false;$row.summary='FABRICATED public body shown without expanding'
   $control=New-AnnouncementControl $row
   try {
    Assert-Equal $control.Tag.fact.Visible $false 'An absent date/fact remains hidden'
-   Assert-Equal $control.Tag.status.Visible $false 'Verification help belongs in the disclosure'
-   if ($null -eq $control.Tag.more -or $control.Tag.extraPanel.Controls[0].Text -notmatch [regex]::Escape((T 'unverifiedHelp'))) {throw 'Unverified update lost its explanation disclosure'}
+   Assert-Equal $control.Tag.status.Visible $false 'An absent status remains hidden'
+   Assert-Equal $control.Tag.more $null 'Public body does not require an explanation disclosure'
+   if ($null -eq $control.Tag.body -or $control.Tag.body.Text -cne $row.summary) {throw 'Public body is not directly available'}
+   if ($control.Tag.label.Text -notmatch [regex]::Escape((T 'categoryUnverifiedShort'))) {throw 'Unverified public message lost its visible category'}
   }finally{$control.Dispose()}
  }
  Test-Case 'local recovery summary stays in the hero in both languages and cannot inherit public messages' {
