@@ -624,7 +624,7 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
    $script:automaticDetailHeight=$false;$script:creditsExpanded=$false;$script:announcementRenderKey=''
    $form.ClientSize=[Drawing.Size]::new(606,500)
    $script:externalData=[pscustomobject]@{status='ok';announcements=[pscustomobject]@{status='ok';stale=$false;sourceUpdatedAt=$now.ToString('o');items=@();history=@()}}
-   foreach($i in 1..50){$script:externalData.announcements.history+=,[pscustomobject]@{id=('https://example.invalid/FABRICATED-viewport-'+$i+'#regular');kind='regular';sourceUrl='https://example.invalid/FABRICATED';certainty='announced';announcedAt=$now.AddDays(-$i).ToString('o');deliveredAt=$now.AddDays(-$i).ToString('o')}}
+   foreach($i in 1..50){$script:externalData.announcements.history+=,[pscustomobject]@{id=('https://example.invalid/FABRICATED-viewport-'+$i+'#regular');noticeVersion='FABRICATED-visible-version';kind='regular';sourceUrl='https://example.invalid/FABRICATED';certainty='announced';announcedAt=$now.AddDays(-$i).ToString('o');deliveredAt=$now.AddDays(-$i).ToString('o')}}
    Show-External;while($script:visibleActivityView.nextCount -gt 0){$activityMore.PerformClick()};$body.AutoScrollPosition=[Drawing.Point]::Empty
    $node=$ast.Find({param($n) $n -is [Management.Automation.Language.InvokeMemberExpressionAst] -and $n.Expression.Extent.Text -eq '$body' -and $n.Member.Value -eq 'Add_Scroll'},$true)
    if(-not $node){throw 'Native scroll does not update the activity viewport'}
@@ -634,8 +634,8 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
    if($body.AutoScrollMinSize.Height -le 6000){throw 'The full history scroll extent was truncated'}
    Add-Type -AssemblyName System.Net.Http
    $script:client=[pscustomobject]@{captured=@()}
-   $script:client | Add-Member ScriptMethod PostAsync {param($url,$content);$this.captured=@(($content.ReadAsStringAsync().GetAwaiter().GetResult() | ConvertFrom-Json).ids);[Threading.Tasks.Task]::FromResult(0)}
-   $script:noticeView=[pscustomobject]@{ids=@($script:visibleActivityView.active | ForEach-Object {$_.id});hasUnread=$true}
+   $script:client | Add-Member ScriptMethod PostAsync {param($url,$content);$this.captured=@(($content.ReadAsStringAsync().GetAwaiter().GetResult() | ConvertFrom-Json).ids | ForEach-Object {$_.id});[Threading.Tasks.Task]::FromResult(0)}
+   $script:noticeView=[pscustomobject]@{ids=@($script:visibleActivityView.active | ForEach-Object {$_.id});entries=@($script:visibleActivityView.active | ForEach-Object {[pscustomobject]@{id=$_.id;version=$_.noticeVersion}});hasUnread=$true}
    $script:announcementReadTask=$null
    $nativeRead=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Start-AnnouncementRead'},$true)
    & $nativeRead.Body.GetScriptBlock()

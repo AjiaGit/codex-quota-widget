@@ -664,7 +664,7 @@ function Layout-AnnouncementRows($parent, $rows, [int]$width, [int]$startY=0) {
         if ($parts.source -and -not $stacked) {Set-ControlBox $parts.source ($width-$sourceWidth) $insideY $sourceWidth $titleHeight}
         $insideY+=$titleHeight+2
         if ($parts.source -and $stacked) {$insideY+=(Set-WrappedBox $parts.source $left $insideY $mainWidth 20)+2}
-        foreach ($control in @($parts.monitor,$parts.fact,$parts.attribution,$parts.missing,$parts.status) | Where-Object {$_ -and $_.Text}) {$insideY+=(Set-WrappedBox $control $left $insideY $mainWidth 20)+2}
+        foreach ($control in @($parts.fact,$parts.body,$parts.attribution,$parts.missing,$parts.status) | Where-Object {$_ -and $_.Text}) {$insideY+=(Set-WrappedBox $control $left $insideY $mainWidth 20)+2}
         if ($parts.more) {
             Set-ControlBox $parts.more $left $insideY ([Math]::Min(180,$mainWidth)) 26;$insideY+=26
             $expanded=[bool]$script:recordExpanded[$parts.key];$parts.more.Expanded=$expanded;$parts.extraPanel.Visible=$expanded
@@ -937,18 +937,19 @@ function New-AnnouncementControl($row) {
     $fact=New-Label $view.fact 36 54 346 22 10.5;$fact.Visible=[bool]$view.fact;$statusLine=New-Label $view.status 36 80 346 22 9.75;$statusLine.Visible=[bool]$view.status
     $missing=if ($view.missing) {New-Label (T 'completionNotProvided') 36 80 346 22 10.5} else {$null}
     $sourceLink=if ($row.sourceUrl) {New-ActivityLink (T $(if ($row.statementBasis -eq 'observation') {'viewWebsiteRecord'} elseif ($row.sourceHint) {'viewSource'} else {'announcementSource'})) $row.sourceUrl} else {$null}
+    $bodyText=if ($view.body) {New-Label $view.body 36 80 346 24 10.5} else {$null}
     $monitorLink=if ($row.monitorSourceUrl) {New-ActivityLink (T 'siteHintSource') $row.monitorSourceUrl} else {$null}
     $more=$null;$extraPanel=$null;$key=if ($row.key) {[string]$row.key} else {[string]$row.sortAt+'/'+[string]$row.title}
-    if ($view.extra -or $row.deliverySourceUrl) {
+    if ($row.kind -eq 'recovery' -and $view.extra) {
         $more=New-DisclosureButton '' 'record-details-toggle';$more.Text=T $(if ($row.kind -eq 'recovery') {'recoveryMore'} else {'moreMessage'});$oldFont=$more.Font;$more.Font=[Drawing.Font]::new('Segoe UI',9.75,[Drawing.FontStyle]::Underline);$oldFont.Dispose();$more.ShowChevron=$false;$more.Tag=@{key=$key}
         $more.Add_Click({param($sender,$e);$key=$sender.Tag.key;$script:recordExpanded[$key]=-not [bool]$script:recordExpanded[$key];Update-ResponsiveLayout})
         $extraPanel=[Windows.Forms.Panel]::new()
         if ($view.extra){$extra=New-Label $view.extra 0 0 346 24 9.75;[void]$extraPanel.Controls.Add($extra)}
         if ($row.deliverySourceUrl){[void]$extraPanel.Controls.Add((New-ActivityLink (T 'deliverySource') $row.deliverySourceUrl))}
     }
-    foreach ($control in @($icon,$label,$heading,$fact,$recordAttribution,$statusLine,$missing,$sourceLink,$monitorLink,$more,$extraPanel) | Where-Object {$_}){[void]$panel.Controls.Add($control)}
+    foreach ($control in @($icon,$label,$heading,$fact,$recordAttribution,$statusLine,$missing,$sourceLink,$monitorLink,$bodyText,$more,$extraPanel) | Where-Object {$_}){[void]$panel.Controls.Add($control)}
     $panel.Add_Paint({param($sender,$e);$pen=[Drawing.Pen]::new($script:colors.line,1);try{$e.Graphics.DrawLine($pen,0,$sender.Height-1,$sender.Width,$sender.Height-1)}finally{$pen.Dispose()}})
-    $panel.Tag=@{key=$key;icon=$icon;label=$label;title=$heading;fact=$fact;attribution=$recordAttribution;status=$statusLine;missing=$missing;source=$sourceLink;monitor=$monitorLink;more=$more;extraPanel=$extraPanel};return $panel
+    $panel.Tag=@{key=$key;icon=$icon;label=$label;title=$heading;fact=$fact;attribution=$recordAttribution;status=$statusLine;body=$bodyText;missing=$missing;source=$sourceLink;monitor=$monitorLink;more=$more;extraPanel=$extraPanel};return $panel
 }
 function Get-ControlOwnedFonts($control) {
     if ($control -is [Windows.Forms.Label] -or $control -is [Windows.Forms.Button]) {$control.Font}
@@ -1090,7 +1091,7 @@ function Update-AnnouncementIndicator {
 }
 function Start-AnnouncementRead {
     if ($script:announcementReadTask -or $script:animating -or $script:layoutBusy -or $script:mode -ne 'Detail' -or -not $form.Visible) {return}
-    $ids=Get-WidgetAnnouncementReadIds $script:noticeView (Get-ActivityReadView) $true
+    $ids=Get-WidgetAnnouncementReadEntries $script:noticeView (Get-ActivityReadView) $true
     if (-not $ids.Count) {return}
     try {
         $json=@{ids=@($ids)} | ConvertTo-Json -Compress

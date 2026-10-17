@@ -37,7 +37,7 @@ foreach ($language in @('en','zh-CN')) {
         $view=Get-WidgetActivityPresentation $row $language
         Assert-Equal $view.title $(if ($language -eq 'en') {'Reset-related news'} else {'重置相关消息'}) 'Same title as Mac'
         Assert-Equal $view.extra (($(if ($language -eq 'en') {'The event type and whether this is an advance notice or a completion message are unclear.'} else {'暂无法判断具体事项，以及是预告还是完成消息。'}))+[Environment]::NewLine+'Landing within the next 2 hours') 'Disclosure retains both evidence level and original text'
-        Assert-Equal $row.monitorSourceUrl 'https://codex-reset.com/' 'Fixed monitoring source link'
+        Assert-Equal $row.monitorSourceUrl $null 'One original-source link'
         Assert-Equal $row.sourceUrl $sourceUrl 'Original post link'
         Assert-Equal $row.explicit $false 'Not a confirmed announcement'
         Assert-Equal $view.missing $false 'Do not imply that only completion time is missing'
@@ -78,7 +78,7 @@ Test-Case 'native cache follows a source hint category correction without duplic
     Assert-Equal $merged.announcements.items[0].kind 'regular' 'Use the current service category'
     $view=Get-WidgetAnnouncementView $merged 'en' $now
     Assert-Equal $view.active.Count 1 'One visible hint'
-    Assert-Equal $view.active[0].monitorSourceUrl 'https://codex-reset.com/' 'Attribution retained'
+    Assert-Equal $view.active[0].monitorSourceUrl $null 'Duplicate monitoring link is omitted'
     $next.certainty='announced';$next.kind='banked';$next.id=$sourceUrl+'#banked';$next.sourceHint=$null
     $confirmed=Merge-WidgetExternalData $merged (Snapshot $next)
     Assert-Equal $confirmed.announcements.items.Count 1 'Confirmation replaces the cached hint'

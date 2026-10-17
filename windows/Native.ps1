@@ -1,6 +1,10 @@
 ﻿# Shared native helpers. Dot-source this file; it does not start a service or UI.
 $script:WidgetStrings = @{
     en = @{
+        previewBefore = 'Expected by {0}'
+        previewAround = 'Expected around {0}'
+        previewLiteral = 'Expected: {0} (original wording)'
+        previewExpired = 'The estimated time has passed; no further update is available.'
         providerUnavailable = '{0}: unavailable'
         providerDelayed = '{0}: updates delayed'
         providerInvalid = '{0}: unusable data'
@@ -124,6 +128,10 @@ $script:WidgetStrings = @{
         expandHistory = 'Show history'; collapseHistory = 'Hide history'
     }
     'zh-CN' = @{
+        previewBefore = '预计 {0} 前'
+        previewAround = '预计 {0} 左右'
+        previewLiteral = '预计：{0}（原文表述）'
+        previewExpired = '预计时段已过，暂无后续更新。'
         providerUnavailable = '{0}：暂不可用'
         providerDelayed = '{0}：更新延迟'
         providerInvalid = '{0}：数据不可用'
@@ -359,7 +367,7 @@ function Get-WidgetResetDetailsView($data, [string]$language, [DateTimeOffset]$n
     [pscustomobject]@{note=$note;rows=@($rows)}
 }
 function Get-WidgetVisibleActivityView($activity, [int]$limit=3) {
-    $records=@(@($activity.active)+@($activity.history) | Where-Object {$_} | Sort-Object sortAt -Descending)
+    $records=@(@($activity.active)+@($activity.history) | Where-Object {$_} | Sort-Object @{Expression={[bool]$_.previewPriority};Descending=$true},@{Expression={$_.sortAt};Descending=$true})
     $shown=@($records | Select-Object -First ([Math]::Max(3,$limit)))
     [pscustomobject]@{active=$shown;history=@();nextCount=[Math]::Min(3,$records.Count-$shown.Count);canCollapse=$shown.Count -gt 3}
 }
@@ -434,7 +442,8 @@ function Get-WidgetActivityPresentation($row, [string]$language) {
           $(if ($row.phase -eq 'waiting') {Get-WidgetText ('waiting'+$kind) $language})) | Where-Object {$_}
     }
     $recordLabel=(Get-WidgetText $(if ($row.statementBasis -eq 'observation') {'observationType'} else {'publicType'}) $language)+' · '+$(if (-not $explicit) {Get-WidgetText 'categoryUnverifiedShort' $language} else {$category})
-    [pscustomobject]@{title=$title;category=$category;recordLabel=$recordLabel;label=$attribution.label;fact=(@($fact,$row.scopeText) | Where-Object {$_}) -join ' · ';status=(@($status) -join ' ');extra=$extra -join [Environment]::NewLine;missing=$false}
+    if($row.previewExpired){$status=Get-WidgetText 'previewExpired' $language}
+    [pscustomobject]@{body=[string]$row.summary;title=$title;category=$category;recordLabel=$recordLabel;label=$attribution.label;fact=(@($fact,$row.scopeText) | Where-Object {$_}) -join ' · ';status=(@($status) -join ' ');extra=$extra -join [Environment]::NewLine;missing=$false}
 
 }
 function Test-WidgetOutsideClick([string]$mode, [bool]$visible, [bool]$animating,
@@ -502,6 +511,15 @@ function ConvertTo-WidgetTimestamp($value) {
     if ([DateTimeOffset]::TryParse([string]$value,[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::None,[ref]$parsed)) { return $parsed }
     return $null
 }
+function Test-WidgetResetPreview($row,[DateTimeOffset]$now) {
+    if($row.kind -ne 'regular' -or $row.certainty -ne 'announced' -or $row.deliveredAt -or $row.correction -or $row.sourceWithdrawn -or $row.announcementBasis -ne 'original' -or $row.sourceUrl -notmatch '^https://x\.com/thsottiaux/status/\d+$'){return $false}
+    $published=ConvertTo-WidgetTimestamp $row.announcedAt
+    if(-not $published -or $published -gt $now){return $false}
+    $end=ConvertTo-WidgetTimestamp $row.scheduledAt
+    if(-not $end){$end=$published.AddHours(24)}
+    if($row.scheduledDate -match '^\d{4}-\d{2}-\d{2}$'){$day=ConvertTo-WidgetTimestamp ($row.scheduledDate+'T00:00:00Z');if($day){$end=$day.AddDays(1)}}
+    return $end -gt $now
+}
 function Get-WidgetAnnouncementPhase($row, [DateTimeOffset]$now = [DateTimeOffset]::UtcNow) {
     if ($row.sourceWithdrawn) { return 'unknown' }
     $delivered=ConvertTo-WidgetTimestamp $row.deliveredAt
@@ -559,24 +577,30 @@ function Get-WidgetFiveHourView($quota, [string]$language, [DateTimeOffset]$now 
     [pscustomobject]@{visible=[bool]$visible;percentText=$percentText;resetText=$resetText;compactResetText=$compactResetText}
 }
 function Get-WidgetAnnouncementAlertView($alerts, [string]$language) {
-    $ids=@(); $kinds=@(); $hasSourceHints=$false; $hasAnnouncements=$false
+    $ids=@(); $entries=@(); $kinds=@(); $hasSourceHints=$false; $hasAnnouncements=$false
     foreach ($row in @($alerts.unread)) {
         if (-not $row -or $row.kind -notin @('banked','regular')) {continue}
         $id=[string]$row.id; $suffix='#'+[string]$row.kind
         if (-not $id.EndsWith($suffix,[StringComparison]::Ordinal)) {continue}
         if (-not (Test-WidgetHttpsUrl $id.Substring(0,$id.Length-$suffix.Length))) {continue}
-        $ids+=,$id; $kinds+=,[string]$row.kind
+        $ids+=,$id; $entries+=,[pscustomobject]@{id=$id;version=[string]$row.version}; $kinds+=,[string]$row.kind
         if ($row.sourceHint -is [bool] -and $row.sourceHint) {$hasSourceHints=$true} else {$hasAnnouncements=$true}
         if ($ids.Count -ge 100) {break}
     }
     $key=if ($hasSourceHints) {if ($hasAnnouncements) {'newPublicUpdates'} else {'newSourceHints'}} elseif (($kinds | Select-Object -Unique).Count -gt 1) {'newAnnouncements'} elseif ($kinds -contains 'banked') {'newGrant'} else {'newGlobalReset'}
-    [pscustomobject]@{ids=@($ids);hasUnread=($ids.Count -gt 0);tooltip=$(if ($ids.Count) {Get-WidgetText $key $language} else {''})}
+    [pscustomobject]@{ids=@($ids);entries=@($entries);hasUnread=($ids.Count -gt 0);tooltip=$(if ($ids.Count) {Get-WidgetText $key $language} else {''})}
 }
 function Get-WidgetAnnouncementReadIds($alerts, $view, [bool]$visible) {
     if (-not $visible) {return ,@()}
     $rendered=@{}
     foreach ($row in @($view.active)+@($view.history)) {if ($row) {$id=if ($row.id) {[string]$row.id} else {[string]$row.key};$rendered[$id]=$true}}
     return ,@($alerts.ids | Where-Object {$rendered.ContainsKey([string]$_)})
+}
+function Get-WidgetAnnouncementReadEntries($alerts,$view,[bool]$visible) {
+    if(-not $visible){return ,@()}
+    $rendered=@{}
+    foreach($row in @($view.active)+@($view.history)){if($row -and $row.noticeVersion){$rendered[[string]$row.id]=[string]$row.noticeVersion}}
+    return ,@($alerts.entries | Where-Object {$_ -and $_.version -and $rendered.ContainsKey([string]$_.id) -and $rendered[[string]$_.id] -ceq [string]$_.version})
 }
 function Get-WidgetNoticeBounds([double]$width, [double]$height) {
     $diameter=[Math]::Max(5,[Math]::Min(8,[Math]::Min($width,$height)*0.12))
@@ -616,9 +640,17 @@ function ConvertTo-WidgetAnnouncementRow($row, [string]$language, [DateTimeOffse
     if ($sourceHint) {$scope=''} elseif (-not $explicit) {$scope=Get-WidgetText 'sourceScope' $language @($scope)}
     $phaseKey=if ($row.sourceWithdrawn) {'sourceWithdrawn'} else {'phase'+(Get-Culture).TextInfo.ToTitleCase($phase)}
     $scheduleNote=if ($scheduled -and $row.scheduledTimeZone) {Get-WidgetText 'sourceTimeZoneNote' $language @([string]$row.scheduledTimeZone)} else {''}
+    $previewPriority=(Test-WidgetResetPreview $row $now) -or [bool]$row.previewPriority
+    $previewExpired=$row.kind -eq 'regular' -and $row.announcementBasis -eq 'original' -and -not $completed -and -not $row.correction -and -not (Test-WidgetResetPreview $row $now)
+    if($explicit -and -not $completed -and $row.scheduleText){
+        $key=if($scheduled){if($row.schedulePrecision -in @('window','deadline')){'previewBefore'}else{'previewAround'}}else{'previewLiteral'}
+        $value=if($scheduled){Format-WidgetCompactDate $scheduled $language $timeZone $now}else{[string]$row.scheduleText}
+        $scheduledText=Get-WidgetText $key $language @($value)
+    }
+    if($row.correction){$scheduledText=$null}
     $summary=if ((Resolve-WidgetLanguage $language) -eq 'zh-CN' -and $row.summaryZh) {[string]$row.summaryZh} elseif ($row.summary) {[string]$row.summary} else {''}
     $compactScheduled=$scheduledText;$compactCompleted=$completedText;$compactAnnounced=$announcedText
-    if ($scheduled -and $scheduledText) {$compactScheduled=Get-WidgetText $scheduleKey $language @((Format-WidgetCompactDate $scheduled $language $timeZone $now))}
+    if ($scheduled -and $scheduledText -and -not $row.scheduleText) {$compactScheduled=Get-WidgetText $scheduleKey $language @((Format-WidgetCompactDate $scheduled $language $timeZone $now))}
     if ($completed) {$compactCompleted=Get-WidgetText $completionKey $language @((Format-WidgetCompactDate $delivered $language $timeZone $now))}
     if ($announced) {$compactAnnounced=Get-WidgetText $(if ($explicit) {'announcedOn'} else {'postedOn'}) $language @((Format-WidgetCompactDate $announced $language $timeZone $now))}
     $hintStatus=if ($sourceHint) {Get-WidgetText $(if ($row.sourceWithdrawn) {'siteHintInactive'} elseif ($historical) {'siteHintExpired'} else {'siteHintStatus'}) $language} else {''}
@@ -633,12 +665,12 @@ function ConvertTo-WidgetAnnouncementRow($row, [string]$language, [DateTimeOffse
         title=Get-WidgetText $(if ($sourceHint) {'siteHintTitle'} elseif ($row.sourceWithdrawn) {'withdrawnRecord'} elseif ($row.kind -eq 'banked') {if ($explicit) {'confirmedBanked'} else {'relatedBanked'}} else {if ($explicit) {'confirmedRegular'} else {'relatedRegular'}}) $language @('codex-reset.com')
         compactScheduledText=$compactScheduled;compactCompletedText=$compactCompleted;compactAnnouncedText=$compactAnnounced
         details=$details -join ' · '; scheduledText=$scheduledText; completedText=$completedText; announcedText=$announcedText; scheduleNote=$scheduleNote; scopeText=$scope
-        summary=$summary;sourceHint=$sourceHint;hintStatus=$hintStatus
+        summary=$summary;sourceHint=$sourceHint;hintStatus=$hintStatus;previewPriority=$previewPriority;previewExpired=$previewExpired;noticeVersion=[string]$row.noticeVersion
         completedEvidence=$completed;sourceSites=@($row.sourceSites);announcementBasis=$row.announcementBasis;completionTimeBasis=$row.completionTimeBasis
         statementBasis=$row.statementBasis;kindKnown=($row.kindKnown -ne $false);correction=$row.correction
-        monitorSourceUrl=$(if ($sourceHint) { @('codex-reset.com','codexreset.dev') | Where-Object {$row.sourceSites -contains $_} | Select-Object -First 1 | ForEach-Object {'https://'+$_+'/'} } else {$null})
+        monitorSourceUrl=$null
         retentionText=$(if ($phase -eq 'delivered') {Get-WidgetText 'retention' $language} else {''})
-        sourceUrl=$(if (Test-WidgetHttpsUrl $row.sourceUrl) {[string]$row.sourceUrl} else {$null})
+        sourceUrl=$(if (Test-WidgetHttpsUrl $row.previewSourceUrl) {[string]$row.previewSourceUrl} elseif (Test-WidgetHttpsUrl $row.sourceUrl) {[string]$row.sourceUrl} else {$null})
         deliverySourceUrl=$(if ($completed -and (Test-WidgetHttpsUrl $row.deliverySourceUrl)) {[string]$row.deliverySourceUrl} else {$null})
     }
 }

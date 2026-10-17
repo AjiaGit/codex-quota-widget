@@ -99,7 +99,7 @@ export async function startMonitor({port=PORT,settingsFile=settingsPath(),query,
         nextExternalAt=Date.now()+externalRefreshDelay(externalState,Date.now(),externalFailures);externalPublishing=false;externalPending=null;}return {...externalState,announcements:announcements.state};
     });return externalPending;
   };
-  const files=new Map([['/',['index.html','text/html']],['/app.css',['app.css','text/css']],['/app.mjs',['app.mjs','text/javascript']],['/i18n.mjs',['i18n.mjs','text/javascript']]]);
+  const files=new Map([['/',['index.html','text/html']],['/app.css',['app.css','text/css']],['/app.mjs',['app.mjs','text/javascript']],['/i18n.mjs',['i18n.mjs','text/javascript']],['/preview.mjs',['preview.mjs','text/javascript']]]);
   const server=createServer(async(request,response)=>{
     try{
       const authority=`${HOST}:${server.address().port}`,origin=`http://${authority}`,url=new URL(request.url||'/',origin);
@@ -120,7 +120,7 @@ export async function startMonitor({port=PORT,settingsFile=settingsPath(),query,
           try{
             let body='';for await(const chunk of request){body+=chunk;if(body.length>16384)throw Error();}
             const input=JSON.parse(body);
-            if(!Array.isArray(input?.ids)||input.ids.length>100||input.ids.some(id=>typeof id!=='string'||id.length>2048))throw Error();
+            if(!Array.isArray(input?.ids)||input.ids.length>100||input.ids.some(entry=>typeof entry==='string'?entry.length>2048:!entry||typeof entry.id!=='string'||entry.id.length>2048||typeof entry.version!=='string'||entry.version.length>4096))throw Error();
             json(await announcements.acknowledge(input.ids));
           }catch{response.writeHead(400).end();}return;
         }

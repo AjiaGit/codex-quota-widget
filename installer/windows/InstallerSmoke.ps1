@@ -697,18 +697,14 @@ http.createServer(async(req,res)=>{
         Wait-Until {-not (Get-VisibleText $handle $ui.Id).Contains('Sample grant / 示例发放')} 'Inline reset details did not collapse.'
         [void](Find-VisibleControl $handle $ui.Id $creditText)
 
-        # The recent record exposes its original plan and delivery link on demand.
-        Assert-True (-not (Get-ActivityRecordText $handle $ui.Id $completedFact).Contains((Get-WidgetText 'deliverySource' $language))) 'Delivery link was expanded by default.'
-        Invoke-ActivityRecordButton $handle $ui.Id $completedFact $moreText
+        # Core public text is directly visible with a single original-source action.
         $summary=if ($language -eq 'en') {'Confirmed public reset delivery record'} else {'已确认全局额度重置送达记录'}
-        Wait-Until {(Get-ActivityRecordText $handle $ui.Id $completedFact).Contains($summary)} 'Message details did not expand in their record.'
-        $plannedText=Get-WidgetText 'originalReset' $language @((Format-WidgetCompactDate ([DateTimeOffset]$completedExpected.scheduledAt) $language))
         $recentText=Get-ActivityRecordText $handle $ui.Id $completedFact
-        Assert-True ($recentText.Contains($plannedText) -and $recentText.Contains($completedFact) -and $recentText.Contains((Get-WidgetText 'announcementSource' $language)) -and $recentText.Contains((Get-WidgetText 'deliverySource' $language))) 'Expanded message omitted original plan, completion, scope or source links.'
+        Assert-True ($recentText.Contains($summary) -and $recentText.Contains($completedFact) -and $recentText.Contains((Get-WidgetText 'announcementSource' $language))) 'Public body, time or original-source action was not directly visible.'
+        Assert-True (-not $recentText.Contains($moreText)) 'Public text still requires a redundant message-details disclosure.'
+        Assert-True (-not $recentText.Contains((Get-WidgetText 'deliverySource' $language))) 'Duplicate delivery-source action competes with the original link.'
         Assert-InlineWindow $handle $ui.Id $language
-        Save-UiEvidence $element $language 'message-details-inline'
-        Invoke-ActivityRecordButton $handle $ui.Id $completedFact $moreText
-        Wait-Until {-not (Get-ActivityRecordText $handle $ui.Id $completedFact).Contains($summary)} 'Message details did not collapse.'
+        Save-UiEvidence $element $language 'public-message-direct'
 
         # Current and historical rows form one chronological list. Each scan
         # walks the actual viewport so offscreen virtualization cannot hide a

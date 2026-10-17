@@ -1,4 +1,5 @@
 import { t, resolveLanguage, formatDate, formatRelativeUpdate, formatShortDate, formatLocalAnnouncementDate, formatCompactLocalDate, localTimeZone } from './i18n.mjs';
+import {isResetPreview,previewDeadline,previewVersion} from './preview.mjs';
 const TEN_MINUTES = 10 * 60 * 1000;
 const PUBLIC_MAX_AGE = 24 * 60 * 60 * 1000;
 function publicSourceFresh(state,now) {
@@ -72,7 +73,7 @@ export function deriveAnnouncementsView(state,now=Date.now(),timeZone=Intl.DateT
     const scopeText=sourceHint?'':explicit?scope:t(language,'sourceScope',{scope});
     const scheduleKey=(confirmed?'original':'scheduled')+(item.kind==='banked'?'Grant':'Reset');
     const unknownScheduleKey=item.kind==='banked'?'scheduleUnknownGrant':'scheduleUnknownReset';
-    const plannedText=!explicit?'':plannedDate?t(language,scheduleKey,{time:plannedDate}):!confirmed&&!historical?t(language,unknownScheduleKey):'';
+    let plannedText=!explicit?'':plannedDate?t(language,scheduleKey,{time:plannedDate}):!confirmed&&!historical?t(language,unknownScheduleKey):'';
     const completionLabel=item.completionTimeBasis==='site-report'?'siteRecordTime':item.completionTimeBasis==='observation'?'observationTime':item.completionTimeBasis==='announcement'?'completionPosted':'completed';
     const completedText=confirmed?`${t(language,completionLabel)} ${formatLocalAnnouncementDate(delivered,timeZone,language,now)}`:'';
     const announcedText=Number.isFinite(announced)?t(language,explicit?'published':'posted',{time:formatLocalAnnouncementDate(announced,timeZone,language,now)}):'';
@@ -96,22 +97,33 @@ export function deriveAnnouncementsView(state,now=Date.now(),timeZone=Intl.DateT
     const displayStatus=correctionKey?t(language,correctionKey):!explicit?
       sourceHint&&(item.sourceWithdrawn||historical)?t(language,item.sourceWithdrawn?'siteHintInactive':'siteHintExpired'):'':[item.sourceWithdrawn?t(language,'sourceWithdrawn'):'',
       !historyCopy&&phase==='waiting'?t(language,'waiting'+kindKey):!confirmed&&(historyCopy||phase==='unknown')?t(language,'unknown'+kindKey):''].filter(Boolean).join(' ');
-    const compactPlanned=!explicit?'':plannedDate?t(language,scheduleKey,{time:Number.isFinite(scheduled)?formatCompactLocalDate(scheduled,timeZone,language,now):plannedDate}):!confirmed&&!historical?t(language,unknownScheduleKey):'';
+    let compactPlanned=!explicit?'':plannedDate?t(language,scheduleKey,{time:Number.isFinite(scheduled)?formatCompactLocalDate(scheduled,timeZone,language,now):plannedDate}):!confirmed&&!historical?t(language,unknownScheduleKey):'';
+    const genuinePreview=isResetPreview(item,now);
+    const previewUpdate=item.kind==='regular'&&item.statementBasis==='original'&&['cancelled','delayed'].includes(item.correction)&&
+      now-announced<PUBLIC_MAX_AGE&&(item.relatedUrls||[]).some(url=>[...(state?.items||[]),...(state?.history||[])].some(row=>row.sourceUrl===url&&row.announcementBasis==='original'));
+    const previewPriority=genuinePreview||previewUpdate;
+    if(explicit&&!confirmed&&item.scheduleText) {
+      const key=item.scheduledAt?(item.schedulePrecision==='window'||item.schedulePrecision==='deadline'?'previewBefore':'previewAround'):'previewLiteral';
+      plannedText=t(language,key,{time:item.scheduledAt?formatLocalAnnouncementDate(scheduled,timeZone,language,now):item.scheduleText});
+      compactPlanned=t(language,key,{time:item.scheduledAt?formatCompactLocalDate(scheduled,timeZone,language,now):item.scheduleText});
+    }
+    if(previewUpdate){plannedText='';compactPlanned='';}
+    const expiredPreview=item.kind==='regular'&&item.announcementBasis==='original'&&!confirmed&&!item.correction&&previewDeadline(item)<=now;
     const compactCompleted=confirmed?`${t(language,completionLabel)} ${formatCompactLocalDate(delivered,timeZone,language,now)}`:'';
     const compactAnnounced=Number.isFinite(announced)?t(language,explicit?'published':'posted',{time:formatCompactLocalDate(announced,timeZone,language,now)}):'';
     return {id:item.id||item.sourceUrl+'#'+item.kind,kind:item.kind,phase,announcedAt:Number.isFinite(announced)?announced:null,title:t(language,sourceHint?'siteHintTitle':item.sourceWithdrawn?'withdrawnRecord':item.kind==='banked'?(explicit?'confirmedGrant':'relatedGrant'):(explicit?'confirmedReset':'relatedReset')),status,
       scheduleNote:explicit&&Number.isFinite(scheduled)&&item.scheduledTimeZone?t(language,'sourceTimeZoneNote',{zone:item.scheduledTimeZone}):'',scheduleNoteDetail:language==='zh-CN'?(item.summaryZh||''):(item.summary||item.summaryZh||''),
       plannedText,completedText,announcedText,scopeText,retentionText:phase==='delivered'?t(language,'retention'):'',
       timeText:[completedText||plannedText||announcedText,scopeText].filter(Boolean).join(' · '),
-      sourceUrl:safeSource(item.sourceUrl),sourceLabel:t(language,item.statementBasis==='observation'?'viewWebsiteRecord':explicit?'viewAnnouncement':'viewSource'),deliverySourceUrl:confirmed?safeSource(item.deliverySourceUrl):null,
-      monitorSourceUrl:sourceHint?['codex-reset.com','codexreset.dev'].filter(site=>item.sourceSites?.includes(site)).map(site=>'https://'+site+'/')[0]||null:null,
-      summary,
+      sourceUrl:safeSource(item.previewSourceUrl||item.sourceUrl),sourceLabel:t(language,item.statementBasis==='observation'?'viewWebsiteRecord':explicit?'viewAnnouncement':'viewSource'),deliverySourceUrl:confirmed?safeSource(item.deliverySourceUrl):null,
+      monitorSourceUrl:null,
+      summary,previewText:summary,previewPriority,noticeVersion:previewVersion(item),
       display:{title:displayTitle,category,recordLabel,label:attribution.label,scope:scopeText,
         help:!explicit?t(language,item.kindKnown===false?'unknownHintHelp':'unverifiedHelp'):'',
         facts:[compactCompleted||compactPlanned||compactAnnounced].filter(Boolean),
         detailFacts:[compactPlanned,compactAnnounced,confirmed?t(language,'completionHelp'+kindKey):''].filter(text=>text&&text!==(compactCompleted||compactPlanned||compactAnnounced)),
         completionMissing:false,
-        status:displayStatus,summary}};
+        status:expiredPreview?t(language,'previewExpired'):displayStatus,summary:''}};
   };
   for(const item of state?.items||[]){
     const hintExpired=item.sourceHint&&item.certainty!=='announced'&&!item.deliveredAt&&now-Date.parse(item.announcedAt)>=PUBLIC_MAX_AGE;
@@ -166,9 +178,15 @@ export function announcementIdsForReading(alerts,view,visible) {
   const rendered=new Set([...(view?.rows||[]),...(view?.history||[])].map(row=>row.id));
   return alerts.unread.filter(row=>['banked','regular'].includes(row?.kind)&&rendered.has(row.id)).map(row=>row.id);
 }
+export function announcementReadsForReading(alerts,view,visible) {
+  if(!visible)return [];
+  const rendered=new Map([...(view?.rows||[]),...(view?.history||[])].map(row=>[row.id,row.noticeVersion]));
+  return (alerts?.unread||[]).filter(row=>rendered.has(row.id)&&typeof row.version==='string'&&row.version===rendered.get(row.id))
+    .map(row=>({id:row.id,version:row.version}));
+}
 export function visibleAnnouncementView(activity,{limit=3}={}) {
   const count=Number.isFinite(limit)?Math.max(3,Math.floor(limit)):3;
-  const records=[...activity.rows,...activity.history].sort((a,b)=>(b.detectedAt??b.announcedAt??-Infinity)-(a.detectedAt??a.announcedAt??-Infinity));
+  const records=[...activity.rows,...activity.history].sort((a,b)=>Number(Boolean(b.previewPriority))-Number(Boolean(a.previewPriority))||(b.detectedAt??b.announcedAt??-Infinity)-(a.detectedAt??a.announcedAt??-Infinity));
   const rows=records.slice(0,count);
   return {rows,nextCount:Math.min(3,records.length-rows.length),canCollapse:rows.length>3};
 }
@@ -185,7 +203,7 @@ if(typeof document!=='undefined') {
       return node.getClientRects().length&&box.bottom>0&&box.top<innerHeight;
     }).map(node=>node.dataset.id));
     const view={rows:readableView.rows.filter(row=>shown.has(row.id))};
-    const ids=announcementIdsForReading(externalState.announcementAlerts,view,detailVisible&&!document.hidden);
+    const ids=announcementReadsForReading(externalState.announcementAlerts,view,detailVisible&&!document.hidden);
     if(!ids.length)return;
     acknowledging=true;
     try {
@@ -260,16 +278,16 @@ if(typeof document!=='undefined') {
       const sourceLink=(url,text)=>{const link=document.createElement('a');link.href=url;link.target='_blank';link.rel='noopener noreferrer';link.textContent=text;return link;};
       if(row.sourceUrl){const link=sourceLink(row.sourceUrl,row.sourceLabel);link.className='announcement-source';headingLine.append(link);}
       content.append(headingLine);
-      if(row.monitorSourceUrl){const line=document.createElement('p');line.append(sourceLink(row.monitorSourceUrl,t(lang,'siteHintSource')));content.append(line);}
       for(const text of display.facts){const line=document.createElement('p');line.className='announcement-fact';line.textContent=text;
         if(display.scope){const scope=document.createElement('span');scope.className='announcement-scope';scope.textContent=display.scope;line.append(scope);}
         content.append(line);
       }
+      if(row.previewText){const line=document.createElement('p');line.className='message-body';line.textContent=row.previewText;content.append(line);}
       if(display.recordLabel&&display.label){const line=document.createElement('p');line.className='record-attribution';line.textContent=display.label;content.append(line);}
       if(display.scope&&!display.facts.length){const line=document.createElement('p');line.textContent=display.scope;content.append(line);}
       if(display.completionMissing){const line=document.createElement('p');line.textContent=t(lang,'completionNotProvided');content.append(line);}
       if(display.status){const line=document.createElement('p');line.className='phase';line.textContent=display.status;content.append(line);}
-      if(display.help||display.detailFacts.length||display.summary||row.scheduleNote||row.deliverySourceUrl){
+      if(row.kind==='recovery'&&(display.help||display.detailFacts.length)){
         const detail=document.createElement('details');detail.className='record-details';
         const summary=document.createElement('summary');summary.textContent=t(lang,row.kind==='recovery'?'recoveryMore':'moreMessage');detail.append(summary);
         for(const text of[display.help,...display.detailFacts,row.scheduleNote,display.summary?t(lang,'sourceSummary',{summary:display.summary}):''].filter(Boolean)){const line=document.createElement('p');line.textContent=text;detail.append(line);}

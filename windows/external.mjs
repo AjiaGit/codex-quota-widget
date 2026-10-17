@@ -471,8 +471,9 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
   } catch {}
   const project = () => {
     const items = snapshot.items.filter(item => active(item, now()));
-    return { ...snapshot, items, history: deduplicate([...snapshot.history, ...snapshot.items.filter(item => !active(item, now()))])
-      .sort((a,b)=>Date.parse(b.announcedAt || 0)-Date.parse(a.announcedAt || 0)).slice(0,50),
+    const presentation=item=>({...item,noticeVersion:previewVersion(item),previewPriority:canNotify(item)});
+    return { ...snapshot, items:items.map(presentation), history: deduplicate([...snapshot.history, ...snapshot.items.filter(item => !active(item, now()))])
+      .sort((a,b)=>Date.parse(b.announcedAt || 0)-Date.parse(a.announcedAt || 0)).slice(0,50).map(presentation),
       stale: snapshot.stale || !sourceFresh(snapshot.sourceUpdatedAt,now()) };
   };
   const persist = async () => {

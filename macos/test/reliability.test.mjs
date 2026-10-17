@@ -354,9 +354,11 @@ test('an explicit related cancellation updates the original promise but unrelate
   }
 });
 
-test('an unverified backup-only update opens the website that supplied it',async()=>{
+test('an unverified backup-only update keeps one original link and its collecting-site attribution',async()=>{
   const result=await query(feed(),history([archived('213','Global reset recorded.')]));
-  assert.equal(view(rows(result)[0]).monitorSourceUrl,'https://codexreset.dev/');
+  assert.equal(view(rows(result)[0]).monitorSourceUrl,null);
+  assert.equal(view(rows(result)[0]).sourceUrl,url('213'));
+  assert.match(view(rows(result)[0]).display.label,/codexreset.dev/);
 });
 
 test('upgrading a legacy cache does not replay a read linked completion',async()=>{

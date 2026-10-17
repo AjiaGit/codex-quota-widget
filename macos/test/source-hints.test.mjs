@@ -94,7 +94,7 @@ test('a source headline displays a subjectless reply without confirming a reset 
     const row = deriveAnnouncementsView(result.announcements, now, 'Asia/Shanghai', language).rows[0];
     assert.equal(row.display.title, title);
     assert.equal(row.display.help, status);
-    assert.equal(row.monitorSourceUrl, 'https://codex-reset.com/');
+    assert.equal(row.monitorSourceUrl, null);
     assert.equal(row.sourceUrl, reply.url);
     assert.equal(row.summary, reply.text);
     assert.equal(row.completedText, '');

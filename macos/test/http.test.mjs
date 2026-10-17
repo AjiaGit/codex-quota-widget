@@ -177,7 +177,7 @@ test('announcement alert cache and scoped read API preserve unread notices and r
   const baseline=Date.now()-120000;
   const store=await createAnnouncementStore({file:join(directory,'announcements.json'),now:()=>baseline});
   await store.update({status:'ok',items:[],history:[],sourceUpdatedAt:new Date(baseline).toISOString()});
-  const item={kind:'banked',certainty:'announced',sourceUrl:'https://example.org/new-grant',announcedAt:new Date(Date.now()-60000).toISOString()};
+  const item={kind:'regular',certainty:'announced',announcementBasis:'original',statementBasis:'original',sourceUrl:'https://x.com/thsottiaux/status/1000000000000000981',announcedAt:new Date(Date.now()-60000).toISOString()};
   let queries=0;
   const {server,stop}=await startMonitor({port:0,settingsFile:join(directory,'settings.json'),query:async()=>({}),externalQuery:async()=>{
     queries++;return {status:'ok',announcements:{status:'ok',items:[item],history:[],sourceUpdatedAt:new Date().toISOString()}};
@@ -187,7 +187,7 @@ test('announcement alert cache and scoped read API preserve unread notices and r
   const post=(body,origin=base)=>fetch(base+'/api/announcement-alerts/read',{method:'POST',headers:{'Content-Type':'application/json',Origin:origin},body:JSON.stringify(body)});
   try {
     const external=await(await fetch(base+'/api/external')).json();
-    const expected={unread:[{id:item.sourceUrl+'#banked',kind:'banked'}]};
+    const expected={unread:[{id:item.sourceUrl+'#regular',kind:'regular',version:'["regular",null,null,null,null,null,null,null,null]'}]};
     assert.deepEqual(external.announcementAlerts,expected);
     assert.deepEqual(await read(),expected);
     assert.equal(queries,1,'native alert polling reads the cache only');
@@ -197,7 +197,10 @@ test('announcement alert cache and scoped read API preserve unread notices and r
     assert.deepEqual(await read(),expected,'failed writes never clear unread notices');
     assert.equal((await post({ids:[]})).status,200);
     assert.deepEqual(await read(),expected,'only explicitly viewed IDs are acknowledged');
-    assert.equal((await post({ids:[expected.unread[0].id]})).status,200);
+    assert.equal((await fetch(base+'/preview.mjs')).status,200,'The browser can load the shared preview module');
+    assert.equal((await post({ids:[{id:expected.unread[0].id,version:'older'}]})).status,200);
+    assert.deepEqual(await read(),expected,'An old visible version cannot clear a newer preview');
+    assert.equal((await post({ids:[expected.unread[0]]})).status,200);
     assert.deepEqual(await read(),{unread:[]});
     assert.equal(queries,1);
   }finally {await stop();await rm(directory,{recursive:true,force:true});}
