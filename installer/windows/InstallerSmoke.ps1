@@ -203,7 +203,29 @@ function Start-Installed {
     Wait-Until { (Invoke-RestMethod "$serviceUrl/api/usage" -TimeoutSec 2).status -eq 'ok' } 'Fabricated Codex fixture did not supply quota.'
 }
 function Stop-Installed {
-    $stop = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe') -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"' + (Join-Path $installDir 'Stop.ps1') + '"'),'-Quiet') -Wait -PassThru -WindowStyle Hidden
+    # Invoke the unmodified installed stop script. Its user-facing catch intentionally
+    # hides low-level errors; this fabricated CI wrapper retains them on failure.
+    $stopWrapper=Join-Path $OutputDir 'stop-diagnostic.ps1'
+    $diagnostic=@'
+param([string]$StopScript)
+$ErrorActionPreference='Stop';$Error.Clear();$global:LASTEXITCODE=0;$stopExitCode=1
+try { & $StopScript -Quiet; $stopExitCode=$LASTEXITCODE }
+finally {
+    if ($stopExitCode -ne 0) {
+        foreach ($record in @($Error)) {
+            Write-Output ('Isolated stop diagnostic: '+$record.Exception.GetType().FullName+': '+$record.Exception.Message)
+            Write-Output $record.ScriptStackTrace
+        }
+    }
+}
+exit $stopExitCode
+'@
+    [IO.File]::WriteAllText($stopWrapper,$diagnostic,(New-Object Text.UTF8Encoding($true)))
+    $stopOut=Join-Path $OutputDir 'stop-stdout.log';$stopError=Join-Path $OutputDir 'stop-stderr.log'
+    $stop = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe') -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"' + $stopWrapper + '"'),'-StopScript',('"' + (Join-Path $installDir 'Stop.ps1') + '"')) -Wait -PassThru -WindowStyle Hidden -RedirectStandardOutput $stopOut -RedirectStandardError $stopError
+    if ($stop.ExitCode -ne 0) {
+        foreach ($stopLog in @($stopOut,$stopError)) { if (Test-Path -LiteralPath $stopLog) { Get-Content -LiteralPath $stopLog | Select-Object -Last 30 | Write-Output } }
+    }
     Assert-True ($stop.ExitCode -eq 0) 'Owned monitor stop failed.'
     Wait-Until { -not (Test-Path -LiteralPath (Join-Path $dataDir 'state.json')) } 'Runtime state remained after quit.'
     $healthy = $false
