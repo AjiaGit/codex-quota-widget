@@ -51,7 +51,7 @@ test('public refresh queries only reset records and preserves confirmed announce
       ? {version:1,fetched_at:new Date(now).toISOString(),profile:{handle:'thsottiaux'},stale:false,tweets:[event],events:[]}
       : {coverage:'partial',events:[],count:0,timezone:'UTC'}};
   }});
-  assert.deepEqual(urls.sort(),['https://codex-reset.com/api/feed','https://codexreset.dev/api/history'].sort());
+  assert.deepEqual(urls.sort(),['https://codex-reset.com/api/feed','https://codexreset.dev/api/status'].sort());
   assert.equal(Object.hasOwn(result,'forecast'),false);
   assert.equal(result.announcements.items[0].certainty,'announced');
   assert.equal(result.lastGlobal.sourceUrl,event.url);

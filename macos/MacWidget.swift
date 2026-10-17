@@ -547,7 +547,7 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
         panel.orderFrontRegardless()
         publishDetailVisibility()
         poll()
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in self?.poll() }
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in self?.poll() }
         ageTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             self?.updateStatusText()
         }
@@ -808,6 +808,7 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
             guard let self, let alerts else { return }
             self.announcementAlerts = alerts
             self.compact.hasNotice = alerts.hasUnread
+            if self.isCompact && self.panel.isVisible { self.client.reportIndicator(alerts) }
             self.updateNativeText()
         }
     }

@@ -107,7 +107,7 @@ struct NativeLocalizer {
         let chinese = resolved == .simplifiedChinese
         let pair: (String, String)
         switch key {
-        case "brand": pair = ("Codex Quota", "Codex 周额度")
+        case "brand": pair = ("Codex Quota", "Codex 额度悬浮窗")
         case "reading": pair = ("Reading…", "正在读取")
         case "updated": pair = ("Updated", "已更新")
         case "updated_just_now": pair = ("Updated just now", "刚刚更新")
@@ -131,15 +131,17 @@ struct NativeLocalizer {
         case "ok": pair = ("OK", "好")
         case "remaining": pair = ("Weekly quota remaining: {value}%", "本周剩余 {value}%")
         case "quota_tooltip": pair = ("Codex weekly quota", "Codex 本周额度")
-        case "new_grant": pair = ("New banked reset grant announcement · Click for details", "有新的重置次数赠送公告，点击查看详情")
-        case "new_global_reset": pair = ("New global reset announcement · Click for details", "有新的全局额度重置公告，点击查看详情")
-        case "new_announcements": pair = ("New banked reset grant and global reset announcements · Click for details", "有新的重置次数赠送和全局额度重置公告，点击查看详情")
+        case "new_grant": pair = ("New reset credit update · Click for details", "有新的重置卡消息，点击查看详情")
+        case "new_global_reset": pair = ("New quota-reset notice or change · Click for details", "有新的额度重置预告或变更，点击查看详情")
+        case "new_announcements": pair = ("New reset credit and quota-reset updates · Click for details", "有新的重置卡和额度重置消息，点击查看详情")
+        case "new_source_hints": pair = ("New monitoring-site hint · Click for details", "有新的监控网站提示，点击查看详情")
+        case "new_public_updates": pair = ("New reset updates · Click for details", "有新的重置动态，点击查看详情")
         case "cli_missing": pair = ("Codex CLI was not found. Install Codex CLI or the Codex desktop app, then reopen this widget.", "未找到 Codex CLI。请安装 Codex CLI 或 Codex 桌面应用，然后重新打开此工具。")
         case "signed_out": pair = ("Sign in to Codex, or run codex login in Terminal, then choose Refresh.", "请先登录 Codex，或在终端运行 codex login，然后点击刷新。")
         case "timeout": pair = ("Codex took too long to respond. Check your connection and choose Refresh.", "Codex 查询超时。请检查网络，然后点击刷新。")
         case "network": pair = ("Codex could not connect. Check your connection and choose Refresh.", "Codex 无法连接。请检查网络，然后点击刷新。")
         case "unsupported": pair = ("This account does not provide a seven-day Codex quota.", "当前账号未提供七天 Codex 额度。")
-        case "service_unavailable": pair = ("The local service is unavailable. Reopen Codex Quota Widget.", "本机额度服务暂不可用，请重新打开 Codex 周额度工具。")
+        case "service_unavailable": pair = ("The local service is unavailable. Reopen Codex Quota Widget.", "本机额度服务暂不可用，请重新打开 Codex 额度悬浮窗。")
         case "settings_failed": pair = ("The language could not be saved. Reopen the widget and try again.", "无法保存语言设置，请重新打开工具后再试。")
         case "query_failed": pair = ("Quota is unavailable. Choose Refresh to try again.", "额度暂不可用，请点击刷新重试。")
         default: pair = (key, key)
@@ -150,7 +152,10 @@ struct NativeLocalizer {
 
 struct NativeAnnouncementAlerts {
     let ids: [String]
+    let visibleEntries: [[String: String]]
     private let kinds: Set<String>
+    private let hasSourceHints: Bool
+    private let hasAnnouncements: Bool
     var hasUnread: Bool { !ids.isEmpty }
 
     init(object: [String: Any]?) {
@@ -161,11 +166,18 @@ struct NativeAnnouncementAlerts {
             return url.scheme == "https" && url.host != nil && url.user == nil && url.password == nil
         }
         ids = entries.compactMap { $0["id"] as? String }
+        visibleEntries = entries.compactMap { row in
+            guard let id = row["id"] as? String, let version = row["version"] as? String, version.count <= 4096 else { return nil }
+            return ["id": id, "version": version]
+        }
         kinds = Set(entries.compactMap { $0["kind"] as? String })
+        hasSourceHints = entries.contains { $0["sourceHint"] as? Bool == true }
+        hasAnnouncements = entries.contains { $0["sourceHint"] as? Bool != true }
     }
 
     func tooltip(_ localizer: NativeLocalizer) -> String {
         guard hasUnread else { return "" }
+        if hasSourceHints { return localizer.text(hasAnnouncements ? "new_public_updates" : "new_source_hints") }
         return localizer.text(kinds.count > 1 ? "new_announcements" : kinds.contains("banked") ? "new_grant" : "new_global_reset")
     }
 }
@@ -336,6 +348,29 @@ final class NativeServiceClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["language": language.rawValue])
         return request
+    }
+
+    static func indicatorRequest(_ alerts: NativeAnnouncementAlerts) -> URLRequest {
+        var request = URLRequest(url: baseURL.appendingPathComponent("api/announcement-alerts/shown"))
+        request.httpMethod = "POST"
+        request.timeoutInterval = 8
+        request.setValue("http://127.0.0.1:39224", forHTTPHeaderField: "Origin")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["ids": alerts.visibleEntries])
+        return request
+    }
+    private var reportedIndicator = ""
+    func reportIndicator(_ alerts: NativeAnnouncementAlerts) {
+        guard !alerts.visibleEntries.isEmpty else { reportedIndicator = ""; return }
+        let request = Self.indicatorRequest(alerts)
+        let key = String(data: request.httpBody ?? Data(), encoding: .utf8) ?? ""
+        guard reportedIndicator != key else { return }
+        reportedIndicator = key
+        session.dataTask(with: request) { [weak self] _, response, _ in
+            if (response as? HTTPURLResponse)?.statusCode != 200 {
+                DispatchQueue.main.async { if self?.reportedIndicator == key { self?.reportedIndicator = "" } }
+            }
+        }.resume()
     }
 
     /// These reads only retrieve the service cache. The service owns the CLI schedule.

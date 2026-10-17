@@ -7,7 +7,7 @@ const announcements={status:'ok',stale:false,sourceUpdatedAt:new Date(now).toISO
 
 test('a stale empty announcement cache does not assert there are no announcements',()=>{
   const result=deriveAnnouncementsView(announcements,now+86400001,'UTC','en');
-  assert.equal(result.notice,'Announcement information unavailable');
+  assert.equal(result.notice,'Monitoring-site updates unavailable');
 });
 test('announcement freshness is independent of retired forecast data and the successful HTTP status',()=>{
   const state={status:'ok',announcements};

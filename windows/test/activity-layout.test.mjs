@@ -75,7 +75,7 @@ test('expired source data remains distinct from a request failure through the ca
   assert.equal(refreshed.reason,null);
 });
 
-test('compact activity keeps every confirmed pending event and the latest personal and public records',()=>{
+test('unified activity keeps chronological records and pages current and pending messages together',()=>{
   const quota={status:'ok',recoveryHistory:{status:'ok',records:[recovery(60000),recovery(120000)]}};
   const feed={status:'ok',sourceUpdatedAt:new Date(now).toISOString(),items:[
     item('latest',30000),item('older',180000),
@@ -84,9 +84,9 @@ test('compact activity keeps every confirmed pending event and the latest person
   ],history:[]};
   const original=JSON.stringify([quota,feed]);
   const view=deriveResetActivityView(quota,feed,now,'Asia/Shanghai','en');
-  assert.ok(Array.isArray(view.featuredRows),'The default list separates featured records from earlier ones');
-  assert.deepEqual(view.featuredRows.map(row=>row.id||row.detectedAt),['latest',now-60000,'grant','reset']);
-  assert.deepEqual(view.earlierRows.map(row=>row.id||row.detectedAt),[now-120000,'older']);
+  assert.deepEqual(view.rows.map(row=>row.id||row.detectedAt),['latest',now-60000,now-120000,'older','grant','reset']);
+  assert.equal(presentation.visibleAnnouncementView(view).rows.length,3);
+  assert.equal(presentation.visibleAnnouncementView(view,{limit:6}).rows.length,6);
   assert.equal(JSON.stringify([quota,feed]),original,'Presentation does not mutate or erase stored records');
 });
 
@@ -96,7 +96,7 @@ test('last successful public fetch survives a failed refresh and restart, separa
     let clock=now;
     const file=join(dir,'announcements.json');
     let store=await createAnnouncementStore({file,now:()=>clock});
-    await store.update({status:'ok',stale:false,sourceUpdatedAt:new Date(now-3600000).toISOString(),items:[item('saved',180000)],history:[]});
+    await store.update({status:'ok',stale:false,sourceUpdatedAt:new Date(now-1200000).toISOString(),items:[item('saved',180000)],history:[]});
     assert.equal(store.state.lastFetchedAt,now);
     clock+=60000;
     await store.update({status:'unavailable'});
@@ -106,7 +106,7 @@ test('last successful public fetch survives a failed refresh and restart, separa
     const notice=derivePublicNotice({status:'unavailable',announcements:store.state},clock,'Asia/Shanghai','en');
     assert.equal(notice.hasCache,true);
     assert.match(notice.lastFetchedText,/12:00/);
-    assert.ok(!notice.lastFetchedText.includes('11:00'),'Source generation time is not represented as retrieval time');
+    assert.ok(!notice.lastFetchedText.includes('11:40'),'Source generation time is not represented as retrieval time');
   }finally{await rm(dir,{recursive:true,force:true});}
 });
 
@@ -125,10 +125,11 @@ test('account recovery display omits percentages and groups the local timezone',
   const row=deriveResetActivityView(quota,{items:[],history:[]},now,'Asia/Shanghai','zh-CN').rows[0];
   assert.ok(row.display,'A recovery has its own compact display');
   assert.equal(row.display.title,'本账号额度已恢复');
-  assert.doesNotMatch(JSON.stringify(row.display),/45%|99%|→/);
+  assert.ok(row.display.detailFacts.includes('45% → 99%'));
+  assert.doesNotMatch(JSON.stringify({title:row.display.title,facts:row.display.facts}),/45%|99%|→/);
   assert.match(row.display.facts[0],/本机发现.*11:59/);
   assert.doesNotMatch(row.display.facts[0],/UTC/);
-  assert.match(row.display.help,/不是准确重置/);
+  assert.match(row.display.help,/不等于准确恢复/);
 });
 
 test('source-reported completion remains distinct from confirmed delivery',()=>{
@@ -136,8 +137,8 @@ test('source-reported completion remains distinct from confirmed delivery',()=>{
   const row=presentation.deriveAnnouncementsView(feed,now,'Asia/Shanghai','zh-CN').rows[0];
   assert.ok(row.display,'Public records have compact display facts');
   assert.equal(row.phase,'unconfirmed');
-  assert.equal(row.display.title,'额度重置消息');
-  assert.equal(row.display.completionMissing,true);
+  assert.equal(row.display.title,'额度重置相关消息');
+  assert.equal(row.display.completionMissing,false);
   assert.match(row.display.facts[0],/发布.*11:59/);
   assert.match(row.display.scope,/(?:网站|来源)标注/);
 });
@@ -150,12 +151,13 @@ test('compact planned times keep an explicit offset when a future event crosses 
   assert.doesNotMatch(row.display.detailFacts.join(' '),/UTC-07:00/);
 });
 
-test('collapsed earlier and history announcements remain unread until those sections are opened',()=>{
-  const activity={featuredRows:[{id:'featured',kind:'regular'}],earlierRows:[{id:'earlier',kind:'banked'}],history:[{id:'history',kind:'regular'}]};
-  const alerts={unread:[{id:'featured',kind:'regular'},{id:'earlier',kind:'banked'},{id:'history',kind:'regular'}]};
-  assert.equal(typeof presentation.visibleAnnouncementView,'function');
-  assert.deepEqual(presentation.announcementIdsForReading(alerts,presentation.visibleAnnouncementView(activity),true),['featured']);
-  assert.deepEqual(presentation.announcementIdsForReading(alerts,presentation.visibleAnnouncementView(activity,{earlierOpen:true,historyOpen:true}),true),['featured','earlier','history']);
+test('folded historical batches remain unread until explicitly opened',()=>{
+  const records=Array.from({length:6},(_,i)=>({id:'record-'+i,kind:'regular',announcedAt:6-i}));
+  const activity={rows:records.slice(0,3),history:records.slice(3)};
+  const alerts={unread:records};
+  assert.equal(presentation.announcementIdsForReading(alerts,presentation.visibleAnnouncementView(activity),false).length,0);
+  assert.deepEqual(presentation.announcementIdsForReading(alerts,presentation.visibleAnnouncementView(activity),true),records.slice(0,3).map(row=>row.id));
+  assert.deepEqual(presentation.announcementIdsForReading(alerts,presentation.visibleAnnouncementView(activity,{limit:10,historyOpen:true,historyLimit:10}),true),records.map(row=>row.id));
 });
 
 test('negated and conditional source summaries never turn into visible claims of completion',()=>{
@@ -163,6 +165,6 @@ test('negated and conditional source summaries never turn into visible claims of
     const row=presentation.deriveAnnouncementsView({items:[item('conditional',60000,{summary})],history:[]},now,'UTC','en').rows[0];
     assert.equal(row.phase,'unconfirmed');
     assert.doesNotMatch(row.display.title,/was reset|completed|delivered/i);
-    assert.equal(row.display.completionMissing,true);
+    assert.equal(row.display.completionMissing,false);
   }
 });

@@ -11,10 +11,10 @@ function Test-Case([string]$name, [scriptblock]$body) {
 }
 $now = [DateTimeOffset]'2026-09-30T12:00:00Z'
 function New-Event([string]$id, [string]$kind = 'banked') {
-    [pscustomobject]@{ id=$id; kind=$kind; certainty='announced'; announcedAt='2026-09-29T12:00:00Z'; scheduledAt=$null; scheduledDate=$null; deliveredAt=$null; scope='paid'; scopeLabel=$null; sourceUrl='https://example.org/announcement'; deliverySourceUrl=$null; summary='Confirmed announcement'; summaryZh='已确认公告' }
+    [pscustomobject]@{ id=$id; kind=$kind; certainty='announced'; announcedAt=$now.AddHours(-3).ToString('o'); scheduledAt=$null; scheduledDate=$null; deliveredAt=$null; scope='paid'; scopeLabel=$null; sourceUrl='https://example.org/announcement'; deliverySourceUrl=$null; summary='Confirmed announcement'; summaryZh='已确认公告' }
 }
 function New-External($items = @(), $history = @(), [string]$status = 'ok') {
-    [pscustomobject]@{ status='ok'; announcements=[pscustomobject]@{ status=$status; items=@($items); history=@($history); sourceUpdatedAt='2026-09-30T11:00:00Z'; stale=$false } }
+    [pscustomobject]@{ status='ok'; announcements=[pscustomobject]@{ status=$status; items=@($items); history=@($history); sourceUpdatedAt=$now.AddMinutes(-5).ToString('o'); stale=$false } }
 }
 Test-Case 'outside clicks collapse only a visible settled detail window' {
     $frame=[Drawing.Rectangle]::new(-606,100,606,585)
@@ -56,7 +56,7 @@ Test-Case 'narrow header keeps relative age below title and ordered equal toolba
     Assert-Equal (Get-WidgetHeaderLayout 620 132 145).statusSecondRow $false 'Wider inline status'
 }
 Test-Case 'Plus quota precedes credits and announcements lead directly to history' {
-    Assert-Equal ((Get-WidgetDetailSectionOrder $true) -join ',') 'hero,fiveHour,credits,announcements,history,sources,footer' 'Plus section order'
+    Assert-Equal ((Get-WidgetDetailSectionOrder $true) -join ',') 'hero,fiveHour,credits,announcements,sources,footer' 'Plus section order'
     Assert-Equal ((Get-WidgetDetailSectionOrder $false) -contains 'fiveHour') $false 'Non-Plus quota'
 }
 Test-Case 'personal recoveries share reset news and move into the same history after 24 hours' {
@@ -70,7 +70,8 @@ Test-Case 'personal recoveries share reset news and move into the same history a
     Assert-Equal $view.active[1].phase 'announced' 'Personal recovery does not confirm public delivery'
     $later=Get-WidgetResetActivityView $data $feed 'en' ($now.AddHours(24))
     Assert-Equal $later.history[0].kind 'recovery' 'Older recovery shares history'
-    Assert-Equal $later.active.Count 1 'Pending public announcement remains active'
+    Assert-Equal $later.active.Count 0 'Old unresolved non-preview announcements archive quietly'
+    Assert-Equal $later.history.Count 2 'Both old records remain available without completion inference'
 }
 Test-Case 'confirmed announcements move from upcoming to waiting without inferred delivery' {
     $row = New-Event 'hidden-event-key'; $row.scheduledAt=$now.AddMinutes(1).ToString('o')
@@ -105,13 +106,23 @@ Test-Case 'two kinds stay separate and empty/unavailable feeds use one muted sta
     $a=New-Event 'banked'; $b=New-Event 'regular' 'regular'
     $view=Get-WidgetAnnouncementView (New-External @($a,$b)) 'en' $now
     Assert-Equal $view.active.Count 2 'Both confirmed kinds'
-    Assert-Equal $view.active[0].title 'Confirmed banked reset grant' 'Banked title'
-    Assert-Equal $view.active[1].title 'Confirmed global reset' 'Regular title'
-    Assert-Equal (Get-WidgetAnnouncementView (New-External) 'zh-CN' $now).emptyText '监控来源暂无已确认的重置次数赠送或全局额度重置公告' 'Merged empty state'
-    Assert-Equal (Get-WidgetAnnouncementView (New-External @() @() 'unavailable') 'en' $now).emptyText 'Confirmed announcements unavailable' 'Unavailable state'
+    Assert-Equal $view.active[0].title 'Reset credit grant announced' 'Banked title'
+    Assert-Equal $view.active[1].title 'Quota reset announced' 'Regular title'
+    Assert-Equal (Get-WidgetAnnouncementView (New-External) 'zh-CN' $now).emptyText '监控网站暂无新的重置动态记录' 'Merged empty state'
+    Assert-Equal (Get-WidgetAnnouncementView (New-External @() @() 'unavailable') 'en' $now).emptyText 'Monitoring-site updates unavailable' 'Unavailable state'
+}
+Test-Case 'empty public feeds distinguish the thirty minute freshness boundary' {
+    foreach ($minutes in @(29,31)) {
+        $external=New-External
+        $external.announcements.sourceUpdatedAt=$now.AddMinutes(-$minutes).ToString('o')
+        $notice=Get-WidgetPublicNoticeView $external 'en' $now
+        Assert-Equal $notice.visible ($minutes -gt 30) 'Old data must not masquerade as a successful empty feed'
+        $view=Get-WidgetAnnouncementView $external 'en' $now
+        Assert-Equal $view.emptyText $(if ($minutes -gt 30) {'Monitoring-site updates unavailable'} else {'Monitored sites have no new reset-update records'}) 'Fresh-empty and stale-empty states stay distinct'
+    }
 }
 Test-Case 'rendering archives delivered rows locally even without another fetch' {
-    $row=New-Event 'completed'; $row.deliveredAt=$now.AddHours(-23).ToString('o')
+    $row=New-Event 'completed'; $row.announcedAt=$now.AddHours(-25).ToString('o'); $row.deliveredAt=$now.AddHours(-23).ToString('o')
     $value=New-External @($row)
     Assert-Equal (Get-WidgetAnnouncementView $value 'en' $now).active.Count 1 'Initial active row'
     $later=Get-WidgetAnnouncementView $value 'en' $now.AddHours(1)
@@ -127,7 +138,7 @@ Test-Case 'local transport failure and restart preserve announcements with pendi
         $restored=Read-WidgetJson (Join-Path $base 'native-public-cache.json')
         $view=Get-WidgetAnnouncementView $restored 'zh-CN' $now
         Assert-Equal $view.active.Count 1 'Known row survives restart'
-        Assert-Equal $view.staleText '信息待更新' 'Connection failure state'
+        Assert-Equal $view.staleText '监控网站数据待更新' 'Connection failure state'
         Assert-Equal $previous.announcements.stale $false 'Previous object not mutated'
     } finally { Remove-Item -LiteralPath $base -Recurse -Force -ErrorAction SilentlyContinue }
 }
@@ -195,7 +206,7 @@ Test-Case 'precise schedules show event-time local offsets and independent publi
     $zone=[TimeZoneInfo]::CreateCustomTimeZone('Test +08',[TimeSpan]::FromHours(8),'Test +08','Test +08')
     $event=New-Event 'timed-grant'; $event.scheduledAt='2026-10-01T20:30:00Z'; $event.announcedAt='2026-09-30T10:00:00Z'
     $row=ConvertTo-WidgetAnnouncementRow $event 'zh-CN' $now $false $zone
-    if ($row.scheduledText -notmatch '预定送达.*10月2日 04:30.*本地 UTC\+08:00') { throw 'Scheduled time did not convert across the local date boundary' }
+    if ($row.scheduledText -notmatch '预计发放.*10月2日 04:30.*本地 UTC\+08:00') { throw 'Scheduled time did not convert across the local date boundary' }
     if ($row.announcedText -notmatch '公告发布.*9月30日 18:00.*本地 UTC\+08:00') { throw 'Publication time omitted or confused with delivery' }
     $india=[TimeZoneInfo]::CreateCustomTimeZone('Test +0530',[TimeSpan]::FromMinutes(330),'Test +0530','Test +0530')
     if ((Format-WidgetAnnouncementDate ([DateTimeOffset]'2026-10-01T18:30:00Z') 'en' $india $now) -notmatch 'Oct 2 00:00.*UTC\+05:30') { throw 'Fractional offset or midnight conversion failed' }
@@ -207,7 +218,7 @@ Test-Case 'precise schedules show event-time local offsets and independent publi
     if ($row.scheduledText -notmatch 'Oct 1.*time not announced' -or $row.scheduledText -match 'UTC|00:00') { throw 'Date-only source invented a local clock or zone' }
     $event.scheduledDate=$null
     $row=ConvertTo-WidgetAnnouncementRow $event 'en' $now $false $zone
-    Assert-Equal $row.scheduledText 'Delivery time not announced' 'Missing delivery time remains unknown'
+    Assert-Equal $row.scheduledText 'Grant time not announced' 'Missing delivery time remains unknown'
 }
 Test-Case 'source-withdrawn records stay neutral in history after native cache reconciliation' {
     $event=New-Event 'withdrawn-source'
@@ -216,8 +227,8 @@ Test-Case 'source-withdrawn records stay neutral in history after native cache r
     $merged=Merge-WidgetExternalData (New-External @($event)) (New-External @() @($withdrawn)) $false
     $view=Get-WidgetAnnouncementView $merged 'zh-CN' $now
     Assert-Equal $view.active.Count 0 'Withdrawn event must leave active announcements'
-    Assert-Equal $view.history[0].title '来源已撤下的公告记录' 'Neutral withdrawn title'
-    if ($view.history[0].details -notmatch '监控来源已撤下此记录') { throw 'Source correction status omitted' }
+    Assert-Equal $view.history[0].title '监控网站已撤下此记录' 'Neutral withdrawn title'
+    if ($view.history[0].details -notmatch '监控网站已撤下此记录') { throw 'Source correction status omitted' }
     $event.scheduledAt=$now.AddHours(1).ToString('o')
     $event | Add-Member -NotePropertyName scheduledTimeZone -NotePropertyValue 'PT'
     $view=Get-WidgetAnnouncementView (New-External @($event)) 'en' $now
@@ -236,22 +247,23 @@ Test-Case 'Plus five-hour view preserves percent and reset time while other plan
 Test-Case 'source pending state is separate from quota age and appears only once' {
     $known=New-External @((New-Event 'known')); $known.announcements.stale=$true; $known.announcements.sourceUpdatedAt=$now.AddHours(-3).ToString('o')
     $view=Get-WidgetAnnouncementView $known 'en' $now
-    Assert-Equal $view.staleText 'Information pending update' 'Single announcement pending state'
+    Assert-Equal $view.staleText 'Monitoring-site data pending update' 'Single announcement pending state'
     $source=Format-WidgetPublicUpdate $known.announcements 'en' $now
     if (-not $source.Contains((Format-WidgetDate $now.AddHours(-3) 'en'))) { throw 'Public source timestamp not preserved' }
     Assert-Equal (Format-WidgetRelativeUpdate ($now.AddMinutes(-1).ToUnixTimeMilliseconds()) 'en' $now) 'Updated 1 minute ago' 'Quota freshness remains independent'
     $empty=New-External @() @() 'unavailable'; $empty.announcements.stale=$true
     $unavailable=Get-WidgetAnnouncementView $empty 'en' $now
     Assert-Equal $unavailable.staleText '' 'Unavailable line does not duplicate pending warning'
-    Assert-Equal $unavailable.emptyText 'Confirmed announcements unavailable' 'One unavailable line'
+    Assert-Equal $unavailable.emptyText 'Monitoring-site updates unavailable' 'One unavailable line'
 }
 Test-Case 'inventory and evidence link terminology match the approved bilingual layout' {
-    Assert-Equal (Get-WidgetText 'cards' 'en' @(2)) 'Banked resets 2' 'Inventory is not consumption count'
-    Assert-Equal (Get-WidgetText 'announcementSource' 'en') 'View announcement' 'Announcement link'
-    Assert-Equal (Get-WidgetText 'deliverySource' 'en') 'Delivery record' 'Evidence link'
+    Assert-Equal (Get-WidgetText 'cards' 'en' @(2)) 'Available resets: 2' 'Inventory is not consumption count'
+    Assert-Equal (Get-WidgetText 'announcementSource' 'en') 'View original post' 'Announcement link'
+    Assert-Equal (Get-WidgetText 'deliverySource' 'en') 'Completion evidence' 'Evidence link'
     foreach ($language in @('en','zh-CN')) {
         $cadence=Get-WidgetText 'refreshCadence' $language
-        if (-not $cadence.Contains('1') -or -not $cadence.Contains('10')) { throw 'Quota/public cadence omitted' }
+        $expected=if ($language -eq 'en') {'Auto-refresh: quota and reset previews every 1 min'} else {'自动刷新：额度与重置预告每 1 分钟'}
+        Assert-Equal $cadence $expected 'Quota and reset-preview minute cadence must both be explicit'
     }
 }
 Test-Case 'completed results explain their 24 hour retention in both languages' {
@@ -265,7 +277,7 @@ Test-Case 'expired announcement cache does not claim no confirmed announcements'
     $value=New-External
     $later=$now.AddHours(25)
     $view=Get-WidgetAnnouncementView $value 'en' $later
-    Assert-Equal $view.emptyText 'Confirmed announcements unavailable' 'Source cache expired'
+    Assert-Equal $view.emptyText 'Monitoring-site updates unavailable' 'Source cache expired'
 }
 Test-Case 'historical rows without delivery evidence do not imply an outstanding delivery' {
     $event=New-Event 'historical-grant'; $event.announcedAt=$now.AddDays(-7).ToString('o')
@@ -274,8 +286,10 @@ Test-Case 'historical rows without delivery evidence do not imply an outstanding
         Assert-Equal $historical.phase 'unknown' 'Historical delivery status'
         if (-not $historical.details.Contains((Get-WidgetText 'phaseUnknown' $language))) {throw 'Missing delivery record was not explained'}
         Assert-Equal $historical.completedText $null 'No invented completion'
-        $active=(Get-WidgetAnnouncementView (New-External @($event)) $language $now).active[0]
-        Assert-Equal $active.phase 'announced' 'Active announcements still await evidence'
+        $archived=Get-WidgetAnnouncementView (New-External @($event)) $language $now
+        Assert-Equal $archived.active.Count 0 'Old unresolved announcements are automatically archived'
+        Assert-Equal $archived.history[0].phase 'unknown' 'Archiving does not prove completion'
+        Assert-Equal $archived.history[0].completedText $null 'No invented completion for aged active records'
     }
     $event.deliveredAt=$now.AddDays(-2).ToString('o'); $event.deliverySourceUrl='https://example.org/delivered'
     $confirmed=(Get-WidgetAnnouncementView (New-External @() @($event)) 'en' $now).history[0]
@@ -286,9 +300,9 @@ Test-Case 'compact announcement indicator validates sources and both localized a
     $alerts=[pscustomobject]@{unread=@([pscustomobject]@{id='https://example.org/grant#banked';kind='banked'},[pscustomobject]@{id='https://example.org/reset#regular';kind='regular'})}
     $view=Get-WidgetAnnouncementAlertView $alerts 'en'
     Assert-Equal $view.hasUnread $true 'Unread indicator'
-    if (-not $view.tooltip.Contains('banked reset grant and global reset')) {throw 'Kinds not explained'}
+    if (-not $view.tooltip.Contains('reset credit and quota-reset')) {throw 'Kinds not explained'}
     $zh=Get-WidgetAnnouncementAlertView $alerts 'zh-CN'
-    if (-not $zh.tooltip.Contains('重置次数赠送和全局额度重置')) {throw 'Chinese tooltip missing'}
+    if (-not $zh.tooltip.Contains('重置卡和额度重置')) {throw 'Chinese tooltip missing'}
     $bad=[pscustomobject]@{unread=@([pscustomobject]@{id='javascript:alert(1)#banked';kind='banked'},[pscustomobject]@{id='https://example.org/hint#hinted';kind='hinted'})}
     Assert-Equal (Get-WidgetAnnouncementAlertView $bad 'en').hasUnread $false 'Unsafe or unconfirmed notices ignored'
     foreach ($side in @(48,64,100)) {
@@ -301,5 +315,37 @@ Test-Case 'hidden detail never acknowledges notices and newly arrived unseen IDs
     $view=[pscustomobject]@{active=@([pscustomobject]@{key='shown'});history=@()}
     Assert-Equal (Get-WidgetAnnouncementReadIds $alerts $view $false).Count 0 'Compact and hidden state'
     Assert-Equal ((Get-WidgetAnnouncementReadIds $alerts $view $true) -join ',') 'shown' 'Only rendered IDs'
+}
+Test-Case 'folded historical pages expose three more rows without marking later pages read' {
+    $rows=@(0..11 | ForEach-Object {[pscustomobject]@{id=('history-'+$_);key=('history-'+$_);sortAt=(12-$_)}})
+    $activity=[pscustomobject]@{active=@();history=$rows}
+    $alerts=[pscustomobject]@{ids=@($rows.id)}
+    Assert-Equal (Get-WidgetVisibleActivityView $activity).history.Count 0 'History is initially folded'
+    $first=Get-WidgetVisibleActivityView $activity 3 $true 3
+    Assert-Equal ($first.history.id -join ',') 'history-0,history-1,history-2' 'Initial three recent records'
+    Assert-Equal $first.historyNextCount 3 'Next batch size'
+    Assert-Equal ((Get-WidgetAnnouncementReadIds $alerts $first $true) -join ',') 'history-0,history-1,history-2' 'Only shown records become read'
+    $second=Get-WidgetVisibleActivityView $activity 3 $true 6
+    Assert-Equal $second.history.Count 6 'Second batch'
+    Assert-Equal $second.historyNextCount 3 'Next full batch'
+    $all=Get-WidgetVisibleActivityView $activity 3 $true 15
+    Assert-Equal $all.history.Count 12 'Final page includes all remaining rows'
+    Assert-Equal $all.historyNextCount 0 'No more button after the end'
+    Assert-Equal $activity.history.Count 12 'Stored history retained'
+}
+
+
+Test-Case 'current records use separate three-row pages while history stays folded' {
+    $current=@(0..5 | ForEach-Object {[pscustomobject]@{id=('current-'+$_);key=('current-'+$_);sortAt=(120-$_*20)}})
+    $archive=@(0..5 | ForEach-Object {[pscustomobject]@{id=('archive-'+$_);key=('archive-'+$_);sortAt=(110-$_*20)}})
+    $activity=[pscustomobject]@{active=$current;featured=$current[0..1];earlier=$current[2..5];history=$archive}
+    $first=Get-WidgetVisibleActivityView $activity
+    Assert-Equal ($first.active.id -join ',') 'current-0,current-1,current-2' 'Current-only newest-first page'
+    Assert-Equal $first.nextCount 3 'Next batch'
+    $second=Get-WidgetVisibleActivityView $activity 6
+    Assert-Equal $second.active.Count 6 'Six loaded records'
+    Assert-Equal $second.nextCount 0 'All current records loaded'
+    Assert-Equal $second.canCollapse $true 'Loaded pages can collapse'
+    Assert-Equal $activity.history.Count 6 'Archive is not truncated'
 }
 if ($script:failures) { throw "$script:failures native layout tests failed" }

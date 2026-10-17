@@ -33,8 +33,8 @@ test('a source reset category alone never confirms a conditional post or trigger
   await store.update(normalized);
   const row=view.deriveAnnouncementsView(store.state,time,'UTC','zh-CN').rows[0];
   assert.equal(row.phase,'unconfirmed');
-  assert.equal(row.title,'全局重置消息');
-  assert.equal(row.status,'网站未提供完成时间');
+  assert.equal(row.title,'额度重置相关消息');
+  assert.equal(row.status,'进展尚不明确');
   assert.equal(row.plannedText,'');
   assert.match(row.scopeText,/网站标注/);
   assert.deepEqual(store.alerts.unread,[]);
@@ -52,7 +52,7 @@ test('explicit source confirmation and valid completion records are distinct fro
   }
 });
 
-test('an already seen related post triggers a notice only when the source explicitly confirms it', async () => {
+test('legacy source confirmation retains records without promoting unverified original evidence to a preview', async () => {
   let time=now;
   const store=await source.createAnnouncementStore({now:()=>time});
   await store.update(source.normalizeAnnouncements(feed(),time));
@@ -62,11 +62,11 @@ test('an already seen related post triggers a notice only when the source explic
   assert.deepEqual(store.alerts.unread,[]);
   time+=hour;
   await store.update(source.normalizeAnnouncements({...feed(null,[{...event,certainty:'announced'}]),generated_at:at(2*hour)},time));
-  assert.equal(store.alerts.unread.length,1);
+  assert.equal(store.alerts.unread.length,0);
   time+=hour;
   await store.update(source.normalizeAnnouncements({...feed(null,[event]),generated_at:at(3*hour)},time));
   assert.equal(store.state.items[0].certainty,'announced','Missing repeated metadata does not revoke an explicit announcement');
-  assert.equal(store.alerts.unread.length,1);
+  assert.equal(store.alerts.unread.length,0);
 });
 
 test('old cached records without explicit certainty do not regain confirmation or old unread dots', async () => {
@@ -91,7 +91,8 @@ test('active announcements show the newest publication first without changing th
   const original=JSON.stringify(state);
   for(const language of ['zh-CN','en']) {
     const result=view.deriveAnnouncementsView(state,time,'Asia/Shanghai',language);
-    assert.deepEqual(result.rows.map(row=>row.id),['oct7','oct5','unknown']);
+    assert.deepEqual(result.rows.map(row=>row.id),['oct7','unknown']);
+    assert.deepEqual(result.history.map(row=>row.id),['oct5']);
   }
   assert.equal(JSON.stringify(state),original);
 });
@@ -143,8 +144,8 @@ test('only a complete fresh reconciliation from both sources withdraws a cached 
     assert.equal(store.state.history[0].sourceWithdrawn,true);
     assert.equal(store.state.history[0].deliveredAt,null,'Withdrawal is not delivery');
     const row=view.deriveAnnouncementsView(store.state,now,'UTC','zh-CN').history[0];
-    assert.equal(row.title,'来源已撤下的公告记录');
-    assert.equal(row.status,'监控来源已撤下此记录');
+    assert.equal(row.title,'监控网站已撤下此记录');
+    assert.equal(row.status,'监控网站已撤下此记录，不代表事情已取消或完成。');
     const restored=await source.createAnnouncementStore({file,now:()=>now});
     assert.equal(restored.state.items.length,0);
     assert.equal(restored.state.history[0].sourceWithdrawn,true);
@@ -154,14 +155,14 @@ test('only a complete fresh reconciliation from both sources withdraws a cached 
   } finally {await rm(dir,{recursive:true,force:true});}
 });
 
-test('reconciliation clears withdrawn unread notices but never withdraws evidenced completed records', async () => {
+test('reconciliation keeps legacy notices quiet and preserves evidenced completed records', async () => {
   let time=now;
   const store=await source.createAnnouncementStore({now:()=>time});
   await store.update(source.normalizeAnnouncements(feed(),time));
   time+=hour;
   const fresh={...scheduled(),ts:at(hour)};
   await store.update(source.normalizeAnnouncements({...feed(fresh),generated_at:at(hour)},time));
-  assert.equal(store.alerts.unread.length,1);
+  assert.equal(store.alerts.unread.length,0);
   await store.update({...source.normalizeAnnouncements({...feed(),generated_at:at(hour)},time),reconciledIds:[]});
   assert.deepEqual(store.alerts.unread,[]);
   const done={...fresh,delivered_at:at(hour)};
@@ -291,15 +292,16 @@ test('announcement presentation distinguishes upcoming, awaiting completion, com
 
 test('historical announcements without delivery evidence never imply they are still awaiting delivery', () => {
   const item = { id: 'old-grant', kind: 'banked', certainty: 'announced', announcedAt: at(-7 * 24 * hour), deliveredAt: null, sourceUrl: 'https://x.com/thsottiaux/status/old-grant' };
-  for (const [language, status] of [['en', 'Source did not provide a delivery record'], ['zh-CN', '来源未提供送达记录']]) {
+  for (const [language, status] of [['en', 'Completion status unclear'], ['zh-CN', '是否已完成尚不明确']]) {
     const historical = view.deriveAnnouncementsView({ status: 'ok', items: [], history: [item] }, now, 'UTC', language);
     assert.equal(historical.history[0].phase, 'unknown');
     assert.equal(historical.history[0].status, status);
     assert.equal(historical.history[0].completedText, '');
     assert.equal(historical.history[0].deliverySourceUrl, null);
     const active = view.deriveAnnouncementsView({ status: 'ok', items: [item], history: [] }, now, 'UTC', language);
-    assert.equal(active.rows[0].phase, 'announced', 'active announcements retain their pending state');
-    assert.equal(active.rows[0].status, locale.t(language, 'announcedWaiting'));
+    assert.equal(active.rows.length,0,'Old unresolved grants are automatically archived');
+    assert.equal(active.history[0].phase,'unknown');
+    assert.equal(active.history[0].status,status);
   }
 });
 
@@ -307,12 +309,12 @@ test('historical completion labels require and preserve delivery evidence', () =
   const item = { id: 'done-reset', kind: 'regular', announcedAt: at(-72 * hour), deliveredAt: at(-48 * hour), sourceUrl: 'https://x.com/thsottiaux/status/done-reset', deliverySourceUrl: 'https://x.com/thsottiaux/status/confirmed' };
   const result = view.deriveAnnouncementsView({ status: 'ok', items: [], history: [item] }, now, 'UTC', 'zh-CN');
   assert.equal(result.history[0].phase, 'archived');
-  assert.equal(result.history[0].status, '已重置');
-  assert.match(result.history[0].completedText, /确认完成/);
+  assert.equal(result.history[0].status, '来源表示额度已重置');
+  assert.match(result.history[0].completedText, /网站记录完成时间/);
   assert.equal(result.history[0].deliverySourceUrl, item.deliverySourceUrl);
 });
 
-test('compact announcement alerts baseline existing records and ignore late historical records', async () => {
+test('legacy and late historical records do not create trusted preview alerts', async () => {
   let time = now;
   const store = await source.createAnnouncementStore({ now: () => time });
   await store.update({ status: 'unavailable' });
@@ -324,12 +326,12 @@ test('compact announcement alerts baseline existing records and ignore late hist
   const fresh = { ...scheduled('regular'), ts: at(hour) };
   const addedHistory = { ...old, url: 'https://x.com/thsottiaux/status/older-added', ts: at(-48 * hour) };
   await store.update(source.normalizeAnnouncements({ ...feed([scheduled(), fresh], [old, addedHistory]), generated_at: at(hour) }, time));
-  assert.deepEqual(store.alerts.unread, [{ id: fresh.url + '#regular', kind: 'regular' }]);
+  assert.deepEqual(store.alerts.unread, []);
   await store.update({ status: 'unavailable' });
-  assert.equal(store.alerts.unread.length, 1, 'provider failure preserves genuine unread notices');
+  assert.equal(store.alerts.unread.length, 0, 'Provider failure cannot promote a legacy record');
 });
 
-test('unread confirmed announcements survive restart and acknowledgements clear only the IDs that were viewed', async () => {
+test('legacy category-only records survive restart without unread preview notifications', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'quota-unread-'));
   const file = join(dir, 'announcements.json');
   let time = now;
@@ -343,11 +345,11 @@ test('unread confirmed announcements survive restart and acknowledgements clear 
     time += hour;
     const reset = { ...scheduled('regular'), ts: at(2 * hour) };
     await store.update(source.normalizeAnnouncements({ ...feed([grant, reset]), generated_at: at(2 * hour) }, time));
-    assert.equal(store.alerts.unread.length, 2);
+    assert.equal(store.alerts.unread.length, 0);
     const restarted = await source.createAnnouncementStore({ file, now: () => time });
-    assert.equal(restarted.alerts.unread.length, 2);
+    assert.equal(restarted.alerts.unread.length, 0);
     await restarted.acknowledge(viewed);
-    assert.deepEqual(restarted.alerts.unread, [{ id: reset.url + '#regular', kind: 'regular' }], 'a newly arrived reset remains unread');
+    assert.deepEqual(restarted.alerts.unread, [], 'Legacy source categories lack verified original preview evidence');
     await restarted.acknowledge([reset.url + '#regular']);
     const reopened = await source.createAnnouncementStore({ file, now: () => time });
     await reopened.update(source.normalizeAnnouncements({ ...feed([grant, reset]), generated_at: at(2 * hour) }, time));
@@ -379,17 +381,60 @@ test('hidden compact details never acknowledge notices and a visible detail ackn
   assert.deepEqual(view.announcementIdsForReading(null, displayed, true), []);
 });
 
+test('current records page independently while archived records stay folded', () => {
+  const current = Array.from({length:6}, (_,i)=>({id:`current-${i}`,kind:'regular',announcedAt:120-i*20}));
+  const history = Array.from({length:6}, (_,i)=>({id:`archive-${i}`,kind:'banked',announcedAt:110-i*20}));
+  const activity = {rows:current,history};
+  const alerts = {unread:[...current,...history]};
+  const first = view.visibleAnnouncementView(activity);
+  assert.deepEqual(first.rows.map(row=>row.id),['current-0','current-1','current-2']);
+  assert.equal(first.nextCount,3);
+  assert.equal(first.canCollapse,false);
+  assert.deepEqual(view.announcementIdsForReading(alerts,first,true).sort(),['current-0','current-1','current-2'].sort());
+  const second = view.visibleAnnouncementView(activity,{limit:6});
+  assert.equal(second.rows.length,6);
+  assert.equal(second.nextCount,0);
+  assert.equal(second.canCollapse,true);
+  const all = view.visibleAnnouncementView(activity,{limit:12});
+  assert.equal(all.rows.length,6);
+  assert.equal(all.nextCount,0);
+  assert.equal(all.historyTotal,6);
+  assert.deepEqual(all.history,[]);
+  assert.equal(activity.rows.length,6);
+  assert.equal(activity.history.length,6);
+});
+
+test('an archive-only disclosure loads three at a time without marking later pages read', () => {
+  const history = Array.from({length:12}, (_,i)=>({id:`history-${i}`,kind:'regular'}));
+  const activity = {rows:[],history};
+  const alerts = {unread:history};
+  const first = view.visibleAnnouncementView(activity,{historyOpen:true});
+  assert.deepEqual(first.history.map(row=>row.id),['history-0','history-1','history-2']);
+  assert.equal(first.historyNextCount,3);
+  assert.deepEqual(view.announcementIdsForReading(alerts,first,true),first.history.map(row=>row.id));
+  const second = view.visibleAnnouncementView(activity,{historyOpen:true,historyLimit:6});
+  assert.equal(second.history.length,6);
+  assert.equal(second.historyNextCount,3);
+  assert.equal(view.announcementIdsForReading(alerts,second,true).includes('history-6'),false);
+  const all = view.visibleAnnouncementView(activity,{historyOpen:true,historyLimit:12});
+  assert.equal(all.history.length,12);
+  assert.equal(all.historyNextCount,0);
+  assert.equal(all.historyTotal,12);
+  assert.deepEqual(all.rows,[]);
+  assert.equal(history.length,12,'Pagination never truncates stored history');
+});
+
 test('no known announcements use one merged notice; transport failure has a different notice and retains known rows', () => {
   assert.equal(typeof view.deriveAnnouncementsView, 'function');
   const empty = view.deriveAnnouncementsView({ status: 'ok', sourceUpdatedAt:at(0), items: [], history: [] }, now, 'UTC', 'zh-CN');
   assert.deepEqual(empty.rows, []);
-  assert.equal(empty.notice, '监控来源暂无已确认的赠送或全局额度重置公告');
+  assert.equal(empty.notice, '监控网站暂无新的重置动态记录');
   const unavailable = view.deriveAnnouncementsView({ status: 'unavailable', items: [], history: [] }, now, 'UTC', 'zh-CN');
-  assert.equal(unavailable.notice, '预告信息暂不可用');
+  assert.equal(unavailable.notice, '监控网站消息暂不可用');
   const known = { id: 'b', kind: 'banked', scheduledDate: '2026-10-01', sourceUrl: 'https://x.com/thsottiaux/status/b' };
   const retained = view.deriveAnnouncementsView({ status: 'unavailable', items: [known], history: [], stale: true }, now, 'UTC', 'en');
   assert.equal(retained.rows.length, 1);
-  assert.equal(retained.notice, 'Information pending update');
+  assert.equal(retained.notice, 'Monitoring-site data pending update');
   assert.doesNotMatch(retained.rows[0].timeText, /00:00/);
 });
 
@@ -433,10 +478,10 @@ test('precise pending schedules show local time and offset independently from an
   const item = { id: 'timed-grant', kind: 'banked', certainty: 'announced', announcedAt: '2026-09-30T10:00:00Z', scheduledAt: '2026-10-01T20:30:00Z', scope: 'paid', sourceUrl: 'https://example.org/announcement' };
   const state = { status: 'ok', items: [item], history: [] };
   const shanghai = view.deriveAnnouncementsView(state, now, 'Asia/Shanghai', 'zh-CN').rows[0];
-  assert.match(shanghai.plannedText, /预定送达.*10\/02.*04:30.*本地 UTC\+08:00/);
+  assert.match(shanghai.plannedText, /预计发放.*10\/02.*04:30.*本地 UTC\+08:00/);
   assert.match(shanghai.announcedText, /公告发布.*09\/30.*18:00.*本地 UTC\+08:00/);
   const pacific = view.deriveAnnouncementsView({ ...state, items: [{ ...item, kind: 'regular' }] }, now, 'America/Los_Angeles', 'en').rows[0];
-  assert.match(pacific.plannedText, /Scheduled reset.*10\/01.*13:30.*local UTC-07:00/);
+  assert.match(pacific.plannedText, /Expected reset.*10\/01.*13:30.*local UTC-07:00/);
   assert.match(pacific.announcedText, /Published.*09\/30.*03:00.*local UTC-07:00/);
 });
 
@@ -457,7 +502,7 @@ test('date-only and unspecified schedules never masquerade as precise local deli
   assert.match(dateOnly.plannedText, /10\/01.*具体时间未公布/);
   assert.doesNotMatch(dateOnly.plannedText, /UTC|\d\d:\d\d|09\/30/);
   const unknown = view.deriveAnnouncementsView({ ...state, items: [{ ...item, scheduledDate: null }] }, now, 'Asia/Shanghai', 'en').rows[0];
-  assert.equal(unknown.plannedText, 'Delivery time not announced');
+  assert.equal(unknown.plannedText, 'Grant time not announced');
   assert.match(unknown.announcedText, /Published.*19:00.*local UTC\+08:00/);
   assert.equal(unknown.completedText, '');
 });
