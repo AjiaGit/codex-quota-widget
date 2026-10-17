@@ -1,6 +1,8 @@
 ﻿# Shared native helpers. Dot-source this file; it does not start a service or UI.
 $script:WidgetStrings = @{
     en = @{
+        previewCancelled = 'Quota-reset notice cancelled'
+        previewDelayed = 'Quota-reset notice postponed'
         previewBefore = 'Expected by {0}'
         previewAround = 'Expected around {0}'
         previewLiteral = 'Expected: {0} (original wording)'
@@ -128,6 +130,8 @@ $script:WidgetStrings = @{
         expandHistory = 'Show history'; collapseHistory = 'Hide history'
     }
     'zh-CN' = @{
+        previewCancelled = '额度重置预告已取消'
+        previewDelayed = '额度重置预告已延期'
         previewBefore = '预计 {0} 前'
         previewAround = '预计 {0} 左右'
         previewLiteral = '预计：{0}（原文表述）'
@@ -415,7 +419,9 @@ function Get-WidgetActivityPresentation($row, [string]$language) {
     $kind=if ($row.kind -eq 'banked') {'Grant'} else {'Reset'}
     $attribution=Get-WidgetActivityAttribution $row $language
     $category=Get-WidgetText $(if ($completed) {'categoryComplete'} elseif ($explicit) {'categoryPreview'} else {'categoryUnverified'}) $language
-    if ($completed -and $row.statementBasis -eq 'observation') {
+    $previewUpdate=$row.previewPriority -and $row.correction -in @('cancelled','delayed')
+    if($previewUpdate){$category=Get-WidgetText 'categoryPreview' $language;$title=Get-WidgetText $(if($row.correction -eq 'cancelled'){'previewCancelled'}else{'previewDelayed'}) $language}
+    elseif ($completed -and $row.statementBasis -eq 'observation') {
         $title=Get-WidgetText ('observed'+$kind) $language @($attribution.source)
     } elseif ($completed -or ($explicit -and $row.phase -ne 'unknown')) {
         $action=Get-WidgetText ($(if ($completed) {'delivered'} else {'upcoming'})+$kind+'Title') $language
@@ -441,7 +447,7 @@ function Get-WidgetActivityPresentation($row, [string]$language) {
         @($(if ($row.withdrawn) {Get-WidgetText 'sourceWithdrawn' $language}),
           $(if ($row.phase -eq 'waiting') {Get-WidgetText ('waiting'+$kind) $language})) | Where-Object {$_}
     }
-    $recordLabel=(Get-WidgetText $(if ($row.statementBasis -eq 'observation') {'observationType'} else {'publicType'}) $language)+' · '+$(if (-not $explicit) {Get-WidgetText 'categoryUnverifiedShort' $language} else {$category})
+    $recordLabel=(Get-WidgetText $(if ($row.statementBasis -eq 'observation') {'observationType'} else {'publicType'}) $language)+' · '+$(if (-not $explicit -and -not $previewUpdate) {Get-WidgetText 'categoryUnverifiedShort' $language} else {$category})
     if($row.previewExpired){$status=Get-WidgetText 'previewExpired' $language}
     [pscustomobject]@{body=[string]$row.summary;title=$title;category=$category;recordLabel=$recordLabel;label=$attribution.label;fact=(@($fact,$row.scopeText) | Where-Object {$_}) -join ' · ';status=(@($status) -join ' ');extra=$extra -join [Environment]::NewLine;missing=$false}
 
@@ -670,7 +676,7 @@ function ConvertTo-WidgetAnnouncementRow($row, [string]$language, [DateTimeOffse
         statementBasis=$row.statementBasis;kindKnown=($row.kindKnown -ne $false);correction=$row.correction
         monitorSourceUrl=$null
         retentionText=$(if ($phase -eq 'delivered') {Get-WidgetText 'retention' $language} else {''})
-        sourceUrl=$(if (Test-WidgetHttpsUrl $row.previewSourceUrl) {[string]$row.previewSourceUrl} elseif (Test-WidgetHttpsUrl $row.sourceUrl) {[string]$row.sourceUrl} else {$null})
+        sourceUrl=$(if ($completed -and (Test-WidgetHttpsUrl $row.deliverySourceUrl)) {[string]$row.deliverySourceUrl} elseif (Test-WidgetHttpsUrl $row.previewSourceUrl) {[string]$row.previewSourceUrl} elseif (Test-WidgetHttpsUrl $row.sourceUrl) {[string]$row.sourceUrl} else {$null})
         deliverySourceUrl=$(if ($completed -and (Test-WidgetHttpsUrl $row.deliverySourceUrl)) {[string]$row.deliverySourceUrl} else {$null})
     }
 }

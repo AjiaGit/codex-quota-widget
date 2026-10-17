@@ -1,4 +1,5 @@
 const en = {
+  previewCancelled:'Quota-reset notice cancelled',previewDelayed:'Quota-reset notice postponed',
   previewBefore:'Expected by {time}',previewAround:'Expected around {time}',previewLiteral:'Expected: {time} (original wording)',previewExpired:'The estimated time has passed; no further update is available.',
   latestRecovery:'Last quota recovery noticed: {time}', observationType:'Website monitoring', categoryUnverifiedShort:'Unverified', relatedUnknown:'Reset-related news',
   categoryPreview:'Advance notice', categoryComplete:'Completion update', categoryUnverified:'Unverified update',
@@ -79,6 +80,7 @@ const en = {
   completionHelpReset:'This is a source report of completion; it does not confirm recovery of your account quota.',
 };
 const zh = {
+  previewCancelled:'额度重置预告已取消',previewDelayed:'额度重置预告已延期',
   previewBefore:'预计 {time} 前',previewAround:'预计 {time} 左右',previewLiteral:'预计：{time}（原文表述）',previewExpired:'预计时段已过，暂无后续更新。',
   latestRecovery:'最近检测到额度恢复：{time}', observationType:'网站监测', categoryUnverifiedShort:'待核实', relatedUnknown:'重置相关消息',
   categoryPreview:'预告', categoryComplete:'完成消息', categoryUnverified:'待核实消息',

@@ -90,8 +90,8 @@ export function deriveAnnouncementsView(state,now=Date.now(),timeZone=Intl.DateT
     if(!explicit)displayTitle=t(language,item.kindKnown===false?'relatedUnknown':(item.kind==='banked'?'relatedGrant':'relatedReset'));
     if(confirmed&&item.statementBasis==='observation')displayTitle=t(language,item.kind==='banked'?'observedGrant':'observedReset',{source:attribution.source});
     const kindKey=item.kind==='banked'?'Grant':'Reset';
-    const category=t(language,confirmed?'categoryComplete':explicit?'categoryPreview':'categoryUnverified');
-    const recordLabel=[t(language,item.statementBasis==='observation'?'observationType':'publicType'),
+    let category=t(language,confirmed?'categoryComplete':explicit?'categoryPreview':'categoryUnverified');
+    let recordLabel=[t(language,item.statementBasis==='observation'?'observationType':'publicType'),
       !explicit?t(language,'categoryUnverifiedShort'):category].join(' · ');
     const correctionKey=item.correction==='not-complete'?'correctionNotice':item.correction==='cancelled'?'cancelledNotice':item.correction==='delayed'?'delayedNotice':null;
     const displayStatus=correctionKey?t(language,correctionKey):!explicit?
@@ -100,14 +100,14 @@ export function deriveAnnouncementsView(state,now=Date.now(),timeZone=Intl.DateT
     let compactPlanned=!explicit?'':plannedDate?t(language,scheduleKey,{time:Number.isFinite(scheduled)?formatCompactLocalDate(scheduled,timeZone,language,now):plannedDate}):!confirmed&&!historical?t(language,unknownScheduleKey):'';
     const genuinePreview=isResetPreview(item,now);
     const previewUpdate=item.kind==='regular'&&item.statementBasis==='original'&&['cancelled','delayed'].includes(item.correction)&&
-      now-announced<PUBLIC_MAX_AGE&&(item.relatedUrls||[]).some(url=>[...(state?.items||[]),...(state?.history||[])].some(row=>row.sourceUrl===url&&row.announcementBasis==='original'));
+      (item.previewPriority===true || now-announced<PUBLIC_MAX_AGE&&(item.relatedUrls||[]).some(url=>[...(state?.items||[]),...(state?.history||[])].some(row=>[row.sourceUrl,...(row.previewAliases||[])].includes(url)&&row.announcementBasis==='original')));
     const previewPriority=genuinePreview||previewUpdate;
     if(explicit&&!confirmed&&item.scheduleText) {
       const key=item.scheduledAt?(item.schedulePrecision==='window'||item.schedulePrecision==='deadline'?'previewBefore':'previewAround'):'previewLiteral';
       plannedText=t(language,key,{time:item.scheduledAt?formatLocalAnnouncementDate(scheduled,timeZone,language,now):item.scheduleText});
       compactPlanned=t(language,key,{time:item.scheduledAt?formatCompactLocalDate(scheduled,timeZone,language,now):item.scheduleText});
     }
-    if(previewUpdate){plannedText='';compactPlanned='';}
+    if(previewUpdate){plannedText='';compactPlanned='';category=t(language,'categoryPreview');recordLabel=t(language,'publicType')+' · '+category;displayTitle=t(language,item.correction==='cancelled'?'previewCancelled':'previewDelayed');}
     const expiredPreview=item.kind==='regular'&&item.announcementBasis==='original'&&!confirmed&&!item.correction&&previewDeadline(item)<=now;
     const compactCompleted=confirmed?`${t(language,completionLabel)} ${formatCompactLocalDate(delivered,timeZone,language,now)}`:'';
     const compactAnnounced=Number.isFinite(announced)?t(language,explicit?'published':'posted',{time:formatCompactLocalDate(announced,timeZone,language,now)}):'';
@@ -115,7 +115,7 @@ export function deriveAnnouncementsView(state,now=Date.now(),timeZone=Intl.DateT
       scheduleNote:explicit&&Number.isFinite(scheduled)&&item.scheduledTimeZone?t(language,'sourceTimeZoneNote',{zone:item.scheduledTimeZone}):'',scheduleNoteDetail:language==='zh-CN'?(item.summaryZh||''):(item.summary||item.summaryZh||''),
       plannedText,completedText,announcedText,scopeText,retentionText:phase==='delivered'?t(language,'retention'):'',
       timeText:[completedText||plannedText||announcedText,scopeText].filter(Boolean).join(' · '),
-      sourceUrl:safeSource(item.previewSourceUrl||item.sourceUrl),sourceLabel:t(language,item.statementBasis==='observation'?'viewWebsiteRecord':explicit?'viewAnnouncement':'viewSource'),deliverySourceUrl:confirmed?safeSource(item.deliverySourceUrl):null,
+      sourceUrl:safeSource(confirmed?item.deliverySourceUrl||item.sourceUrl:item.previewSourceUrl||item.sourceUrl),sourceLabel:t(language,item.statementBasis==='observation'?'viewWebsiteRecord':explicit?'viewAnnouncement':'viewSource'),deliverySourceUrl:confirmed?safeSource(item.deliverySourceUrl):null,
       monitorSourceUrl:null,
       summary,previewText:summary,previewPriority,noticeVersion:previewVersion(item),
       display:{title:displayTitle,category,recordLabel,label:attribution.label,scope:scopeText,

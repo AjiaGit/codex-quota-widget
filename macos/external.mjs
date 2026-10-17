@@ -85,6 +85,9 @@ function normalizedAnnouncement(raw, now, scheduled = false, persisted = false) 
     observationAt: persisted ? timestamp(raw.observationAt, now) : null,
     previewSourceUrl: persisted ? officialPostUrl(raw.previewSourceUrl) : null,
     previewUpdatedAt: persisted ? timestamp(raw.previewUpdatedAt,now) : null,
+    previewAliases: persisted ? (Array.isArray(raw.previewAliases)?raw.previewAliases:[]).map(officialPostUrl).filter(Boolean).slice(-10) : [],
+    previewBaseScope: persisted ? text(raw.previewBaseScope) : null,
+    previewBaseScopeLabel: persisted ? text(raw.previewBaseScopeLabel) : null,
     evidenceUrl: persisted ? safeHttpsUrl(raw.evidenceUrl) : null,
     multiKind: persisted && raw.multiKind === true,
   };
@@ -148,12 +151,12 @@ function deduplicate(items, knownItems = []) {
       item = { ...item, sourceHint: 'inactive', sourceWithdrawn: true };
     // A partial refresh of the parent alone cannot erase its explicit reply.
     if(previous?.previewSourceUrl&&!item.previewSourceUrl&&!item.scheduleText&&!item.correction) {
-      for(const field of ['scheduledAt','scheduledFrom','scheduleText','schedulePrecision','previewSourceUrl','previewUpdatedAt','summary'])item[field]=previous[field];
+      for(const field of ['scheduledAt','scheduledFrom','scheduleText','schedulePrecision','previewSourceUrl','previewUpdatedAt','previewAliases','previewBaseScope','previewBaseScopeLabel','scope','scopeLabel','summary'])item[field]=previous[field];
     }
     map.set(item.id, previous ? { ...previous, ...item,
       announcedAt: item.announcedAt || previous.announcedAt,
-      scheduledAt: item.scheduledAt || previous.scheduledAt,
-      scheduledDate: item.scheduledDate || previous.scheduledDate,
+      scheduledAt: item.statementBasis==='original' ? item.scheduledAt : item.scheduledAt || previous.scheduledAt,
+      scheduledDate: item.statementBasis==='original' ? item.scheduledDate : item.scheduledDate || previous.scheduledDate,
       certainty: item.certainty === 'announced' || previous.certainty === 'announced' ? 'announced' : 'unconfirmed',
       deliveredAt: item.deliveredAt || previous.deliveredAt,
       kindBasis: item.kindBasis || previous.kindBasis,
@@ -197,13 +200,20 @@ function linkCompletions(items) {
   const records = deduplicate(items).map(item=>({...item})).sort((a,b) => Date.parse(a.announcedAt || 0) - Date.parse(b.announcedAt || 0));
   for(const update of [...records]) {
     if(update.kind!=='regular'||update.certainty!=='announced'||update.deliveredAt||update.correction||update.statementBasis!=='original')continue;
-    const parents=records.filter(item=>item!==update&&item.kind===update.kind&&item.certainty==='announced'&&!item.deliveredAt&&!item.correction&&
+    const parents=records.filter(item=>item!==update&&item.kind===update.kind&&(item.certainty==='announced'||item.correction)&&!item.deliveredAt&&
       update.relatedUrls?.includes(item.sourceUrl)&&Date.parse(item.announcedAt)<Date.parse(update.announcedAt)&&
-      (!item.scope||!update.scope||item.scope===update.scope));
+      (item.previewAliases?.includes(update.sourceUrl)||!item.scope||!update.scope||item.scope===update.scope));
     if(parents.length!==1)continue;
     const parent=parents[0];
+    if(parent.correction&&Date.parse(parent.correctionAt)>=Date.parse(update.announcedAt)){records.splice(records.indexOf(update),1);continue;}
     if(Date.parse(parent.previewUpdatedAt)>Date.parse(update.announcedAt))continue;
-    Object.assign(parent,{...parsePreviewTime(update.summary,update.announcedAt),summary:update.summary,
+    const baseScope=parent.previewSourceUrl?parent.previewBaseScope:parent.scope;
+    const baseScopeLabel=parent.previewSourceUrl?parent.previewBaseScopeLabel:parent.scopeLabel;
+    const scope=update.scope||(parent.previewSourceUrl===update.sourceUrl?baseScope:parent.scope);
+    Object.assign(parent,{...parsePreviewTime(update.summary,update.announcedAt),summary:update.summary,scope,
+      scopeLabel:update.scopeLabel||(parent.previewSourceUrl===update.sourceUrl?baseScopeLabel:parent.scopeLabel),
+      previewBaseScope:baseScope,previewBaseScopeLabel:baseScopeLabel,
+      previewAliases:[...new Set([...(parent.previewAliases||[]),parent.previewSourceUrl,update.sourceUrl].filter(Boolean))].slice(-10),
       previewSourceUrl:update.sourceUrl,previewUpdatedAt:update.announcedAt,evidenceUpdatedAt:update.evidenceUpdatedAt,
       evidenceFresh:update.evidenceFresh,sourceSites:sourceSites([...(parent.sourceSites||[]),...(update.sourceSites||[])])});
     records.splice(records.indexOf(update),1);
@@ -212,10 +222,11 @@ function linkCompletions(items) {
     const targets=records.filter(item=>item!==correction && officialPostUrl(item.sourceUrl) && item.kind===correction.kind &&
       item.announcedAt && correction.announcedAt && Date.parse(item.announcedAt)<Date.parse(correction.announcedAt) &&
       !(Date.parse(item.deliveredAt || item.correctionAt)>Date.parse(correction.announcedAt)) &&
-      correction.relatedUrls?.includes(item.sourceUrl) && (!item.scope || !correction.scope || item.scope===correction.scope));
+      correction.relatedUrls?.some(url=>[item.sourceUrl,item.previewSourceUrl,...(item.previewAliases||[])].includes(url)) && (!item.scope || !correction.scope || item.scope===correction.scope));
     if(targets.length!==1)continue;
     Object.assign(targets[0],{certainty:'unconfirmed',correction:correction.correction,sourceWithdrawn:true,
       correctionSourceUrl:correction.sourceUrl,correctionAt:correction.announcedAt,
+      scheduledAt:null,scheduledFrom:null,scheduledDate:null,scheduleText:null,schedulePrecision:null,
       deliveredAt:null,deliverySourceUrl:null,completionTimeBasis:null,evidenceUpdatedAt:correction.evidenceUpdatedAt,
       evidenceFresh:correction.evidenceFresh});
     // Keep the separately dated correction post as the verifiable source. The
@@ -231,7 +242,7 @@ function linkCompletions(items) {
       Date.parse(item.announcedAt) < Date.parse(completion.deliveredAt) &&
       (!item.correctionAt || Date.parse(completion.deliveredAt)>Date.parse(item.correctionAt) ||
         completion.sourceUrl===item.correctionSourceUrl && Date.parse(completion.evidenceUpdatedAt)>=Date.parse(item.evidenceUpdatedAt)) &&
-      (completion.relatedUrls || []).includes(item.sourceUrl) &&
+      (completion.relatedUrls || []).some(url=>[item.sourceUrl,item.previewSourceUrl,...(item.previewAliases||[])].includes(url)) &&
       (!item.scope || !completion.scope || item.scope === completion.scope));
     if (pending.length !== 1) continue;
     const item = pending[0];
@@ -418,7 +429,9 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
   const observed = new Set(), observedStages = new Map(), unread = new Map(), previewVersions = new Map(), previewTraces = new Map();
   const canNotify = item => isResetPreview(item,now()) || Boolean(item?.kind==='regular' && item.statementBasis==='original' &&
     ['cancelled','delayed'].includes(item.correction) && (!item.correctionSourceUrl || item.correctionSourceUrl===item.sourceUrl) &&
-    now()-Date.parse(item.announcedAt)<MAX_AGE_MS && (item.relatedUrls||[]).some(url=>previewVersions.has(url+'#regular')));
+    (now()-Date.parse(item.announcedAt)<MAX_AGE_MS || now()-(previewTraces.get(item.id)?.notifiedAt??-Infinity)<MAX_AGE_MS ||
+      [...snapshot.items,...snapshot.history].some(row=>isResetPreview(row,now()) && (row.id===item.id||(item.relatedUrls||[]).some(url=>[row.sourceUrl,row.previewSourceUrl,...(row.previewAliases||[])].includes(url))))) && (previewVersions.has(item.id) || (item.relatedUrls||[]).some(url=>
+      previewVersions.has(url+'#regular') || [...snapshot.items,...snapshot.history].some(row=>previewVersions.has(row.id)&&[row.previewSourceUrl,...(row.previewAliases||[])].includes(url)))));
   const previewEntry = item => ({id:item.id,kind:item.kind,version:previewVersion(item)});
   const alertIdentity = id => {
     if(typeof id !== 'string')return null;
@@ -518,7 +531,7 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
     async update(input) {
       const fresh=input?.status === 'ok' && !input.stale && sourceFresh(input.sourceUpdatedAt,now());
       const eligible = item => !Array.isArray(input?.noticeEvidence) || input.noticeEvidence.some(evidence =>
-        [item.id,item.deliverySourceUrl+'#'+item.kind].includes(evidence.id) && evidence.stage === noticeStage(item));
+        [item.id,item.previewSourceUrl+'#'+item.kind,item.deliverySourceUrl+'#'+item.kind].includes(evidence.id) && evidence.stage === noticeStage(item));
       const inactiveHints = new Set(fresh && Array.isArray(input.inactiveHintUrls)
         ? input.inactiveHintUrls.map(officialPostUrl).filter(Boolean) : []);
       const withdrawHint = item => item.sourceHint && inactiveHints.has(item.sourceUrl)
@@ -533,16 +546,6 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
       const hintEvidence = new Set([...incomingHistory, ...incomingItems].filter(item=>item.sourceHint &&
         (item.sourceSites.includes('codex-reset.com') || !knownItems.some(old=>old.sourceUrl===item.sourceUrl&&old.sourceSites.includes('codex-reset.com')))).map(item=>item.sourceUrl));
       if(fresh) {
-        for(const item of [...freshItems,...freshHistory].filter(eligible)) {
-          const version=previewVersion(item);
-          if(!previewTraces.has(item.id))previewTraces.set(item.id,{id:item.id,publishedAt:item.announcedAt,firstSeenAt:now(),classifiedAt:null,notifiedAt:null,indicatorReportedAt:null});
-          const trace=previewTraces.get(item.id);
-          if(canNotify(item) && previewVersions.get(item.id)!==version){
-            unread.set(item.id,previewEntry(item));Object.assign(trace,{classifiedAt:now(),notifiedAt:now(),indicatorReportedAt:null});
-          }
-          while(previewTraces.size>100)previewTraces.delete(previewTraces.keys().next().value);
-          if(isResetPreview(item,now()) || canNotify(item))previewVersions.set(item.id,version);
-        }
         if(baselineAt===null)baselineAt=now();
         for(const item of [...freshHistory,...freshItems].filter(eligible)) {
           observed.add(item.id);
@@ -566,6 +569,19 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
         reconciled && !reconciled.has(item.id) && !item.deliveredAt ? {...item,sourceWithdrawn:true} : item);
       for(const item of retained)if(item.sourceWithdrawn)unread.delete(item.id);
       const records = linkCompletions([...previous.history, ...retained, ...freshHistory, ...freshItems]);
+      const freshIds=new Set([...freshItems,...freshHistory].map(item=>item.id));
+      if(fresh) {
+        for(const item of records.filter(item=>item.evidenceFresh!==false && eligible(item) && [item.id,item.previewSourceUrl+'#'+item.kind].some(id=>freshIds.has(id)))) {
+          const version=previewVersion(item);
+          if(!previewTraces.has(item.id))previewTraces.set(item.id,{id:item.id,publishedAt:item.announcedAt,firstSeenAt:now(),classifiedAt:null,notifiedAt:null,indicatorReportedAt:null});
+          const trace=previewTraces.get(item.id);
+          if(canNotify(item) && previewVersions.get(item.id)!==version){
+            unread.set(item.id,previewEntry(item));Object.assign(trace,{classifiedAt:now(),notifiedAt:now(),indicatorReportedAt:null});
+          }
+          while(previewTraces.size>100)previewTraces.delete(previewTraces.keys().next().value);
+          if(isResetPreview(item,now()) || canNotify(item))previewVersions.set(item.id,version);
+        }
+      }
       for (const item of records) {
         if (!canNotify(item)) unread.delete(item.id);
         // A cached source can improve an existing record without being fresh
