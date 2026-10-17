@@ -41,26 +41,32 @@ public static class SmokeScrollFixture {
    Reject(delegate{QuotaSmokeWindows.OwnedScrollPosition(root,scroll,pid);},"Actually hidden body was accepted");
    reports.Add("PASS smoke scroll rejects a genuinely hidden body without a redraw marker");
    form.Show();System.Windows.Forms.Application.DoEvents();
-   Redraw(root,false);
-   System.Threading.Tasks.Task<int> read=null;
-   try{
-    Require(GetProp(root,"SysSetRedraw")!=System.IntPtr.Zero && !IsWindowVisible(scroll),"Windows did not expose the expected redraw pause visibility state");
-    using(var entered=new System.Threading.ManualResetEventSlim(false)){
-     read=System.Threading.Tasks.Task.Factory.StartNew(delegate{entered.Set();return QuotaSmokeWindows.OwnedScrollPosition(root,scroll,pid);});
-     Require(entered.Wait(1000),"Scroll reader did not start");
-     System.Threading.Thread.Sleep(100);
-     if(read.IsCompleted){
-      string reason=read.IsFaulted?read.Exception.GetBaseException().Message:"returned before redraw resumed";
-      throw new System.Exception("Scroll read did not wait for the evidenced redraw pause: "+reason);
+   foreach(var pausedTarget in new[]{root,scroll}){
+    Redraw(pausedTarget,false);
+    System.Threading.Tasks.Task<int> read=null;
+    try{
+     Require(GetProp(pausedTarget,"SysSetRedraw")!=System.IntPtr.Zero && !IsWindowVisible(scroll),"Windows did not expose the expected redraw pause visibility state");
+     var guardTime=System.Diagnostics.Stopwatch.StartNew();
+     Reject(delegate{QuotaSmokeWindows.OwnedScrollPosition(root,scroll,pid+100000);},"Redraw pause accepted a foreign process");
+     Reject(delegate{QuotaSmokeWindows.OwnedScrollPosition(root,other.Handle,pid);},"Redraw pause accepted an unrelated window");
+     Require(guardTime.ElapsedMilliseconds<1000,"Redraw pause deferred invalid-target rejection");
+     using(var entered=new System.Threading.ManualResetEventSlim(false)){
+      read=System.Threading.Tasks.Task.Factory.StartNew(delegate{entered.Set();return QuotaSmokeWindows.OwnedScrollPosition(root,scroll,pid);});
+      Require(entered.Wait(1000),"Scroll reader did not start");
+      System.Threading.Thread.Sleep(100);
+      if(read.IsCompleted){
+       string reason=read.IsFaulted?read.Exception.GetBaseException().Message:"returned before redraw resumed";
+       throw new System.Exception("Scroll read did not wait for the evidenced redraw pause: "+reason);
+      }
+      Redraw(pausedTarget,true);
+      var deadline=System.DateTime.UtcNow.AddSeconds(3);
+      while(!read.IsCompleted && System.DateTime.UtcNow<deadline){System.Windows.Forms.Application.DoEvents();System.Threading.Thread.Sleep(10);}
+      Require(read.IsCompleted,"Scroll read did not finish after redraw resumed");
+      Require(read.GetAwaiter().GetResult()==0,"Resumed owned position");
      }
-     Redraw(root,true);
-     var deadline=System.DateTime.UtcNow.AddSeconds(3);
-     while(!read.IsCompleted && System.DateTime.UtcNow<deadline){System.Windows.Forms.Application.DoEvents();System.Threading.Thread.Sleep(10);}
-     Require(read.IsCompleted,"Scroll read did not finish after redraw resumed");
-     Require(read.GetAwaiter().GetResult()==0,"Resumed owned position");
-    }
-    reports.Add("PASS actual smoke scroll waits through WM_SETREDRAW and keeps the same owned body");
-   }finally{Redraw(root,true);System.Windows.Forms.Application.DoEvents();}
+     reports.Add("PASS actual smoke scroll waits through WM_SETREDRAW on "+(pausedTarget==root?"parent":"body")+" and keeps strict ownership");
+    }finally{Redraw(pausedTarget,true);System.Windows.Forms.Application.DoEvents();}
+   }
    Require(QuotaSmokeWindows.ScrollOwnedBody(root,scroll,pid,3)>0,"Normal owned scrolling stopped working");
    reports.Add("PASS smoke helper still scrolls the verified body after redraw resumes");
    Redraw(root,false);

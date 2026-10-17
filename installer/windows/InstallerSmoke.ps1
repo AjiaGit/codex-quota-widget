@@ -112,11 +112,34 @@ public static class QuotaSmokeWindows {
     [DllImport("user32.dll")] private static extern bool GetScrollInfo(IntPtr window, int bar, ref ScrollInfo info);
     [DllImport("user32.dll", EntryPoint="GetPropW", CharSet=CharSet.Unicode, ExactSpelling=true)] private static extern IntPtr GetProp(IntPtr window, string name);
     public static int OwnedScrollPosition(IntPtr parent, IntPtr scroll, int pid) {
-        if (scroll == IntPtr.Zero || ScrollBody(parent,pid) != scroll || !IsOwned(scroll,pid) || !IsChild(parent,scroll) || !IsWindowVisible(scroll))
-            throw new InvalidOperationException("Scroll escaped the owned visible fixture body: parent="+parent+", scroll="+scroll+", currentScroll="+ScrollBody(parent,pid)+", ownedParent="+IsOwned(parent,pid)+", ownedScroll="+IsOwned(scroll,pid)+", child="+IsChild(parent,scroll)+", visibleParent="+IsWindowVisible(parent)+", visibleScroll="+IsWindowVisible(scroll)+", parentRedraw="+GetProp(parent,"SysSetRedraw")+", scrollRedraw="+GetProp(scroll,"SysSetRedraw"));
-        var info=new ScrollInfo {Size=(uint)Marshal.SizeOf(typeof(ScrollInfo)),Mask=4};
-        if (!GetScrollInfo(scroll,1,ref info)) throw new InvalidOperationException("Fixture body has no vertical scroll position");
-        return info.Position;
+        var settling=System.Diagnostics.Stopwatch.StartNew();
+        while (true) {
+            var currentScroll=ScrollBody(parent,pid);
+            bool ownedParent=IsOwned(parent,pid), ownedScroll=IsOwned(scroll,pid), child=IsChild(parent,scroll);
+            bool visibleParent=IsWindowVisible(parent), visibleScroll=IsWindowVisible(scroll);
+            var parentRedraw=GetProp(parent,"SysSetRedraw"); var scrollRedraw=GetProp(scroll,"SysSetRedraw");
+            bool sameBody=scroll!=IntPtr.Zero && currentScroll==scroll && ownedParent && ownedScroll && child;
+            // WM_SETREDRAW(FALSE) temporarily clears WS_VISIBLE, including for descendants.
+            // Wait only for an evidenced render batch on this same owned subtree, never for
+            // an arbitrary hidden/replaced window or a failed product assertion.
+            // https://learn.microsoft.com/windows/win32/gdi/wm-setredraw
+            if (sameBody && parentRedraw==IntPtr.Zero && scrollRedraw==IntPtr.Zero) {
+                // The batch can finish between the first visibility sample and GetProp.
+                visibleParent=IsWindowVisible(parent); visibleScroll=IsWindowVisible(scroll);
+                if (visibleParent && visibleScroll) {
+                    var info=new ScrollInfo {Size=(uint)Marshal.SizeOf(typeof(ScrollInfo)),Mask=4};
+                    if (!GetScrollInfo(scroll,1,ref info)) throw new InvalidOperationException("Fixture body has no vertical scroll position");
+                    return info.Position;
+                }
+                // Conversely a new batch can start between GetProp and the final
+                // visibility sample. Classify that observed pause before rejecting it.
+                parentRedraw=GetProp(parent,"SysSetRedraw"); scrollRedraw=GetProp(scroll,"SysSetRedraw");
+            }
+            if (sameBody && (parentRedraw!=IntPtr.Zero || scrollRedraw!=IntPtr.Zero) && settling.ElapsedMilliseconds<2000) {
+                System.Threading.Thread.Sleep(10); continue;
+            }
+            throw new InvalidOperationException("Scroll escaped the owned visible fixture body: parent="+parent+", scroll="+scroll+", currentScroll="+currentScroll+", ownedParent="+ownedParent+", ownedScroll="+ownedScroll+", child="+child+", visibleParent="+visibleParent+", visibleScroll="+visibleScroll+", parentRedraw="+parentRedraw+", scrollRedraw="+scrollRedraw);
+        }
     }
     public static int ScrollOwnedBody(IntPtr parent, IntPtr scroll, int pid, int command) {
         OwnedScrollPosition(parent,scroll,pid);
