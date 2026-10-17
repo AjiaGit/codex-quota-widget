@@ -235,7 +235,7 @@ test('a partial preannouncement refresh preserves the meaning of cached completi
   assert.match(deriveAnnouncementsView(store.state, now, 'UTC', 'en').rows[0].completedText, /^Completion message posted/);
 });
 
-test('reading a completion notice clears its canonical paired row after a partial backup update', async () => {
+test('a partial completion update preserves its paired row without a new preview notice', async () => {
   let clock = Date.parse('2026-10-10T20:00:00Z');
   const store = await createAnnouncementStore({ now: () => clock });
   await store.update({ status: 'ok', stale: false, sourceUpdatedAt: new Date(clock).toISOString(), items: [], history: [] });
@@ -245,7 +245,8 @@ test('reading a completion notice clears its canonical paired row after a partia
   await store.update((await query(new Error('offline'), history([record()]))).announcements);
   const view = deriveAnnouncementsView(store.state, now, 'UTC', 'en');
   const ids = announcementIdsForReading(store.alerts, view, true);
-  assert.deepEqual(ids, [preUrl + '#regular']);
+  assert.deepEqual(ids, []);
+  assert.ok(store.state.items.some(item=>item.deliverySourceUrl));
   await store.acknowledge(ids);
   assert.deepEqual(store.alerts.unread, []);
 });
@@ -287,7 +288,7 @@ test('an explicit original category corrects conflicting cached rows and their u
   await store.update((await query(new Error('offline'), backup)).announcements);
   assert.deepEqual(store.state.items.map(item => item.id), [doneUrl + '#banked']);
   assert.deepEqual(store.state.history.map(item => item.id), [doneUrl + '#banked']);
-  assert.deepEqual(store.alerts.unread, [{ id: doneUrl + '#banked', kind: 'banked' }]);
+  assert.deepEqual(store.alerts.unread, []);
   const ids = announcementIdsForReading(store.alerts, deriveAnnouncementsView(store.state, now, 'UTC', 'en'), true);
   await store.acknowledge(ids);
   assert.deepEqual(store.alerts.unread, []);

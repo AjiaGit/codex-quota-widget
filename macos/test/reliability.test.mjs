@@ -98,7 +98,7 @@ test('categorized archive plus context-only short completion stays visible and u
   assert.match(view(rows(result)[0]).display.title, /额度重置相关消息/);
   const store = await baseline();
   await store.update(result.announcements);
-  assert.equal(store.alerts.unread.length, 1);
+  assert.equal(store.alerts.unread.length, 0);
 });
 
 test('website-only reset-credit observations retain website scope and observation time through persistence', async () => {
@@ -137,18 +137,18 @@ test('fresh explicit completion can resolve a correction as a genuinely new upda
   assert.ok(store.state.items.find(row => row.sourceUrl === url('115')).deliveredAt);
 });
 
-test('unverified to promise to completion notifies at each real stage, never on a mirror or restart', async () => {
+test('only the quota promise notifies across unverified, promise and completion stages', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'quota-stages-'));
   try {
     const file = join(directory, 'cache.json'), store = await baseline(file);
     const entry = post('116', 'Landing within the next 2 hours');
     const input = feed([entry], { events: [{ url: entry.url, group: 'reset' }] });
     await store.update((await query(input)).announcements);
-    assert.equal(store.alerts.unread.length, 1);
+    assert.equal(store.alerts.unread.length, 0);
     await store.acknowledge([entry.url + '#regular']);
     for (const text of ['Global reset by EOD.', 'Global reset is complete.']) {
       await store.update((await query(feed([{ ...entry, text }]))).announcements);
-      assert.equal(store.alerts.unread.length, 1, text);
+      assert.equal(store.alerts.unread.length, text.includes('complete')?0:1, text);
       await store.acknowledge([entry.url + '#regular']);
     }
     await store.update((await query(feed([{ ...entry, text: 'Global reset is complete.' }]), history([archived('116', 'Global reset is complete.')]))).announcements);
@@ -226,14 +226,14 @@ test('Retry-After suppresses repeated manual provider requests until the source 
   assert.equal(requests, 2);
 });
 
-test('both actions in one post keep separate unread identities instead of treating one as a corrected category', async () => {
+test('completion and credit promises retain separate records without quota preview alerts', async () => {
   const store = await baseline();
   const result = await query(feed([post('122', 'Global reset is complete. We will give a banked reset.')]));
   await store.update(result.announcements);
   assert.equal(store.state.items.length, 2);
-  assert.deepEqual(store.alerts.unread.map(row => row.kind).sort(), ['banked', 'regular']);
+  assert.deepEqual(store.alerts.unread, []);
   await store.acknowledge([url('122') + '#regular']);
-  assert.deepEqual(store.alerts.unread.map(row => row.kind), ['banked']);
+  assert.deepEqual(store.alerts.unread, []);
 });
 
 test('bounded diagnostics explain ignored context without persisting message bodies', async () => {
@@ -291,7 +291,7 @@ test('a stale stage cannot consume the first fresh stage notification, including
       const restarted=await createAnnouncementStore({file,now:()=>now});
       const fresh=(await query(feed([{...entry,text:next}],{events}))).announcements;
       await restarted.update(fresh);
-      assert.equal(restarted.alerts.unread.length,1,next);
+      assert.equal(restarted.alerts.unread.length,next.includes('complete')?0:1,next);
       await restarted.acknowledge([entry.url+'#regular']);
       await restarted.update(fresh);
       assert.deepEqual(restarted.alerts.unread,[]);

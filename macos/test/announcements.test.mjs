@@ -52,7 +52,7 @@ test('explicit source confirmation and valid completion records are distinct fro
   }
 });
 
-test('an already seen related post triggers a notice only when the source explicitly confirms it', async () => {
+test('legacy source confirmation retains records without promoting unverified original evidence to a preview', async () => {
   let time=now;
   const store=await source.createAnnouncementStore({now:()=>time});
   await store.update(source.normalizeAnnouncements(feed(),time));
@@ -62,11 +62,11 @@ test('an already seen related post triggers a notice only when the source explic
   assert.deepEqual(store.alerts.unread,[]);
   time+=hour;
   await store.update(source.normalizeAnnouncements({...feed(null,[{...event,certainty:'announced'}]),generated_at:at(2*hour)},time));
-  assert.equal(store.alerts.unread.length,1);
+  assert.equal(store.alerts.unread.length,0);
   time+=hour;
   await store.update(source.normalizeAnnouncements({...feed(null,[event]),generated_at:at(3*hour)},time));
   assert.equal(store.state.items[0].certainty,'announced','Missing repeated metadata does not revoke an explicit announcement');
-  assert.equal(store.alerts.unread.length,1);
+  assert.equal(store.alerts.unread.length,0);
 });
 
 test('old cached records without explicit certainty do not regain confirmation or old unread dots', async () => {
@@ -154,14 +154,14 @@ test('only a complete fresh reconciliation from both sources withdraws a cached 
   } finally {await rm(dir,{recursive:true,force:true});}
 });
 
-test('reconciliation clears withdrawn unread notices but never withdraws evidenced completed records', async () => {
+test('reconciliation keeps legacy notices quiet and preserves evidenced completed records', async () => {
   let time=now;
   const store=await source.createAnnouncementStore({now:()=>time});
   await store.update(source.normalizeAnnouncements(feed(),time));
   time+=hour;
   const fresh={...scheduled(),ts:at(hour)};
   await store.update(source.normalizeAnnouncements({...feed(fresh),generated_at:at(hour)},time));
-  assert.equal(store.alerts.unread.length,1);
+  assert.equal(store.alerts.unread.length,0);
   await store.update({...source.normalizeAnnouncements({...feed(),generated_at:at(hour)},time),reconciledIds:[]});
   assert.deepEqual(store.alerts.unread,[]);
   const done={...fresh,delivered_at:at(hour)};
@@ -312,7 +312,7 @@ test('historical completion labels require and preserve delivery evidence', () =
   assert.equal(result.history[0].deliverySourceUrl, item.deliverySourceUrl);
 });
 
-test('compact announcement alerts baseline existing records and ignore late historical records', async () => {
+test('legacy and late historical records do not create trusted preview alerts', async () => {
   let time = now;
   const store = await source.createAnnouncementStore({ now: () => time });
   await store.update({ status: 'unavailable' });
@@ -324,12 +324,12 @@ test('compact announcement alerts baseline existing records and ignore late hist
   const fresh = { ...scheduled('regular'), ts: at(hour) };
   const addedHistory = { ...old, url: 'https://x.com/thsottiaux/status/older-added', ts: at(-48 * hour) };
   await store.update(source.normalizeAnnouncements({ ...feed([scheduled(), fresh], [old, addedHistory]), generated_at: at(hour) }, time));
-  assert.deepEqual(store.alerts.unread, [{ id: fresh.url + '#regular', kind: 'regular' }]);
+  assert.deepEqual(store.alerts.unread, []);
   await store.update({ status: 'unavailable' });
-  assert.equal(store.alerts.unread.length, 1, 'provider failure preserves genuine unread notices');
+  assert.equal(store.alerts.unread.length, 0, 'Provider failure cannot promote a legacy record');
 });
 
-test('unread confirmed announcements survive restart and acknowledgements clear only the IDs that were viewed', async () => {
+test('legacy category-only records survive restart without unread preview notifications', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'quota-unread-'));
   const file = join(dir, 'announcements.json');
   let time = now;
@@ -343,11 +343,11 @@ test('unread confirmed announcements survive restart and acknowledgements clear 
     time += hour;
     const reset = { ...scheduled('regular'), ts: at(2 * hour) };
     await store.update(source.normalizeAnnouncements({ ...feed([grant, reset]), generated_at: at(2 * hour) }, time));
-    assert.equal(store.alerts.unread.length, 2);
+    assert.equal(store.alerts.unread.length, 0);
     const restarted = await source.createAnnouncementStore({ file, now: () => time });
-    assert.equal(restarted.alerts.unread.length, 2);
+    assert.equal(restarted.alerts.unread.length, 0);
     await restarted.acknowledge(viewed);
-    assert.deepEqual(restarted.alerts.unread, [{ id: reset.url + '#regular', kind: 'regular' }], 'a newly arrived reset remains unread');
+    assert.deepEqual(restarted.alerts.unread, [], 'Legacy source categories lack verified original preview evidence');
     await restarted.acknowledge([reset.url + '#regular']);
     const reopened = await source.createAnnouncementStore({ file, now: () => time });
     await reopened.update(source.normalizeAnnouncements({ ...feed([grant, reset]), generated_at: at(2 * hour) }, time));

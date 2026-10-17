@@ -140,7 +140,7 @@ test('a fresh backup cannot make stale primary hints current', async () => {
   assert.equal(result.announcements.items.some(item => item.sourceUrl === reply.url), false);
 });
 
-test('new hints notify once, survive restart unread, and stay read after viewing without confirming a reset', async t => {
+test('website hints stay silent across restart, viewing and refresh without confirming a reset', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'quota-source-hints-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   let clock = now - 2 * hour;
@@ -152,7 +152,7 @@ test('new hints notify once, survive restart unread, and stay read after viewing
   await store.update(incoming);
   await store.update(incoming);
   assert.equal(store.state.items.length, 1);
-  const expected = [{ id: reply.url + '#regular', kind: 'regular', sourceHint: true }];
+  const expected = [];
   assert.deepEqual(store.alerts.unread, expected);
   const restored = await createAnnouncementStore({ file, now: () => clock });
   await restored.update(incoming);
@@ -187,11 +187,11 @@ test('first lookup and late historical hints do not create a backlog of unread n
   assert.deepEqual(tracked.alerts.unread, []);
 });
 
-test('offline refresh and archival preserve unread hints until the visible record is read', async () => {
+test('offline refresh and archival preserve hint history without notifications', async () => {
   const { store, setTime } = await trackedStore();
   await store.update((await query(feed())).announcements);
   await store.update((await query(new Error('FABRICATED offline'), now, archiveReply())).announcements);
-  assert.equal(store.alerts.unread.length, 1);
+  assert.equal(store.alerts.unread.length, 0);
   setTime(now + 24 * hour);
   await store.update({ status: 'unavailable' });
   const activity = deriveResetActivityView({ status: 'unavailable' }, store.state, now + 24 * hour, 'UTC', 'en');
@@ -199,12 +199,12 @@ test('offline refresh and archival preserve unread hints until the visible recor
   assert.deepEqual(announcementIdsForReading(store.alerts, visible, false), []);
   const expanded = visibleAnnouncementView(activity);
   const viewed = announcementIdsForReading(store.alerts, expanded, true);
-  assert.deepEqual(viewed, [reply.url + '#regular']);
+  assert.deepEqual(viewed, []);
   await store.acknowledge(viewed);
   assert.deepEqual(store.alerts.unread, []);
 });
 
-test('reading the first three records leaves later hints unread until more is loaded', async () => {
+test('paging website hints never marks them as new quota previews', async () => {
   const { store } = await trackedStore();
   const newer=Array.from({length:5},(_,i)=>({...reply,id:'100000000000000012'+i,url:'https://x.com/thsottiaux/status/100000000000000012'+i,at:`2026-10-15T05:0${i}:00Z`}));
   await store.update((await query(feed([...newer,reply],{signal:headline(newer[4])}))).announcements);
@@ -212,21 +212,22 @@ test('reading the first three records leaves later hints unread until more is lo
   const visible=visibleAnnouncementView(activity);
   assert.deepEqual(announcementIdsForReading(store.alerts,visible,false),[]);
   const viewed=announcementIdsForReading(store.alerts,visible,true);
-  assert.equal(viewed.length,3);
+  assert.equal(viewed.length,0);
   assert.equal(viewed.includes(reply.url+'#regular'),false);
   await store.acknowledge(viewed);
-  assert.deepEqual(store.alerts.unread.map(item=>item.id).sort(),[newer[0].url+'#regular',newer[1].url+'#regular',reply.url+'#regular'].sort());
+  assert.deepEqual(store.alerts.unread,[]);
+  assert.equal(visible.rows.length,3);
   await store.acknowledge(announcementIdsForReading(store.alerts,visibleAnnouncementView(activity,{limit:6}),true));
   assert.deepEqual(store.alerts.unread,[]);
 });
 
-test('source hint category corrections migrate unread identity without alerting again after reading', async () => {
+test('source hint category corrections retain history without creating preview alerts', async () => {
   const { store } = await trackedStore();
   const credits = feed([reply], { events: [{ url: reply.url, group: 'credits' }] });
   await store.update((await query(credits)).announcements);
-  assert.deepEqual(store.alerts.unread, [{ id: reply.url + '#banked', kind: 'banked', sourceHint: true }]);
+  assert.deepEqual(store.alerts.unread, []);
   await store.update((await query(credits, now, archiveReply())).announcements);
-  assert.deepEqual(store.alerts.unread, [{ id: reply.url + '#regular', kind: 'regular', sourceHint: true }]);
+  assert.deepEqual(store.alerts.unread, []);
   await store.acknowledge([reply.url + '#regular']);
   await store.update((await query(credits)).announcements);
   assert.deepEqual(store.alerts.unread, []);
@@ -237,14 +238,15 @@ test('a stale confirmation stays quiet until the first fresh promise, which noti
     const { store } = await trackedStore();
     const id = reply.url + '#regular';
     await store.update((await query(feed())).announcements);
-    assert.deepEqual(store.alerts.unread, [{ id, kind: 'regular', sourceHint: true }]);
+    assert.deepEqual(store.alerts.unread, []);
     if (alreadyRead) await store.acknowledge([id]);
     const promise = { ...reply, text: 'Global reset landing tomorrow.' };
     for (const stale of [true, false]) {
       await store.update((await query(feed([promise], { signal: headline(promise), stale }))).announcements);
       assert.equal(store.state.items[0].certainty, 'announced');
       assert.equal(store.state.items[0].sourceHint, null);
-      assert.deepEqual(store.alerts.unread, alreadyRead && stale ? [] : [{ id, kind: 'regular' }]);
+      assert.equal(store.alerts.unread.length,stale?0:1);
+      if(!stale)assert.equal(store.alerts.unread[0].id,id);
     }
     await store.acknowledge([id]);
     await store.update((await query(feed([promise], { signal: headline(promise) }))).announcements);
@@ -255,7 +257,7 @@ test('a stale confirmation stays quiet until the first fresh promise, which noti
 test('stale and inactive site signals cannot create or revive unread notices', async () => {
   const { store } = await trackedStore();
   await store.update((await query(feed([reply], { stale: true }), now, archiveReply())).announcements);
-  assert.equal(store.alerts.unread.length, 1, 'A fresh archive can independently supply an unverified update');
+  assert.equal(store.alerts.unread.length, 0, 'A fresh archive classification is not a quota preview');
   await store.acknowledge([reply.url + '#regular']);
   await store.update((await query(feed())).announcements);
   assert.deepEqual(store.alerts.unread, [], 'A second collecting site is not a new message stage');
@@ -265,15 +267,15 @@ test('stale and inactive site signals cannot create or revive unread notices', a
   assert.deepEqual(store.alerts.unread, []);
 });
 
-test('an explicit stop clears an unread hint even after it has moved into history', async () => {
+test('an explicit stop updates a silent hint even after it has moved into history', async () => {
   const { store, setTime } = await trackedStore();
   await store.update((await query(feed())).announcements);
-  assert.equal(store.alerts.unread.length, 1);
+  assert.equal(store.alerts.unread.length, 0);
   const later = now + 24 * hour;
   setTime(later);
   await store.update({ status: 'unavailable' });
   assert.equal(store.state.items.length, 0);
-  assert.equal(store.alerts.unread.length, 1);
+  assert.equal(store.alerts.unread.length, 0);
   await store.update((await query(feed([], { signal: { ...headline(reply), active: false }, fetched_at: new Date(later).toISOString() }), later)).announcements);
   assert.equal(store.state.history[0].sourceHint, 'inactive');
   assert.deepEqual(store.alerts.unread, []);

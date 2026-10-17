@@ -35,5 +35,5 @@ export function isResetPreview(item,now=Date.now()) {
 }
 export function previewVersion(item) {
   return JSON.stringify([item.kind,item.correction||null,item.scheduledAt||null,item.scheduledFrom||null,item.scheduledDate||null,
-    item.schedulePrecision||null,item.scheduleText?.toLowerCase().trim().replace(/\s+/g,' ')||null,item.scope||null,item.scopeLabel||null]);
+    item.schedulePrecision||null,!item.scheduledAt?item.scheduleText?.toLowerCase().trim().replace(/\s+/g,' ')||null:null,item.scope||null,item.scopeLabel||null]);
 }

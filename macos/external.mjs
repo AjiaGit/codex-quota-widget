@@ -2,7 +2,7 @@ import { readFile, mkdir, writeFile, rename } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setDefaultResultOrder } from 'node:dns';
 import { analyzePublicPost, publicPostIndex } from './public-evidence.mjs';
-import { parsePreviewTime } from './public/preview.mjs';
+import { parsePreviewTime, isResetPreview, previewVersion } from './public/preview.mjs';
 // Prefer the working IPv4 route on networks whose IPv6 TLS path resets connections.
 // This changes only this service process and retains IPv6 as a fallback.
 setDefaultResultOrder('ipv4first');
@@ -82,6 +82,8 @@ function normalizedAnnouncement(raw, now, scheduled = false, persisted = false) 
     evidenceUpdatedAt: persisted ? timestamp(raw.evidenceUpdatedAt, now) : null,
     evidenceFresh: persisted && raw.evidenceFresh === false ? false : true,
     observationAt: persisted ? timestamp(raw.observationAt, now) : null,
+    previewSourceUrl: persisted ? officialPostUrl(raw.previewSourceUrl) : null,
+    previewUpdatedAt: persisted ? timestamp(raw.previewUpdatedAt,now) : null,
     evidenceUrl: persisted ? safeHttpsUrl(raw.evidenceUrl) : null,
     multiKind: persisted && raw.multiKind === true,
   };
@@ -143,6 +145,10 @@ function deduplicate(items, knownItems = []) {
     if (previous?.sourceHint && !item.sourceHint && !confirmedAnnouncement(item)) continue;
     if (previous?.sourceHint === 'inactive' && item.sourceHint === 'recent')
       item = { ...item, sourceHint: 'inactive', sourceWithdrawn: true };
+    // A partial refresh of the parent alone cannot erase its explicit reply.
+    if(previous?.previewSourceUrl&&!item.previewSourceUrl&&!item.scheduleText&&!item.correction) {
+      for(const field of ['scheduledAt','scheduledFrom','scheduleText','schedulePrecision','previewSourceUrl','previewUpdatedAt','summary'])item[field]=previous[field];
+    }
     map.set(item.id, previous ? { ...previous, ...item,
       announcedAt: item.announcedAt || previous.announcedAt,
       scheduledAt: item.scheduledAt || previous.scheduledAt,
@@ -188,6 +194,19 @@ function deduplicate(items, knownItems = []) {
 
 function linkCompletions(items) {
   const records = deduplicate(items).map(item=>({...item})).sort((a,b) => Date.parse(a.announcedAt || 0) - Date.parse(b.announcedAt || 0));
+  for(const update of [...records]) {
+    if(update.kind!=='regular'||update.certainty!=='announced'||update.deliveredAt||update.correction||update.statementBasis!=='original')continue;
+    const parents=records.filter(item=>item!==update&&item.kind===update.kind&&item.certainty==='announced'&&!item.deliveredAt&&!item.correction&&
+      update.relatedUrls?.includes(item.sourceUrl)&&Date.parse(item.announcedAt)<Date.parse(update.announcedAt)&&
+      (!item.scope||!update.scope||item.scope===update.scope));
+    if(parents.length!==1)continue;
+    const parent=parents[0];
+    if(Date.parse(parent.previewUpdatedAt)>Date.parse(update.announcedAt))continue;
+    Object.assign(parent,{...parsePreviewTime(update.summary,update.announcedAt),summary:update.summary,
+      previewSourceUrl:update.sourceUrl,previewUpdatedAt:update.announcedAt,evidenceUpdatedAt:update.evidenceUpdatedAt,
+      evidenceFresh:update.evidenceFresh,sourceSites:sourceSites([...(parent.sourceSites||[]),...(update.sourceSites||[])])});
+    records.splice(records.indexOf(update),1);
+  }
   for(const correction of records.filter(item=>item.correction && item.statementBasis==='original')) {
     const targets=records.filter(item=>item!==correction && officialPostUrl(item.sourceUrl) && item.kind===correction.kind &&
       item.announcedAt && correction.announcedAt && Date.parse(item.announcedAt)<Date.parse(correction.announcedAt) &&
@@ -394,13 +413,23 @@ export function normalizeAnnouncements(data, now = Date.now()) {
 export async function createAnnouncementStore({ file, now = Date.now } = {}) {
   let snapshot = emptyAnnouncements(), writes = Promise.resolve();
   let baselineAt = null;
-  const observed = new Set(), observedStages = new Map(), unread = new Map();
+  const observed = new Set(), observedStages = new Map(), unread = new Map(), previewVersions = new Map();
+  const canNotify = item => isResetPreview(item,now()) || Boolean(item?.kind==='regular' && item.statementBasis==='original' &&
+    ['cancelled','delayed'].includes(item.correction) && (!item.correctionSourceUrl || item.correctionSourceUrl===item.sourceUrl) &&
+    now()-Date.parse(item.announcedAt)<MAX_AGE_MS && (item.relatedUrls||[]).some(url=>previewVersions.has(url+'#regular')));
+  const previewEntry = item => ({id:item.id,kind:item.kind,version:previewVersion(item)});
   const alertIdentity = id => {
     if(typeof id !== 'string')return null;
     const kind = id.endsWith('#banked') ? 'banked' : id.endsWith('#regular') ? 'regular' : null;
     return kind && safeHttpsUrl(id.slice(0, -kind.length - 1)) ? { id, kind } : null;
   };
-  const alerts = () => ({ unread: [...unread.values()] });
+  const alerts = () => {
+    for(const [id] of unread) {
+      const row=[...snapshot.items,...snapshot.history].find(item=>item.id===id);
+      if(!row || !canNotify(row))unread.delete(id);
+    }
+    return {unread:[...unread.values()]};
+  };
   const clean = entries => (Array.isArray(entries) ? entries : []).slice(0,100)
     .map(item => normalizedAnnouncement(item, now(), false, true)).filter(Boolean);
   try {
@@ -425,10 +454,18 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
           if(item.completionTimeBasis==='announcement' && observed.has(alias))observedStages.set(alias,noticeStage(item));
         }
       }
+      if(Array.isArray(tracking.previewVersions)) {
+        for(const [id,version] of tracking.previewVersions.slice(-500))
+          if(alertIdentity(id)&&typeof version==='string'&&version.length<4000)previewVersions.set(id,version);
+      } else {
+        // Old completed/hint notices are retired; already-read previews stay read.
+        for(const row of [...snapshot.items,...snapshot.history])
+          if(isResetPreview(row,now())&&observed.has(row.id))previewVersions.set(row.id,previewVersion(row));
+      }
       for(const entry of (Array.isArray(tracking.unread) ? tracking.unread : []).slice(0,100)) {
         const identity = alertIdentity(entry?.id);
-        const record = identity && [...snapshot.items,...snapshot.history].find(item=>item.id===identity.id && noticeEligible(item));
-        if(record && identity.kind === entry.kind && observed.has(identity.id))unread.set(identity.id,noticeEntry(record));
+        const record = identity && [...snapshot.items,...snapshot.history].find(item=>item.id===identity.id && canNotify(item));
+        if(record && identity.kind === entry.kind && observed.has(identity.id))unread.set(identity.id,previewEntry(record));
       }
     }
   } catch {}
@@ -443,7 +480,7 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
     writes = writes.catch(()=>{}).then(async()=>{
       await mkdir(dirname(file), { recursive: true }); const temp = file + '.' + process.pid + '.tmp';
       await writeFile(temp, JSON.stringify({ version:1, ...project(), alertTracking: {
-        version:1, baselineAt, observed:[...observed].slice(-500), observedStages:[...observedStages].slice(-500), unread:alerts().unread,
+        version:1, baselineAt, observed:[...observed].slice(-500), observedStages:[...observedStages].slice(-500), previewVersions:[...previewVersions].slice(-500), unread:alerts().unread,
       } }), { mode:0o600 }); await rename(temp,file);
     });
     // Storage failure must not erase confirmed live data or unread notices.
@@ -453,7 +490,10 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
     get state() { return project(); },
     get alerts() { return alerts(); },
     async acknowledge(ids) {
-      for(const id of (Array.isArray(ids) ? ids : []).slice(0,100))unread.delete(id);
+      for(const entry of (Array.isArray(ids) ? ids : []).slice(0,100)) {
+        const id=typeof entry==='string'?entry:entry?.id,current=unread.get(id);
+        if(current && (typeof entry==='string'||entry?.version===current.version))unread.delete(id);
+      }
       await persist();
       return alerts();
     },
@@ -475,24 +515,12 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
       const hintEvidence = new Set([...incomingHistory, ...incomingItems].filter(item=>item.sourceHint &&
         (item.sourceSites.includes('codex-reset.com') || !knownItems.some(old=>old.sourceUrl===item.sourceUrl&&old.sourceSites.includes('codex-reset.com')))).map(item=>item.sourceUrl));
       if(fresh) {
-        if(baselineAt !== null)for(const item of freshItems.filter(eligible)) {
-          const completionId = item.deliverySourceUrl + '#' + item.kind;
-          const priorStage=observedStages.get(item.id) ?? observedStages.get(completionId);
-          const newCompletion = item.completionTimeBasis === 'announcement' && item.deliveredAt &&
-            observedStages.get(completionId)!==noticeStage(item);
-          const publication = newCompletion ? item.deliveredAt : item.announcedAt;
-          const prior = known.get(item.id);
-          const stageChanged = priorStage!==undefined && priorStage !== noticeStage(item);
-          const newConfirmed = confirmedAnnouncement(item) &&
-            (newCompletion || !observed.has(item.id) || stageChanged || priorStage==='unconfirmed');
-          const seenPost = observed.has(item.id) || observed.has(item.sourceUrl + (item.kind === 'banked' ? '#regular' : '#banked'));
-          const newHint = sourceHintNotice(item) && hintEvidence.has(item.sourceUrl) &&
-            (!seenPost || prior && !prior.sourceHint && !confirmedAnnouncement(prior));
-          const newCorrection = item.correction && priorStage!==noticeStage(item);
-          if((newConfirmed || newHint || newCorrection) && publication && Date.parse(publication) >= baselineAt)
-            unread.set(item.id,noticeEntry(item));
+        for(const item of [...freshItems,...freshHistory].filter(eligible)) {
+          const version=previewVersion(item);
+          if(canNotify(item) && previewVersions.get(item.id)!==version)unread.set(item.id,previewEntry(item));
+          if(isResetPreview(item,now()) || canNotify(item))previewVersions.set(item.id,version);
         }
-        else baselineAt = now();
+        if(baselineAt===null)baselineAt=now();
         for(const item of [...freshHistory,...freshItems].filter(eligible)) {
           observed.add(item.id);
           observedStages.set(item.id,noticeStage(item));
@@ -502,7 +530,7 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
           }
         }
       }
-      for(const item of [...freshHistory,...freshItems])if(!noticeEligible(item))unread.delete(item.id);
+      for(const item of [...freshHistory,...freshItems])if(!canNotify(item))unread.delete(item.id);
       const previous = project();
       previous.items = deduplicate(previous.items.map(withdrawHint), authorities);
       previous.history = deduplicate(previous.history.map(withdrawHint), authorities);
@@ -516,10 +544,10 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
       for(const item of retained)if(item.sourceWithdrawn)unread.delete(item.id);
       const records = linkCompletions([...previous.history, ...retained, ...freshHistory, ...freshItems]);
       for (const item of records) {
-        if (!noticeEligible(item)) unread.delete(item.id);
+        if (!canNotify(item)) unread.delete(item.id);
         // A cached source can improve an existing record without being fresh
         // enough to create a notice. Keep its unread type aligned with the card.
-        else if (unread.has(item.id)) unread.set(item.id, noticeEntry(item));
+        else if (unread.has(item.id)) unread.set(item.id, previewEntry(item));
       }
       const hintUrls = new Set(knownItems.filter(item=>item.sourceHint).map(item=>item.sourceUrl));
       for (const item of records) if (item.kindBasis === 'original' || item.sourceHint || hintUrls.has(item.sourceUrl)) {
@@ -527,7 +555,7 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
         const oldId = item.sourceUrl + (item.kind === 'banked' ? '#regular' : '#banked');
         if (observed.has(oldId)) observed.add(item.id);
         if(observedStages.has(oldId) && !observedStages.has(item.id))observedStages.set(item.id,observedStages.get(oldId));
-        if (unread.delete(oldId) && noticeEligible(item)) unread.set(item.id, noticeEntry(item));
+        if (unread.delete(oldId) && noticeEligible(item)) unread.set(item.id, previewEntry(item));
       }
       for (const item of records) if (item.deliverySourceUrl && item.deliverySourceUrl !== item.sourceUrl) {
         const alias = item.deliverySourceUrl + '#' + item.kind;
