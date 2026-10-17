@@ -735,9 +735,11 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
     Start-ModeTransition 'Detail'
     if($form.ClientSize.Width -lt 404 -or $form.ClientSize.Height -lt 390){throw 'Expanded detail kept compact dimensions'}
     Show-External
-    Assert-Equal $script:announcementRows.Count 3 'History still opens in batches after language switching'
-    while ($script:visibleActivityView.nextCount -gt 0) {$activityMore.PerformClick()}
-    Assert-Equal $script:announcementRows.Count 50 'All history survives language switching'
+    Assert-Equal $script:historyRows.Count 0 'History starts folded after language switching'
+    $historyToggle.PerformClick()
+    Assert-Equal $script:historyRows.Count 3 'History opens three records after language switching'
+    while ($script:visibleActivityView.historyNextCount -gt 0) {$historyMore.PerformClick()}
+    Assert-Equal $script:historyRows.Count 50 'All history survives language switching'
     Assert-Equal $title.Text (T 'app') 'Title translated'
     Assert-Equal $cadence.Text (T 'refreshCadence') 'Footer translated'
     $script:activityLimit=3;Show-External;Start-ModeTransition 'Compact'

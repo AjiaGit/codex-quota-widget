@@ -11,7 +11,7 @@ function Test-Case([string]$name, [scriptblock]$body) {
 }
 $now = [DateTimeOffset]'2026-09-30T12:00:00Z'
 function New-Event([string]$id, [string]$kind = 'banked') {
-    [pscustomobject]@{ id=$id; kind=$kind; certainty='announced'; announcedAt='2026-09-29T12:00:00Z'; scheduledAt=$null; scheduledDate=$null; deliveredAt=$null; scope='paid'; scopeLabel=$null; sourceUrl='https://example.org/announcement'; deliverySourceUrl=$null; summary='Confirmed announcement'; summaryZh='已确认公告' }
+    [pscustomobject]@{ id=$id; kind=$kind; certainty='announced'; announcedAt=$now.AddHours(-3).ToString('o'); scheduledAt=$null; scheduledDate=$null; deliveredAt=$null; scope='paid'; scopeLabel=$null; sourceUrl='https://example.org/announcement'; deliverySourceUrl=$null; summary='Confirmed announcement'; summaryZh='已确认公告' }
 }
 function New-External($items = @(), $history = @(), [string]$status = 'ok') {
     [pscustomobject]@{ status='ok'; announcements=[pscustomobject]@{ status=$status; items=@($items); history=@($history); sourceUpdatedAt=$now.AddMinutes(-5).ToString('o'); stale=$false } }
@@ -122,7 +122,7 @@ Test-Case 'empty public feeds distinguish the thirty minute freshness boundary' 
     }
 }
 Test-Case 'rendering archives delivered rows locally even without another fetch' {
-    $row=New-Event 'completed'; $row.deliveredAt=$now.AddHours(-23).ToString('o')
+    $row=New-Event 'completed'; $row.announcedAt=$now.AddHours(-25).ToString('o'); $row.deliveredAt=$now.AddHours(-23).ToString('o')
     $value=New-External @($row)
     Assert-Equal (Get-WidgetAnnouncementView $value 'en' $now).active.Count 1 'Initial active row'
     $later=Get-WidgetAnnouncementView $value 'en' $now.AddHours(1)
@@ -286,8 +286,10 @@ Test-Case 'historical rows without delivery evidence do not imply an outstanding
         Assert-Equal $historical.phase 'unknown' 'Historical delivery status'
         if (-not $historical.details.Contains((Get-WidgetText 'phaseUnknown' $language))) {throw 'Missing delivery record was not explained'}
         Assert-Equal $historical.completedText $null 'No invented completion'
-        $active=(Get-WidgetAnnouncementView (New-External @($event)) $language $now).active[0]
-        Assert-Equal $active.phase 'announced' 'Active announcements still await evidence'
+        $archived=Get-WidgetAnnouncementView (New-External @($event)) $language $now
+        Assert-Equal $archived.active.Count 0 'Old unresolved announcements are automatically archived'
+        Assert-Equal $archived.history[0].phase 'unknown' 'Archiving does not prove completion'
+        Assert-Equal $archived.history[0].completedText $null 'No invented completion for aged active records'
     }
     $event.deliveredAt=$now.AddDays(-2).ToString('o'); $event.deliverySourceUrl='https://example.org/delivered'
     $confirmed=(Get-WidgetAnnouncementView (New-External @() @($event)) 'en' $now).history[0]
@@ -314,34 +316,35 @@ Test-Case 'hidden detail never acknowledges notices and newly arrived unseen IDs
     Assert-Equal (Get-WidgetAnnouncementReadIds $alerts $view $false).Count 0 'Compact and hidden state'
     Assert-Equal ((Get-WidgetAnnouncementReadIds $alerts $view $true) -join ',') 'shown' 'Only rendered IDs'
 }
-Test-Case 'archive-only unified pages expose three more rows without marking later pages read' {
+Test-Case 'folded historical pages expose three more rows without marking later pages read' {
     $rows=@(0..11 | ForEach-Object {[pscustomobject]@{id=('history-'+$_);key=('history-'+$_);sortAt=(12-$_)}})
     $activity=[pscustomobject]@{active=@();history=$rows}
     $alerts=[pscustomobject]@{ids=@($rows.id)}
-    $first=Get-WidgetVisibleActivityView $activity
-    Assert-Equal ($first.active.id -join ',') 'history-0,history-1,history-2' 'Initial three recent records'
-    Assert-Equal $first.nextCount 3 'Next batch size'
+    Assert-Equal (Get-WidgetVisibleActivityView $activity).history.Count 0 'History is initially folded'
+    $first=Get-WidgetVisibleActivityView $activity 3 $true 3
+    Assert-Equal ($first.history.id -join ',') 'history-0,history-1,history-2' 'Initial three recent records'
+    Assert-Equal $first.historyNextCount 3 'Next batch size'
     Assert-Equal ((Get-WidgetAnnouncementReadIds $alerts $first $true) -join ',') 'history-0,history-1,history-2' 'Only shown records become read'
-    $second=Get-WidgetVisibleActivityView $activity 6
-    Assert-Equal $second.active.Count 6 'Second batch'
-    Assert-Equal $second.nextCount 3 'Next full batch'
-    $all=Get-WidgetVisibleActivityView $activity 15
-    Assert-Equal $all.active.Count 12 'Final page includes all remaining rows'
-    Assert-Equal $all.nextCount 0 'No more button after the end'
+    $second=Get-WidgetVisibleActivityView $activity 3 $true 6
+    Assert-Equal $second.history.Count 6 'Second batch'
+    Assert-Equal $second.historyNextCount 3 'Next full batch'
+    $all=Get-WidgetVisibleActivityView $activity 3 $true 15
+    Assert-Equal $all.history.Count 12 'Final page includes all remaining rows'
+    Assert-Equal $all.historyNextCount 0 'No more button after the end'
     Assert-Equal $activity.history.Count 12 'Stored history retained'
 }
 
 
-Test-Case 'current and archived records share one chronological three-row page' {
+Test-Case 'current records use separate three-row pages while history stays folded' {
     $current=@(0..5 | ForEach-Object {[pscustomobject]@{id=('current-'+$_);key=('current-'+$_);sortAt=(120-$_*20)}})
     $archive=@(0..5 | ForEach-Object {[pscustomobject]@{id=('archive-'+$_);key=('archive-'+$_);sortAt=(110-$_*20)}})
     $activity=[pscustomobject]@{active=$current;featured=$current[0..1];earlier=$current[2..5];history=$archive}
     $first=Get-WidgetVisibleActivityView $activity
-    Assert-Equal ($first.active.id -join ',') 'current-0,archive-0,current-1' 'One newest-first page'
+    Assert-Equal ($first.active.id -join ',') 'current-0,current-1,current-2' 'Current-only newest-first page'
     Assert-Equal $first.nextCount 3 'Next batch'
     $second=Get-WidgetVisibleActivityView $activity 6
     Assert-Equal $second.active.Count 6 'Six loaded records'
-    Assert-Equal $second.nextCount 3 'Next full batch'
+    Assert-Equal $second.nextCount 0 'All current records loaded'
     Assert-Equal $second.canCollapse $true 'Loaded pages can collapse'
     Assert-Equal $activity.history.Count 6 'Archive is not truncated'
 }
