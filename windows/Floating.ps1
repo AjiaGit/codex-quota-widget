@@ -11,6 +11,9 @@ $script:dataDirectory = Get-WidgetDataDirectory
 Initialize-WidgetStorage $PSScriptRoot $script:dataDirectory
 $script:languageSetting = Get-WidgetLanguageSetting $script:dataDirectory
 $script:language = Resolve-WidgetLanguage $script:languageSetting
+$script:indicatorTask = $null
+$script:indicatorContent = $null
+$script:indicatorKey = ''
 $script:announcementReadTask = $null
 $script:announcementReadContent = $null
 $script:noticeView = $null
@@ -1088,6 +1091,18 @@ function Update-AnnouncementIndicator {
         $tooltip.SetToolTip($ring,$tip); $ring.AccessibleName=$tip
     }
     $ring.Invalidate()
+    if($script:indicatorTask -and $script:indicatorTask.IsCompleted) {
+        try {$response=$script:indicatorTask.GetAwaiter().GetResult();if(-not $response.IsSuccessStatusCode){$script:indicatorKey=''};$response.Dispose()} catch {$script:indicatorKey=''}
+        $script:indicatorTask=$null
+        if($script:indicatorContent){$script:indicatorContent.Dispose();$script:indicatorContent=$null}
+    }
+    if($script:mode -eq 'Compact' -and $form.Visible -and $script:noticeView.entries.Count -and -not $script:indicatorTask) {
+        $json=@{ids=@($script:noticeView.entries)} | ConvertTo-Json -Depth 5 -Compress
+        if($json -cne $script:indicatorKey) {
+            $script:indicatorKey=$json
+            try {$script:indicatorContent=[Net.Http.StringContent]::new($json,[Text.Encoding]::UTF8,'application/json');$script:indicatorTask=$script:client.PostAsync("$script:baseUrl/api/announcement-alerts/shown",$script:indicatorContent)} catch {$script:indicatorKey=''}
+        }
+    }
 }
 function Start-AnnouncementRead {
     if ($script:announcementReadTask -or $script:animating -or $script:layoutBusy -or $script:mode -ne 'Detail' -or -not $form.Visible) {return}
@@ -1106,12 +1121,12 @@ function Start-ExternalRequest {
     if ($script:externalTask) { return }
     try {
         $script:externalTask = $script:client.GetAsync("$script:baseUrl/api/external")
-        $script:nextExternalPoll = [DateTime]::UtcNow.AddSeconds(60)
+        $script:nextExternalPoll = [DateTime]::UtcNow.AddSeconds(15)
     } catch {
         $script:externalTask = $null
         $script:externalData = Merge-WidgetExternalData $script:externalData $null $true
         Save-PublicSnapshot
-        $script:nextExternalPoll = [DateTime]::UtcNow.AddSeconds(60)
+        $script:nextExternalPoll = [DateTime]::UtcNow.AddSeconds(15)
         Show-External
     }
 }

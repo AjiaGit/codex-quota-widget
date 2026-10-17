@@ -119,3 +119,5 @@ body[data-embedded="true"] .source-footer { padding-top:10px; }
   .announcement-heading .announcement-source { grid-column:1; grid-row:3; justify-self:start; }
   .announcement-scope { display:block; } .announcement-scope::before { content:none; }
 }
+
+.announcement .message-body { color:var(--text); white-space:pre-line; overflow-wrap:anywhere; }

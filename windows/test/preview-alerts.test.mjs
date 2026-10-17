@@ -84,3 +84,10 @@ test('an explicitly related time reply updates one preview and keeps its verifie
   assert.equal(row.previewSourceUrl,replyUrl);
   assert.equal(row.scheduledAt,'2026-10-17T03:59:00.000Z');
 });
+test('passing the estimated window archives a preview and retires its unread dot',async()=>{
+  const {store,setTime}=await tracked();await store.update(input([item()]));
+  setTime(now+3600001);
+  assert.equal(store.state.items.length,0);
+  assert.equal(store.state.history[0].sourceUrl,url);
+  assert.deepEqual(store.alerts.unread,[]);
+});

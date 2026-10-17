@@ -21,9 +21,9 @@ The widget installer is unsigned, so Windows may display an unknown-publisher or
 - Open **Available resets / Details** to expand the available grant/expiry information inside the main window. Click again to collapse it. The widget never uses a banked reset.
 - **Your quota has recovered** appears alongside public reset news with the local detection time. Expand **About this record** for before/after percentages, the previous reading time, and the explanation. After 24 hours it is archived and remains in the same activity list. Tracking starts with the first observation and survives restarts, separately for each account. It does not confirm delivery of a global reset.
 
-The Windows interface follows the accepted macOS layout: ring and countdown, the Plus-only five-hour row, inline banked-reset details, one unified activity list, data sources, and refresh cadence. The list starts with three recent records and appends three on demand; **Show latest 3** collapses it. Expand **Message details** or **Data sources** in place. Announcement time and scheduled/delivered time remain separate; the local UTC offset is shown above the activity list.
+The Windows interface follows the accepted macOS layout: ring and countdown, the Plus-only five-hour row, inline banked-reset details, one unified activity list, data sources, and refresh cadence. Active quota-reset previews come first; the list starts with three records and appends three on demand; **Show latest 3** collapses it. Public text and estimated time are directly visible with one original-post link; recovery explanations and **Data sources** expand in place. Announcement time and scheduled/delivered time remain separate; the local UTC offset is shown above the activity list.
 
-Quota and cache checks run every 60 seconds. Manual refresh, reopening, and wake trigger a prompt update. Temporary failures retry at 15/30/60 seconds. Public reset data normally refreshes every 10 minutes, accelerating to 2 minutes for a recent pending message (up to 2 hours).
+Quota and cache checks run every 60 seconds. Manual refresh, reopening, and wake trigger a prompt update. Temporary failures retry at 15/30/60 seconds. Public preview sources refresh about every minute, with source backoff; the native indicator cache refreshes about every 15 seconds.
 
 ## Update and uninstall
 

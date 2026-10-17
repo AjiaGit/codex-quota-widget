@@ -76,7 +76,11 @@ final class LocalService: URLProtocol {
     service.refresh { refreshes += 1 }
     waitFor { refreshes == 1 }
     service.fetch(force: true) { _, _ in reads += 1 }; waitFor { reads == 3 }
+    let preview = NativeAnnouncementAlerts(object: ["unread": [["id": "https://x.com/thsottiaux/status/1000000000000000991#regular", "kind": "regular", "version": "FABRICATED-version"]]])
+    let shown = NativeServiceClient.indicatorRequest(preview)
     let output: [String: Any] = [
+       "shownPath": shown.url!.path, "shownOrigin": shown.value(forHTTPHeaderField: "Origin") as Any,
+       "shownBody": String(data: shown.httpBody!, encoding: .utf8)! ,
        "brand": en.text("brand"), "auto": automatic.text("refresh"), "fallback": fallback.text("refresh"),
        "zhBrand": zh.text("brand"), "percent": valid.percent as Any,
        "expired": expired.percent == nil, "stale": stale.percent == nil,
@@ -104,6 +108,9 @@ final class LocalService: URLProtocol {
     const result = spawnSync(executable, [temp], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
     const output = JSON.parse(result.stdout);
+    assert.equal(output.shownPath,'/api/announcement-alerts/shown');
+    assert.equal(output.shownOrigin,'http://127.0.0.1:39224');
+    assert.deepEqual(JSON.parse(output.shownBody),{ids:[{id:'https://x.com/thsottiaux/status/1000000000000000991#regular',version:'FABRICATED-version'}]});
     assert.equal(output.brand, 'Codex Quota');
     assert.equal(output.zhBrand, 'Codex 额度悬浮窗');
     assert.equal(output.auto, '刷新');

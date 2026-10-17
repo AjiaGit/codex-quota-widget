@@ -2,7 +2,7 @@ import { readFile, mkdir, writeFile, rename } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setDefaultResultOrder } from 'node:dns';
 import { analyzePublicPost, publicPostIndex } from './public-evidence.mjs';
-import { parsePreviewTime, isResetPreview, previewVersion } from './public/preview.mjs';
+import { parsePreviewTime, isResetPreview, previewVersion, previewDeadline } from './public/preview.mjs';
 // Prefer the working IPv4 route on networks whose IPv6 TLS path resets connections.
 // This changes only this service process and retains IPv6 as a fallback.
 setDefaultResultOrder('ipv4first');
@@ -37,6 +37,7 @@ function timestamp(value, now, earliest = -Infinity) {
   const ms = preciseTimestamp(value);
   return Number.isFinite(ms) && ms <= now && ms >= earliest ? new Date(ms).toISOString() : null;
 }
+const sourceTimestamp=(value,now)=>timestamp(value,now+5*60000);
 function dateOnly(value) {
   if(typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value))return null;
   const ms=Date.parse(value+'T00:00:00Z');
@@ -79,7 +80,7 @@ function normalizedAnnouncement(raw, now, scheduled = false, persisted = false) 
     correction: persisted && ['not-complete','cancelled','delayed'].includes(raw.correction) ? raw.correction : null,
     correctionSourceUrl: persisted ? officialPostUrl(raw.correctionSourceUrl) : null,
     correctionAt: persisted ? timestamp(raw.correctionAt,now) : null,
-    evidenceUpdatedAt: persisted ? timestamp(raw.evidenceUpdatedAt, now) : null,
+    evidenceUpdatedAt: persisted ? sourceTimestamp(raw.evidenceUpdatedAt, now) : null,
     evidenceFresh: persisted && raw.evidenceFresh === false ? false : true,
     observationAt: persisted ? timestamp(raw.observationAt, now) : null,
     previewSourceUrl: persisted ? officialPostUrl(raw.previewSourceUrl) : null,
@@ -282,7 +283,7 @@ function providerView(records, sourceUpdatedAt, now, stale = false, keepPending 
 }
 
 function normalizeCodexFeed(data, now, archiveKinds) {
-  if(data?.version!==1 || !Array.isArray(data.tweets) || data.profile?.handle!=='thsottiaux' || !timestamp(data.fetched_at,now))return emptyAnnouncements('invalid-data');
+  if(data?.version!==1 || !Array.isArray(data.tweets) || data.profile?.handle!=='thsottiaux' || !sourceTimestamp(data.fetched_at,now))return emptyAnnouncements('invalid-data');
   const events=(Array.isArray(data.events)?data.events:[]);
   const categories=new Map(events.map(event=>[officialPostUrl(event?.url),event?.reset_kind==='banked'||event?.group==='credits'?'banked':event?.group==='reset'?'regular':null]));
   const posts=[...data.tweets,...(Array.isArray(data.radar_context)?data.radar_context:[])];
@@ -354,7 +355,7 @@ function normalizeCodexHistory(data, now) {
   if(!Array.isArray(data?.events)||!(['partial','complete'].includes(data.coverage)||['confirmed_today','recorded_today','no_verified_reset','unknown'].includes(data.status)))return emptyAnnouncements('invalid-data');
   const records=[],sourceTimes=[];
   for(const event of data.events) {
-    const checked=timestamp(event?.retrieved_at,now);
+    const checked=sourceTimestamp(event?.retrieved_at,now);
     if(checked)sourceTimes.push(checked);
     const kind=event?.type==='banked_reset'?'banked':event?.type==='global_reset'?'regular':null;
     const url=officialPostUrl(event?.source_url);
@@ -370,11 +371,12 @@ function normalizeCodexHistory(data, now) {
         evidenceUpdatedAt:checked,evidenceFresh:sourceFresh(checked,now)}));
     }
   }
-  const sourceUpdatedAt=timestamp(data.resetArchiveSyncedAt,now)||sourceTimes.sort().at(-1)||null;
+  const sourceUpdatedAt=sourceTimestamp(data.resetArchiveSyncedAt,now)||sourceTimes.sort().at(-1)||null;
   const upstream=(Array.isArray(data.sources)?data.sources:[]).find(source=>source.id==='codex-resets');
   return providerView(records,sourceUpdatedAt,now,Boolean(upstream&&upstream.status!=='online'),false);
 }
-const active = (item, now) => !item.sourceWithdrawn && (item.deliveredAt
+const active = (item, now) => !item.sourceWithdrawn &&
+  !(item.kind==='regular'&&item.announcementBasis==='original'&&!item.deliveredAt&&previewDeadline(item)<=now) && (item.deliveredAt
   ? now - Date.parse(item.deliveredAt) < MAX_AGE_MS
   : item.certainty === 'announced' || item.announcedAt && now - Date.parse(item.announcedAt) < MAX_AGE_MS);
 const confirmedAnnouncement = item => item.certainty === 'announced' || Boolean(item.deliveredAt);
@@ -413,7 +415,7 @@ export function normalizeAnnouncements(data, now = Date.now()) {
 export async function createAnnouncementStore({ file, now = Date.now } = {}) {
   let snapshot = emptyAnnouncements(), writes = Promise.resolve();
   let baselineAt = null;
-  const observed = new Set(), observedStages = new Map(), unread = new Map(), previewVersions = new Map();
+  const observed = new Set(), observedStages = new Map(), unread = new Map(), previewVersions = new Map(), previewTraces = new Map();
   const canNotify = item => isResetPreview(item,now()) || Boolean(item?.kind==='regular' && item.statementBasis==='original' &&
     ['cancelled','delayed'].includes(item.correction) && (!item.correctionSourceUrl || item.correctionSourceUrl===item.sourceUrl) &&
     now()-Date.parse(item.announcedAt)<MAX_AGE_MS && (item.relatedUrls||[]).some(url=>previewVersions.has(url+'#regular')));
@@ -435,9 +437,15 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
   try {
     const saved = JSON.parse(await readFile(file, 'utf8'));
     if (saved.version === 1) snapshot = { ...snapshot, items: clean(saved.items), history: clean(saved.history),
-      sourceUpdatedAt: timestamp(saved.sourceUpdatedAt, now()), providerHealth: Array.isArray(saved.providerHealth) ? saved.providerHealth : [],
+      sourceUpdatedAt: sourceTimestamp(saved.sourceUpdatedAt, now()), providerHealth: Array.isArray(saved.providerHealth) ? saved.providerHealth : [],
       diagnostics: Array.isArray(saved.diagnostics) ? saved.diagnostics.slice(-100) : [],
       lastFetchedAt: Number.isFinite(saved.lastFetchedAt) && saved.lastFetchedAt >= 0 && saved.lastFetchedAt <= now() ? saved.lastFetchedAt : null, stale: true };
+    for(const row of (Array.isArray(saved.previewTrace)?saved.previewTrace:[]).slice(-100)) {
+      if(!alertIdentity(row?.id)||!Number.isFinite(row.firstSeenAt)||row.firstSeenAt>now())continue;
+      const value={id:row.id,publishedAt:timestamp(row.publishedAt,now()),firstSeenAt:row.firstSeenAt};
+      for(const key of ['classifiedAt','notifiedAt','indicatorReportedAt'])value[key]=Number.isFinite(row[key])&&row[key]<=now()?row[key]:null;
+      previewTraces.set(row.id,value);
+    }
     const tracking = saved.version === 1 && saved.alertTracking;
     if(tracking?.version === 1 && Number.isFinite(tracking.baselineAt) && tracking.baselineAt <= now()) {
       baselineAt = tracking.baselineAt;
@@ -472,7 +480,7 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
   const project = () => {
     const items = snapshot.items.filter(item => active(item, now()));
     const presentation=item=>({...item,noticeVersion:previewVersion(item),previewPriority:canNotify(item)});
-    return { ...snapshot, items:items.map(presentation), history: deduplicate([...snapshot.history, ...snapshot.items.filter(item => !active(item, now()))])
+    return { ...snapshot, previewTrace:[...previewTraces.values()].slice(-100).map(row=>({...row})), items:items.map(presentation), history: deduplicate([...snapshot.history, ...snapshot.items.filter(item => !active(item, now()))])
       .sort((a,b)=>Date.parse(b.announcedAt || 0)-Date.parse(a.announcedAt || 0)).slice(0,50).map(presentation),
       stale: snapshot.stale || !sourceFresh(snapshot.sourceUpdatedAt,now()) };
   };
@@ -490,6 +498,15 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
   return {
     get state() { return project(); },
     get alerts() { return alerts(); },
+    async recordIndicator(entries) {
+      let changed=false;
+      for(const entry of (Array.isArray(entries)?entries:[]).slice(0,100)) {
+        const alert=unread.get(entry?.id),trace=previewTraces.get(entry?.id);
+        if(alert&&trace&&entry.version===alert.version&&!trace.indicatorReportedAt){trace.indicatorReportedAt=now();changed=true;}
+      }
+      if(changed)await persist();
+      return alerts();
+    },
     async acknowledge(ids) {
       for(const entry of (Array.isArray(ids) ? ids : []).slice(0,100)) {
         const id=typeof entry==='string'?entry:entry?.id,current=unread.get(id);
@@ -518,7 +535,12 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
       if(fresh) {
         for(const item of [...freshItems,...freshHistory].filter(eligible)) {
           const version=previewVersion(item);
-          if(canNotify(item) && previewVersions.get(item.id)!==version)unread.set(item.id,previewEntry(item));
+          if(!previewTraces.has(item.id))previewTraces.set(item.id,{id:item.id,publishedAt:item.announcedAt,firstSeenAt:now(),classifiedAt:null,notifiedAt:null,indicatorReportedAt:null});
+          const trace=previewTraces.get(item.id);
+          if(canNotify(item) && previewVersions.get(item.id)!==version){
+            unread.set(item.id,previewEntry(item));Object.assign(trace,{classifiedAt:now(),notifiedAt:now(),indicatorReportedAt:null});
+          }
+          while(previewTraces.size>100)previewTraces.delete(previewTraces.keys().next().value);
           if(isResetPreview(item,now()) || canNotify(item))previewVersions.set(item.id,version);
         }
         if(baselineAt===null)baselineAt=now();
@@ -574,7 +596,7 @@ export async function createAnnouncementStore({ file, now = Date.now } = {}) {
         lastFetchedAt: fresh ? now() : snapshot.lastFetchedAt,
         items: currentRecords,
         history: records.filter(item=>historicalIds.has(item.id) || historicalIds.has(item.deliverySourceUrl + '#' + item.kind)),
-        sourceUpdatedAt: timestamp(input?.sourceUpdatedAt, now()) || snapshot.sourceUpdatedAt,
+        sourceUpdatedAt: sourceTimestamp(input?.sourceUpdatedAt, now()) || snapshot.sourceUpdatedAt,
         stale: input?.status !== 'ok' || input?.stale === true || currentRecords.some(item => !item.sourceWithdrawn &&
           (item.sourceHint ? !hintEvidence.has(item.sourceUrl) :
             !evidence.has(item.id) && !evidence.has(item.deliverySourceUrl + '#' + item.kind))) };

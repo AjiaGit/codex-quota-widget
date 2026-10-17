@@ -197,15 +197,15 @@ test('backup upstream failure cannot be hidden by freshly generated or retrieved
   assert.deepEqual(store.alerts.unread, []);
 });
 
-test('public refresh cadence accelerates only a recent pending message and backs off for rate limits', async () => {
+test('public refresh checks every minute in quiet periods and backs off for rate limits', async () => {
   const { externalRefreshDelay } = await import('../monitor.mjs');
   assert.equal(typeof externalRefreshDelay, 'function');
   const waiting = { announcements: { items: [{ certainty: 'announced', announcedAt: iso(now - 600000) }] } };
-  assert.equal(externalRefreshDelay(waiting, now), 120000);
-  assert.equal(externalRefreshDelay(waiting, now + 3 * hour), 600000);
-  assert.equal(externalRefreshDelay({ announcements: { items: [{ ...waiting.announcements.items[0], deliveredAt: iso(now) }] } }, now), 600000);
+  assert.equal(externalRefreshDelay(waiting, now), 60000);
+  assert.equal(externalRefreshDelay(waiting, now + 3 * hour), 60000);
+  assert.equal(externalRefreshDelay({ announcements: { items: [{ ...waiting.announcements.items[0], deliveredAt: iso(now) }] } }, now), 60000);
   assert.equal(externalRefreshDelay({ announcements: { ...waiting.announcements, providerHealth: [{ retryAfterMs: 900000 }] } }, now), 900000);
-  assert.equal(externalRefreshDelay({ announcements: { ...waiting.announcements, providerHealth: [{ status:'unavailable', retryAfterMs:900000 },{ status:'ok' }] } }, now), 120000, 'One throttled source cannot stop the working provider');
+  assert.equal(externalRefreshDelay({ announcements: { ...waiting.announcements, providerHealth: [{ status:'unavailable', retryAfterMs:900000 },{ status:'ok' }] } }, now), 60000, 'One throttled source cannot stop the working provider');
   const unavailable={announcements:{providerHealth:[{status:'unavailable'},{status:'unavailable'}]}};
   assert.equal(externalRefreshDelay(unavailable,now,1),60000);
   assert.equal(externalRefreshDelay(unavailable,now,3),240000);

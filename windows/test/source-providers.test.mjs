@@ -204,12 +204,12 @@ test('suggestions, capabilities and requests do not become promises while explic
   }
 });
 
-test('an explicit pending original announcement stays current past 24 hours without reviving ancient archive promises', async () => {
+test('an expired original preview moves to history without reviving ancient archive promises', async () => {
   const old = { ...pre, at: '2026-10-10T00:00:00Z', declared_at: '2026-10-10T00:00:00Z' };
   const ancient = record({ announced_at: '2026-03-01T00:00:00Z', evidence_text: 'Global reset by EOD.' });
   const result = await query(feed([old]), history([ancient]));
-  assert.deepEqual(result.announcements.items.map(item => item.sourceUrl), [preUrl]);
-  assert.equal(result.announcements.items[0].deliveredAt, null);
+  assert.deepEqual(result.announcements.items, []);
+  assert.equal(result.announcements.history.find(item=>item.sourceUrl===preUrl).deliveredAt,null);
 });
 
 test('an old completed pairing enters history without becoming a new live notice', async () => {

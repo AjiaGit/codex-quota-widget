@@ -86,7 +86,7 @@ $script:WidgetStrings = @{
         recoveryCount = '{0} records'; recoveryNone = 'No records'; relatedBanked = 'Reset credit news'; relatedRegular = 'Quota-reset news'; phaseUnconfirmed = 'Tracker has no completion time'; sourceScope = 'Tracker scope: {0}'; postedOn = 'Posted: {0}'
         recoveryTitle = 'My quota recoveries'; recoveryDetected = 'Noticed locally: {0}'; recoveryObserved = 'Previous reading: {0}'; recoveryExplanation = 'Changes to your own quota.'; recoveryTracking = 'Recording since {0}.'; recoveryEmpty = 'No new quota recovery recorded yet.'; recoveryUnavailable = 'Tracking unavailable. Refresh after signing in to Codex.'; recoveryUnsaved = 'Local saving failed; new records may be lost when the app closes.'
         newSourceHints = 'New monitoring-site hint · Click for details'; newPublicUpdates = 'New reset updates · Click for details'
-        newGrant = 'New reset credit update · Click for details'; newGlobalReset = 'New quota-reset update · Click for details'; newAnnouncements = 'New reset credit and quota-reset updates · Click for details'
+        newGrant = 'New reset credit update · Click for details'; newGlobalReset = 'New quota-reset notice or change · Click for details'; newAnnouncements = 'New reset credit and quota-reset updates · Click for details'
         app = 'Codex quota'; loading = 'Loading'; reading = 'Reading quota'; updated = 'Updated'; unavailable = 'Unavailable'; refreshing = 'Refreshing'
         compact = 'Mini'; refresh = 'Refresh'; weekly = 'Weekly remaining'; untilReset = 'Time to reset'; reset = 'Resets {0}'; resetUnknown = 'Reset time —'
         lastUpdated = 'Updated {0}'; stale = 'Data is stale. Refresh to update.'; cards = 'Available resets: {0}'; cardsUnknown = 'Available resets: —'
@@ -122,7 +122,7 @@ $script:WidgetStrings = @{
         scheduledGrant = 'Expected grant: {0}'; scheduledReset = 'Expected reset: {0}'; originalGrant = 'Originally expected grant: {0}'; originalReset = 'Originally expected reset: {0}'
         localAnnouncementTime = '{0} (local {1})'; dateOnlySchedule = '{0} (time not announced)'
         sourceTimeZoneNote = 'Converted from {0} by the monitoring source; see original post.'; sourceWithdrawn = 'The monitoring site removed this record; this does not establish cancellation or completion.'; withdrawnRecord = 'Record removed by monitoring site'
-        publicUpdated = 'Public data updated {0}'; publicUpdateUnknown = 'Public update time unavailable'; refreshCadence = 'Auto-refresh: quota every 1 min · public updates adapt to activity'; sourceLinks = 'codex-reset.com / codexreset.dev'
+        publicUpdated = 'Public data updated {0}'; publicUpdateUnknown = 'Public update time unavailable'; refreshCadence = 'Auto-refresh: quota and reset previews every 1 min'; sourceLinks = 'codex-reset.com / codexreset.dev'
         announcementSource = 'View original post'; deliverySource = 'Completion evidence'; announcementHistory = 'History'; historyEmpty = 'No history yet'
 
         expandHistory = 'Show history'; collapseHistory = 'Hide history'
@@ -213,7 +213,7 @@ $script:WidgetStrings = @{
         recoveryCount = '{0} 条记录'; recoveryNone = '暂无记录'; relatedBanked = '重置卡相关消息'; relatedRegular = '额度重置相关消息'; phaseUnconfirmed = '网站未提供完成时间'; sourceScope = '网站标注：{0}'; postedOn = '消息发布 {0}'
         recoveryTitle = '我的额度恢复'; recoveryDetected = '本机发现：{0}'; recoveryObserved = '上次读取：{0}'; recoveryExplanation = '这里只记录你自己的额度变化。'; recoveryTracking = '从 {0} 开始记录。'; recoveryEmpty = '还没有新的额度恢复记录。'; recoveryUnavailable = '记录暂不可用，登录 Codex 后刷新。'; recoveryUnsaved = '本地保存失败，本次新记录可能在关闭应用后丢失。'
         newSourceHints = '有新的监控网站提示，点击查看详情'; newPublicUpdates = '有新的重置动态，点击查看详情'
-        newGrant = '有新的重置卡消息，点击查看详情'; newGlobalReset = '有新的额度重置消息，点击查看详情'; newAnnouncements = '有新的重置卡和额度重置消息，点击查看详情'
+        newGrant = '有新的重置卡消息，点击查看详情'; newGlobalReset = '有新的额度重置预告或变更，点击查看详情'; newAnnouncements = '有新的重置卡和额度重置消息，点击查看详情'
         app = 'Codex 额度悬浮窗'; loading = '读取中'; reading = '正在读取额度'; updated = '数据已更新'; unavailable = '暂不可用'; refreshing = '正在刷新'
         compact = '极简'; refresh = '刷新'; weekly = '本周剩余'; untilReset = '距离重置'; reset = '重置 {0}'; resetUnknown = '重置时间 —'
         lastUpdated = '最近更新 {0}'; stale = '数据已过期，请刷新'; cards = '可用重置卡：{0} 张'; cardsUnknown = '可用重置卡：—'
@@ -249,7 +249,7 @@ $script:WidgetStrings = @{
         scheduledGrant = '预计发放：{0}'; scheduledReset = '预计重置：{0}'; originalGrant = '原定发放：{0}'; originalReset = '原定重置：{0}'
         localAnnouncementTime = '{0}（本地 {1}）'; dateOnlySchedule = '{0}（具体时间未公布）'
         sourceTimeZoneNote = '来源按 {0} 时区换算；原文见公告。'; sourceWithdrawn = '监控网站已撤下此记录，不代表事情已取消或完成。'; withdrawnRecord = '监控网站已撤下此记录'
-        publicUpdated = '公告数据更新 {0}'; publicUpdateUnknown = '公告更新时间暂不可用'; refreshCadence = '自动刷新：额度每1分钟 · 公开消息按进展刷新'; sourceLinks = 'codex-reset.com / codexreset.dev'
+        publicUpdated = '公告数据更新 {0}'; publicUpdateUnknown = '公告更新时间暂不可用'; refreshCadence = '自动刷新：额度与重置预告每1分钟'; sourceLinks = 'codex-reset.com / codexreset.dev'
         announcementSource = '查看原帖'; deliverySource = '完成依据'; announcementHistory = '历史记录'; historyEmpty = '暂无历史记录'
 
         expandHistory = '展开历史记录'; collapseHistory = '收起历史记录'
@@ -640,7 +640,7 @@ function ConvertTo-WidgetAnnouncementRow($row, [string]$language, [DateTimeOffse
     if ($sourceHint) {$scope=''} elseif (-not $explicit) {$scope=Get-WidgetText 'sourceScope' $language @($scope)}
     $phaseKey=if ($row.sourceWithdrawn) {'sourceWithdrawn'} else {'phase'+(Get-Culture).TextInfo.ToTitleCase($phase)}
     $scheduleNote=if ($scheduled -and $row.scheduledTimeZone) {Get-WidgetText 'sourceTimeZoneNote' $language @([string]$row.scheduledTimeZone)} else {''}
-    $previewPriority=(Test-WidgetResetPreview $row $now) -or [bool]$row.previewPriority
+    $previewPriority=(Test-WidgetResetPreview $row $now) -or ([bool]$row.previewPriority -and [bool]$row.correction)
     $previewExpired=$row.kind -eq 'regular' -and $row.announcementBasis -eq 'original' -and -not $completed -and -not $row.correction -and -not (Test-WidgetResetPreview $row $now)
     if($explicit -and -not $completed -and $row.scheduleText){
         $key=if($scheduled){if($row.schedulePrecision -in @('window','deadline')){'previewBefore'}else{'previewAround'}}else{'previewLiteral'}

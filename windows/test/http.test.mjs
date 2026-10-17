@@ -153,7 +153,7 @@ test('external API restores confirmed announcements after a service restart and 
   }finally { if(running)await running.stop();await rm(directory,{recursive:true,force:true}); }
 });
 
-test('public data is queried on the ten-minute timer and polling the cache does not query the provider',async(context)=>{
+test('public data is queried on the one-minute timer and polling the cache does not query the provider',async(context)=>{
   context.mock.timers.enable({apis:['setInterval','Date'],now:Date.now()});
   const directory=await mkdtemp(join(tmpdir(),'quota-public-cadence-'));
   let queries=0,running;
@@ -162,7 +162,7 @@ test('public data is queried on the ten-minute timer and polling the cache does 
     const base=`http://127.0.0.1:${running.server.address().port}`;
     const read=async()=>(await(await fetch(base+'/api/external')).json());
     assert.equal((await read()).updatedAt,1);
-    context.mock.timers.tick(599999);
+    context.mock.timers.tick(59999);
     assert.equal((await read()).updatedAt,1);
     context.mock.timers.tick(1);
     // The timer starts an asynchronous store write; observe the response after it completes.

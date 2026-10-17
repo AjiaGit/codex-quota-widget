@@ -73,13 +73,10 @@ export function createQuotaCache({query=()=>queryAppServer(),now=Date.now,recove
 }
 export function externalRefreshDelay(state, now=Date.now(), failures=1) {
   const feed=state?.announcements;
-  const active=(feed?.items||[]).some(item=>!item.deliveredAt&&!item.sourceWithdrawn&&
-    (item.certainty==='announced'||['active','recent'].includes(item.sourceHint))&&
-    Date.parse(item.announcedAt)<=now&&now-Date.parse(item.announcedAt)<2*3600000);
   const health=feed?.providerHealth||[];
   const cooldown=health.length&&health.every(provider=>provider.retryAfterMs>0)?Math.min(...health.map(provider=>provider.retryAfterMs)):0;
   const allFailed=health.length&&health.every(provider=>provider.status==='unavailable');
-  return Math.max(allFailed?Math.min(600000,60000*2**Math.max(0,Math.min(failures-1,4))):active?120000:600000,cooldown);
+  return Math.max(allFailed?Math.min(600000,60000*2**Math.max(0,Math.min(failures-1,4))):60000,cooldown);
 }
 export async function startMonitor({port=PORT,settingsFile=settingsPath(),query,externalQuery=queryExternal}={}) {
   const recoveryStore=await createRecoveryStore({file:join(dirname(settingsFile),'quota-recovery.json')});
@@ -115,13 +112,13 @@ export async function startMonitor({port=PORT,settingsFile=settingsPath(),query,
       if(request.method==='GET'&&url.pathname==='/api/settings'){json(await readSettings(settingsFile));return;}
       if(request.method==='POST'){
         if(request.headers.origin&&request.headers.origin!==origin){response.writeHead(403).end();return;}
-        if(url.pathname==='/api/announcement-alerts/read'){
+        if(['/api/announcement-alerts/read','/api/announcement-alerts/shown'].includes(url.pathname)){
           if(!/^application\/json(?:;|$)/i.test(request.headers['content-type']||'')){response.writeHead(415).end();return;}
           try{
             let body='';for await(const chunk of request){body+=chunk;if(body.length>16384)throw Error();}
             const input=JSON.parse(body);
             if(!Array.isArray(input?.ids)||input.ids.length>100||input.ids.some(entry=>typeof entry==='string'?entry.length>2048:!entry||typeof entry.id!=='string'||entry.id.length>2048||typeof entry.version!=='string'||entry.version.length>4096))throw Error();
-            json(await announcements.acknowledge(input.ids));
+            json(await (url.pathname.endsWith('/shown')?announcements.recordIndicator(input.ids):announcements.acknowledge(input.ids)));
           }catch{response.writeHead(400).end();}return;
         }
         if(url.pathname==='/api/settings'){

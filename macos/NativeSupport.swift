@@ -132,7 +132,7 @@ struct NativeLocalizer {
         case "remaining": pair = ("Weekly quota remaining: {value}%", "本周剩余 {value}%")
         case "quota_tooltip": pair = ("Codex weekly quota", "Codex 本周额度")
         case "new_grant": pair = ("New reset credit update · Click for details", "有新的重置卡消息，点击查看详情")
-        case "new_global_reset": pair = ("New quota-reset update · Click for details", "有新的额度重置消息，点击查看详情")
+        case "new_global_reset": pair = ("New quota-reset notice or change · Click for details", "有新的额度重置预告或变更，点击查看详情")
         case "new_announcements": pair = ("New reset credit and quota-reset updates · Click for details", "有新的重置卡和额度重置消息，点击查看详情")
         case "new_source_hints": pair = ("New monitoring-site hint · Click for details", "有新的监控网站提示，点击查看详情")
         case "new_public_updates": pair = ("New reset updates · Click for details", "有新的重置动态，点击查看详情")
@@ -152,6 +152,7 @@ struct NativeLocalizer {
 
 struct NativeAnnouncementAlerts {
     let ids: [String]
+    let visibleEntries: [[String: String]]
     private let kinds: Set<String>
     private let hasSourceHints: Bool
     private let hasAnnouncements: Bool
@@ -165,6 +166,10 @@ struct NativeAnnouncementAlerts {
             return url.scheme == "https" && url.host != nil && url.user == nil && url.password == nil
         }
         ids = entries.compactMap { $0["id"] as? String }
+        visibleEntries = entries.compactMap { row in
+            guard let id = row["id"] as? String, let version = row["version"] as? String, version.count <= 4096 else { return nil }
+            return ["id": id, "version": version]
+        }
         kinds = Set(entries.compactMap { $0["kind"] as? String })
         hasSourceHints = entries.contains { $0["sourceHint"] as? Bool == true }
         hasAnnouncements = entries.contains { $0["sourceHint"] as? Bool != true }
@@ -343,6 +348,29 @@ final class NativeServiceClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["language": language.rawValue])
         return request
+    }
+
+    static func indicatorRequest(_ alerts: NativeAnnouncementAlerts) -> URLRequest {
+        var request = URLRequest(url: baseURL.appendingPathComponent("api/announcement-alerts/shown"))
+        request.httpMethod = "POST"
+        request.timeoutInterval = 8
+        request.setValue("http://127.0.0.1:39224", forHTTPHeaderField: "Origin")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["ids": alerts.visibleEntries])
+        return request
+    }
+    private var reportedIndicator = ""
+    func reportIndicator(_ alerts: NativeAnnouncementAlerts) {
+        guard !alerts.visibleEntries.isEmpty else { reportedIndicator = ""; return }
+        let request = Self.indicatorRequest(alerts)
+        let key = String(data: request.httpBody ?? Data(), encoding: .utf8) ?? ""
+        guard reportedIndicator != key else { return }
+        reportedIndicator = key
+        session.dataTask(with: request) { [weak self] _, response, _ in
+            if (response as? HTTPURLResponse)?.statusCode != 200 {
+                DispatchQueue.main.async { if self?.reportedIndicator == key { self?.reportedIndicator = "" } }
+            }
+        }.resume()
     }
 
     /// These reads only retrieve the service cache. The service owns the CLI schedule.
