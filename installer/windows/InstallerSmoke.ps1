@@ -110,9 +110,10 @@ public static class QuotaSmokeWindows {
         public uint Size, Mask; public int Min, Max; public uint Page; public int Position, TrackPosition;
     }
     [DllImport("user32.dll")] private static extern bool GetScrollInfo(IntPtr window, int bar, ref ScrollInfo info);
+    [DllImport("user32.dll", EntryPoint="GetPropW", CharSet=CharSet.Unicode, ExactSpelling=true)] private static extern IntPtr GetProp(IntPtr window, string name);
     public static int OwnedScrollPosition(IntPtr parent, IntPtr scroll, int pid) {
         if (scroll == IntPtr.Zero || ScrollBody(parent,pid) != scroll || !IsOwned(scroll,pid) || !IsChild(parent,scroll) || !IsWindowVisible(scroll))
-            throw new InvalidOperationException("Scroll escaped the owned visible fixture body");
+            throw new InvalidOperationException("Scroll escaped the owned visible fixture body: parent="+parent+", scroll="+scroll+", currentScroll="+ScrollBody(parent,pid)+", ownedParent="+IsOwned(parent,pid)+", ownedScroll="+IsOwned(scroll,pid)+", child="+IsChild(parent,scroll)+", visibleParent="+IsWindowVisible(parent)+", visibleScroll="+IsWindowVisible(scroll)+", parentRedraw="+GetProp(parent,"SysSetRedraw")+", scrollRedraw="+GetProp(scroll,"SysSetRedraw"));
         var info=new ScrollInfo {Size=(uint)Marshal.SizeOf(typeof(ScrollInfo)),Mask=4};
         if (!GetScrollInfo(scroll,1,ref info)) throw new InvalidOperationException("Fixture body has no vertical scroll position");
         return info.Position;
