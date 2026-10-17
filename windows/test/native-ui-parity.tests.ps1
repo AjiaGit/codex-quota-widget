@@ -356,7 +356,7 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
    }
   }finally{$script:data=$old;Show-Quota}
  }
- Test-Case 'long grant descriptions and expanded activity facts cannot overlap subsequent content' {
+ Test-Case 'long grant descriptions and direct public bodies cannot overlap subsequent content' {
   $long=('FABRICATED TEST DATA long record explanation ' * 12)
   foreach($width in @(404,606)) {
    $form.ClientSize=[Drawing.Size]::new($width,640);Update-ResponsiveLayout
@@ -372,7 +372,8 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
    $control=New-AnnouncementControl $row;$holder=[Windows.Forms.Panel]::new();$holder.Controls.Add($control)
    try {
     [void](Layout-AnnouncementRows $holder @($control) $content.Width)
-    if($control.Tag.extraPanel.Bottom -gt $control.Height -or $control.Tag.extraPanel.Top -lt $control.Tag.more.Bottom){throw 'Long expanded activity details overlap or clip'}
+    if($null -eq $control.Tag.body -or $control.Tag.body.Text -cne $long){throw 'Long public body is missing'}
+    if($control.Tag.body.Bottom -gt $control.Height -or $control.Tag.body.Top -lt $control.Tag.fact.Bottom -or $control.Tag.body.Right -gt $control.Width){throw 'Long public body overlaps or clips'}
    }finally{$holder.Dispose();$script:recordExpanded.Remove($row.key)}
   }
  }
