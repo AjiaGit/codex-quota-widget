@@ -6,11 +6,11 @@ import { join } from 'node:path';
 import { queryExternal, createAnnouncementStore } from '../external.mjs';
 import { deriveAnnouncementsView, deriveResetActivityView, announcementIdsForReading, visibleAnnouncementView } from '../public/app.mjs';
 
-// FABRICATED IDs, timestamps and responses; wording reproduces a missed public signal.
+// FABRICATED IDs, timestamps and responses; a website hint without verified quota context.
 const now = Date.parse('2026-10-15T06:00:00Z');
 const hour = 3600000;
 const parent = { id: '1000000000000000100', url: 'https://x.com/thsottiaux/status/1000000000000000100',
-  text: 'Day 10/ Reset', at: '2026-10-15T04:55:00Z', kind: 'other' };
+  text: 'A reset-related discussion', at: '2026-10-15T04:55:00Z', kind: 'other' };
 const reply = { id: '1000000000000000101', url: 'https://x.com/thsottiaux/status/1000000000000000101',
   text: 'Landing within the next 2 hours', at: '2026-10-15T04:56:00Z', kind: 'signal',
   is_reply: true, replying_to: 'thsottiaux', in_reply_to_tweet_id: parent.id, conversation_id: parent.id };

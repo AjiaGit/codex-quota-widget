@@ -2,6 +2,7 @@ import { readFile, mkdir, writeFile, rename } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setDefaultResultOrder } from 'node:dns';
 import { analyzePublicPost, publicPostIndex } from './public-evidence.mjs';
+import { parsePreviewTime } from './public/preview.mjs';
 // Prefer the working IPv4 route on networks whose IPv6 TLS path resets connections.
 // This changes only this service process and retains IPv6 as a fallback.
 setDefaultResultOrder('ipv4first');
@@ -58,6 +59,9 @@ function normalizedAnnouncement(raw, now, scheduled = false, persisted = false) 
     id: sourceUrl + '#' + kind,
     kind, announcedAt, certainty: raw.certainty === 'announced' ? 'announced' : 'unconfirmed',
     scheduledAt: Number.isFinite(scheduledMs) ? new Date(scheduledMs).toISOString() : null,
+    scheduledFrom: persisted ? timestamp(raw.scheduledFrom,now) : null,
+    scheduleText: persisted ? text(raw.scheduleText) : null,
+    schedulePrecision: persisted && ['window','approximate','deadline','instant','text'].includes(raw.schedulePrecision) ? raw.schedulePrecision : null,
     scheduledDate: dateOnly(persisted ? raw.scheduledDate : scheduled ? raw.day ?? raw.date : null),
     scheduledTimeZone: text(persisted ? raw.scheduledTimeZone : scheduled ? raw.tz_label : null),
     deliveredAt, scope: text(raw.scope), scopeLabel: text(persisted ? raw.scopeLabel : raw.scope_label),
@@ -244,7 +248,7 @@ function publicRecord({kind, url, at, summary, claim, scope = null, kindBasis = 
   return { id: url + '#' + kind, kind, sourceUrl: url, announcedAt, deliveredAt,
     deliverySourceUrl: deliveredAt ? url : null, completionTimeBasis: deliveredAt ? 'announcement' : null,
     certainty: claim === 'announced' || deliveredAt ? 'announced' : 'unconfirmed',
-    scheduledAt: null, scheduledDate: null, scheduledTimeZone: null, scope, scopeLabel: null, kindBasis,
+    ...parsePreviewTime(claim === 'announced' ? summary : null,at), scheduledDate: null, scheduledTimeZone: null, scope, scopeLabel: null, kindBasis,
     summary: text(summary), summaryZh: null, sourceHint: null, sourceWithdrawn: false,
     sourceSites: sourceSites([sourceSite]), announcementBasis: claim === 'announced' && metadata.statementBasis === 'original' ? 'original' : null,
     ...metadata };
