@@ -2,6 +2,8 @@
 
 ## 0.1.0
 
+- Restore automatic activity archiving with folded, three-record history batches and a clear empty state. Keep valid quota-reset previews visible and resurface important linked corrections without treating expiry as completion.
+
 - Public announcements now use codex-reset.com and codexreset.dev, retaining original publication times, pairing unambiguous preannouncements with completion statements, and preserving cached history through partial feeds or outages. Completion-statement time remains separate from account recovery.
 
 - Windows follows the primary macOS interface with inline reset-credit details, responsive activity cards and section icons, earlier-update/history/source disclosures, and a separate refresh-cadence footer. Direct GDI text and website links remain intact.

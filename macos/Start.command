@@ -14,6 +14,7 @@ if [[ -x "$ROOT/../../Helpers/QuotaWidget.app/Contents/MacOS/CodexQuota" ]]; the
   APP="$(cd "$ROOT/../../Helpers/QuotaWidget.app" && pwd -P)"
   LAUNCHER="$(cd "$ROOT/../../.." && pwd -P)"
 else
+  # Keep the legacy source-helper path for process ownership compatibility.
   APP="$ROOT/Codex 周额度.app"
   LAUNCHER="$ROOT/Codex Quota Widget.app"
 fi
@@ -29,7 +30,7 @@ fi
 
 notice() {
   local message="$1" title="Codex Quota Widget" button="OK"
-  if [[ "$LANGUAGE" == "zh-CN" ]]; then message="$2"; title="Codex 周额度"; button="好"; fi
+  if [[ "$LANGUAGE" == "zh-CN" ]]; then message="$2"; title="Codex 额度悬浮窗"; button="好"; fi
   printf '\n%s\n' "$message"
   /usr/bin/osascript -e 'on run argv' -e 'display dialog (item 1 of argv) buttons {item 3 of argv} default button (item 3 of argv) with title (item 2 of argv)' -e 'end run' "$message" "$title" "$button" >/dev/null 2>&1 || true
 }
@@ -148,4 +149,4 @@ if [[ "$WIDGET_ONLY" == 1 ]]; then
 else
   /usr/bin/open "$LAUNCHER"
 fi
-if [[ "$LANGUAGE" == "zh-CN" ]]; then printf '%s\n' '已启动 Codex 周额度。'; else printf '%s\n' 'Codex Quota Widget is running.'; fi
+if [[ "$LANGUAGE" == "zh-CN" ]]; then printf '%s\n' '已启动 Codex 额度悬浮窗。'; else printf '%s\n' 'Codex Quota Widget is running.'; fi

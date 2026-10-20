@@ -28,7 +28,7 @@ test('English presentation includes localized countdown, counts and errors', () 
   const result = view.deriveView({ status: 'ok', remainingPercent: 75, resetsAt: (now + 36*3600000)/1000, updatedAt: now, resetCards: 2 }, now, 'UTC', 'en');
   assert.equal(result.statusText, 'Updated');
   assert.equal(result.countdownText, '1d 12h');
-  assert.equal(result.cardsText, '2 resets');
+  assert.equal(result.cardsText, '2');
   assert.match(view.deriveView({status:'unavailable',errorCode:'signed_out'},now,'UTC','en').message, /Sign in/);
 });
 

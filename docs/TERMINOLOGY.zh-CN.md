@@ -6,19 +6,21 @@
 
 ## 重置术语
 
-| 官方英文名称 | 本工具中文名称 | 含义 |
+| 英文术语 | 本工具中文名称 | 含义 |
 | --- | --- | --- |
-| Banked reset | 可用重置 / 可用重置次数 | 保存在账号中，可在到期前由用户手动使用的一次额度重置。 |
-| Global reset / automatic reset | 全局额度重置 / 自动额度重置 | 直接对公告所列符合条件的账号生效，不会增加可保留的重置次数。 |
-| Credits | 付费使用额度 | 单独购买的额外使用额度，与可用重置不同。 |
+| Reset credit / banked reset | 重置卡 / 可用重置卡 | 保存在账号中，可在到期前由用户手动使用的一次额度重置。 |
+| Quota reset（来源也称 global / automatic reset） | 额度重置 | 直接对公告所列符合条件的账号生效，不会增加可保留的重置卡。 |
+| Credits | 付费使用额度 | 单独购买的额外使用额度，与重置卡不同。 |
 | Usage limits | 用量限制 | 账号适用的使用额度限制。 |
 | Weekly / 5-hour usage window | 每周 / 5 小时用量周期 | 账号的常规用量周期，与活动赠送的重置分别处理。 |
 
-英文名称及含义依据 [OpenAI 的 Banked reset 说明](https://help.openai.com/en/articles/20001498-how-banked-codex-resets-work)。中文名称是本工具按官方含义采用的译法，并非声称 OpenAI 已统一使用这些中文名称。可用重置不是现金、充值卡或 API 额度；资格、到期时间和重置范围按具体活动及账号的 Usage 页面为准。
+英文名称及含义依据 [OpenAI 的 Banked reset 说明](https://help.openai.com/en/articles/20001498-how-banked-codex-resets-work)。中文名称是本工具按官方含义采用的译法，并非声称 OpenAI 已统一使用这些中文名称。重置卡不是现金、充值卡或 API 额度；资格、到期时间和重置范围按具体活动及账号的 Usage 页面为准。
+
+英文界面将可留存的重置机会称为 **Reset credits**，数量栏使用 **Available resets**；中文称为**重置卡**，数量单位为**张**。[Codex App Server 文档](https://learn.chatgpt.com/docs/app-server#8-earned-rate-limit-resets-chatgpt)也区分了 earned reset credits 与使用额度。
 
 ## 自动刷新是什么意思？
 
-- **额度每 1 分钟：**通过本机 Codex App Server 读取已登录账号的额度；可用重置次数也来自该账号的返回数据。
+- **额度每 1 分钟：**通过本机 Codex App Server 读取已登录账号的额度；可用重置卡也来自该账号的返回数据。
 - **公共信息每 10 分钟：**读取下列第三方监控站点的公开公告与完成记录。这是工具检查的间隔，不是 OpenAI 发放或重置的间隔。
 - 本工具不会向这些公开站点发送个人额度或登录凭据。
 

@@ -9,6 +9,7 @@ if [[ -d "$ROOT/../../Helpers/QuotaWidget.app" ]]; then
   APP="$(cd "$ROOT/../../Helpers/QuotaWidget.app" && pwd -P)"
   LAUNCHER="$(cd "$ROOT/../../.." && pwd -P)"
 else
+  # Keep the legacy source-helper path for process ownership compatibility.
   APP="$ROOT/Codex 周额度.app"
   LAUNCHER="$ROOT/Codex Quota Widget.app"
 fi
@@ -75,4 +76,4 @@ if [[ "$GUARD_UNAVAILABLE" == 1 ]]; then
   if [[ "$LANGUAGE" == "zh-CN" ]]; then printf '%s\n' '无法验证进程归属。请先运行 Start.command 更新原生工具，再重试停止。' >&2; else printf '%s\n' 'Process ownership could not be verified. Run Start.command to update the native tools, then retry Stop.command.' >&2; fi
   exit 1
 fi
-if [[ "$LANGUAGE" == "zh-CN" ]]; then printf '%s\n' 'Codex 周额度工具已停止。'; else printf '%s\n' 'Codex Quota Widget has stopped.'; fi
+if [[ "$LANGUAGE" == "zh-CN" ]]; then printf '%s\n' 'Codex 额度悬浮窗已停止。'; else printf '%s\n' 'Codex Quota Widget has stopped.'; fi

@@ -7,13 +7,13 @@ const now = Date.parse('2026-10-11T12:00:00Z');
 const preUrl = 'https://x.com/thsottiaux/status/1000000000000000001';
 const doneUrl = 'https://x.com/thsottiaux/status/1000000000000000002';
 const pre = { id: '1000000000000000001', url: preUrl, text: 'Global reset by EOD.', at: '2026-10-10T22:16:20Z', declared_at: '2026-10-10T22:16:20Z', kind: 'signal' };
-const done = { id: '1000000000000000002', url: doneUrl, text: 'Put the reset in the bag. All propagated.', at: '2026-10-11T04:01:09Z', kind: 'signal' };
+const done = { id: '1000000000000000002', url: doneUrl, text: 'Put the reset in the bag. All propagated.', at: '2026-10-11T04:01:09Z', kind: 'signal', in_reply_to_tweet_id: pre.id, replying_to: 'thsottiaux' };
 const feed = (tweets = [], extra = {}) => ({ version: 1, fetched_at: '2026-10-11T11:50:00Z', stale: false, profile: { handle: 'thsottiaux' }, tweets, events: [], ...extra });
-const record = (extra = {}) => ({ id: 'cr-1000000000000000002', type: 'global_reset', status: 'recorded', source_url: doneUrl, announced_at: '2026-10-11T04:01:09Z', effective_at: '2026-10-11T04:01:09Z', retrieved_at: '2026-10-11T11:45:00Z', time_basis: 'announcement', source_author: '@thsottiaux (archived by Codex Resets)', evidence_text: 'All propagated.', origin: 'codex_resets', ...extra });
+const record = (extra = {}) => ({ id: 'cr-1000000000000000002', type: 'global_reset', status: 'recorded', source_url: doneUrl, announced_at: '2026-10-11T04:01:09Z', effective_at: '2026-10-11T04:01:09Z', retrieved_at: '2026-10-11T11:45:00Z', time_basis: 'announcement', source_author: '@thsottiaux (archived by Codex Resets)', evidence_text: 'All propagated.', origin: 'codex_resets', in_reply_to_tweet_id: pre.id, replying_to: 'thsottiaux', ...extra });
 const history = (events = []) => ({ events, count: events.length, coverage: 'partial', timezone: 'UTC' });
 const query = (primary, backup = history()) => queryExternal({ now, fetchFn: async (url, options) => {
   assert.match(options.headers['User-Agent'], /^codex-quota-widget\//);
-  const data = url === 'https://codex-reset.com/api/feed' ? primary : url === 'https://codexreset.dev/api/history' ? backup : new Error('Unexpected provider');
+  const data = url === 'https://codex-reset.com/api/feed' ? primary : url === 'https://codexreset.dev/api/status' ? backup : new Error('Unexpected provider');
   if (data instanceof Error) throw data;
   return { ok: true, json: async () => data };
 } });
@@ -62,7 +62,7 @@ test('combines the preannouncement and completion statement once across mirrored
   assert.equal(item.deliveredAt, '2026-10-11T04:01:09.000Z');
   assert.equal(item.completionTimeBasis, 'announcement');
   const row = deriveAnnouncementsView(result.announcements, now, 'Asia/Shanghai', 'zh-CN').rows[0];
-  assert.match(row.completedText, /完成声明发布.*12:01/);
+  assert.match(row.completedText, /完成消息发布于.*12:01/);
   assert.equal(result.lastGlobal.sourceUrl, preUrl);
 });
 
@@ -120,7 +120,7 @@ test('full completion repairs a cached cropped archive without duplicate or retr
   const view = deriveAnnouncementsView(store.state, clock, 'Asia/Shanghai', 'zh-CN');
   assert.equal(view.rows.length, 0);
   assert.equal(view.history.length, 1);
-  assert.match(view.history[0].completedText, /完成声明发布.*10\/11.*12:01/);
+  assert.match(view.history[0].completedText, /完成消息发布于.*10\/11.*12:01/);
   assert.deepEqual(store.alerts.unread, []);
 });
 
@@ -204,12 +204,12 @@ test('suggestions, capabilities and requests do not become promises while explic
   }
 });
 
-test('an explicit pending original announcement stays current past 24 hours without reviving ancient archive promises', async () => {
+test('an expired original preview moves to history without reviving ancient archive promises', async () => {
   const old = { ...pre, at: '2026-10-10T00:00:00Z', declared_at: '2026-10-10T00:00:00Z' };
   const ancient = record({ announced_at: '2026-03-01T00:00:00Z', evidence_text: 'Global reset by EOD.' });
   const result = await query(feed([old]), history([ancient]));
-  assert.deepEqual(result.announcements.items.map(item => item.sourceUrl), [preUrl]);
-  assert.equal(result.announcements.items[0].deliveredAt, null);
+  assert.deepEqual(result.announcements.items, []);
+  assert.equal(result.announcements.history.find(item=>item.sourceUrl===preUrl).deliveredAt,null);
 });
 
 test('an old completed pairing enters history without becoming a new live notice', async () => {
@@ -232,10 +232,10 @@ test('a partial preannouncement refresh preserves the meaning of cached completi
   await store.update((await query(feed([done, pre]), history([record()]))).announcements);
   await store.update((await query(feed([pre]))).announcements);
   assert.equal(store.state.items[0].completionTimeBasis, 'announcement');
-  assert.match(deriveAnnouncementsView(store.state, now, 'UTC', 'en').rows[0].completedText, /^Completion statement posted/);
+  assert.match(deriveAnnouncementsView(store.state, now, 'UTC', 'en').rows[0].completedText, /^Completion message posted/);
 });
 
-test('reading a completion notice clears its canonical paired row after a partial backup update', async () => {
+test('a partial completion update preserves its paired row without a new preview notice', async () => {
   let clock = Date.parse('2026-10-10T20:00:00Z');
   const store = await createAnnouncementStore({ now: () => clock });
   await store.update({ status: 'ok', stale: false, sourceUpdatedAt: new Date(clock).toISOString(), items: [], history: [] });
@@ -245,7 +245,8 @@ test('reading a completion notice clears its canonical paired row after a partia
   await store.update((await query(new Error('offline'), history([record()]))).announcements);
   const view = deriveAnnouncementsView(store.state, now, 'UTC', 'en');
   const ids = announcementIdsForReading(store.alerts, view, true);
-  assert.deepEqual(ids, [preUrl + '#regular']);
+  assert.deepEqual(ids, []);
+  assert.ok(store.state.items.some(item=>item.deliverySourceUrl));
   await store.acknowledge(ids);
   assert.deepEqual(store.alerts.unread, []);
 });
@@ -287,7 +288,7 @@ test('an explicit original category corrects conflicting cached rows and their u
   await store.update((await query(new Error('offline'), backup)).announcements);
   assert.deepEqual(store.state.items.map(item => item.id), [doneUrl + '#banked']);
   assert.deepEqual(store.state.history.map(item => item.id), [doneUrl + '#banked']);
-  assert.deepEqual(store.alerts.unread, [{ id: doneUrl + '#banked', kind: 'banked' }]);
+  assert.deepEqual(store.alerts.unread, []);
   const ids = announcementIdsForReading(store.alerts, deriveAnnouncementsView(store.state, now, 'UTC', 'en'), true);
   await store.acknowledge(ids);
   assert.deepEqual(store.alerts.unread, []);

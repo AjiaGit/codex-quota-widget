@@ -71,23 +71,32 @@ export function createQuotaCache({query=()=>queryAppServer(),now=Date.now,recove
   };
   return {get state(){return state;},refresh,settle:()=>pending?.catch(()=>{}),refreshIfDue:()=>now()>=nextDue?refresh():Promise.resolve(state)};
 }
+export function externalRefreshDelay(state, now=Date.now(), failures=1) {
+  const feed=state?.announcements;
+  const health=feed?.providerHealth||[];
+  const cooldown=health.length&&health.every(provider=>provider.retryAfterMs>0)?Math.min(...health.map(provider=>provider.retryAfterMs)):0;
+  const allFailed=health.length&&health.every(provider=>provider.status==='unavailable');
+  return Math.max(allFailed?Math.min(600000,60000*2**Math.max(0,Math.min(failures-1,4))):60000,cooldown);
+}
 export async function startMonitor({port=PORT,settingsFile=settingsPath(),query,externalQuery=queryExternal}={}) {
   const recoveryStore=await createRecoveryStore({file:join(dirname(settingsFile),'quota-recovery.json')});
   const cache=createQuotaCache({query,recoveryStore});
   const announcements=await createAnnouncementStore({file:join(dirname(settingsFile),'announcements.json')});
-  let externalState={status:'loading',lastGlobal:null},externalPending=null,externalPublishing=false,lastExternalFetch=0;
+  const externalBackoff=new Map();
+  let externalState={status:'loading',lastGlobal:null},externalPending=null,externalPublishing=false,lastExternalFetch=0,nextExternalAt=0,externalFailures=0;
   const refreshExternal=(force=false,retry=false)=>{
     if(externalPending)return externalPending;
     if(force&&!retry&&Date.now()-lastExternalFetch<60000)return Promise.resolve(externalState);
     lastExternalFetch=Date.now();externalPending=Promise.resolve().then(async()=>{
-      try{const next=await externalQuery();externalPublishing=true;await announcements.update(next.announcements);externalState=next;}
+      try{const next=await externalQuery({backoff:externalBackoff});externalPublishing=true;await announcements.update(next.announcements);externalState=next;}
       // Publish the failure only after the snapshot write has settled. Otherwise
       // an immediate visible retry can coalesce with that unfinished old fetch.
       catch{externalPublishing=true;await announcements.update({status:'unavailable'});externalState={...externalState,status:'unavailable'};}
-      finally{externalPublishing=false;externalPending=null;}return {...externalState,announcements:announcements.state};
+      finally{externalFailures=(externalState.announcements?.providerHealth||[]).every(provider=>provider.status==='unavailable')?externalFailures+1:0;
+        nextExternalAt=Date.now()+externalRefreshDelay(externalState,Date.now(),externalFailures);externalPublishing=false;externalPending=null;}return {...externalState,announcements:announcements.state};
     });return externalPending;
   };
-  const files=new Map([['/',['index.html','text/html']],['/app.css',['app.css','text/css']],['/app.mjs',['app.mjs','text/javascript']],['/i18n.mjs',['i18n.mjs','text/javascript']]]);
+  const files=new Map([['/',['index.html','text/html']],['/app.css',['app.css','text/css']],['/app.mjs',['app.mjs','text/javascript']],['/i18n.mjs',['i18n.mjs','text/javascript']],['/preview.mjs',['preview.mjs','text/javascript']]]);
   const server=createServer(async(request,response)=>{
     try{
       const authority=`${HOST}:${server.address().port}`,origin=`http://${authority}`,url=new URL(request.url||'/',origin);
@@ -103,13 +112,13 @@ export async function startMonitor({port=PORT,settingsFile=settingsPath(),query,
       if(request.method==='GET'&&url.pathname==='/api/settings'){json(await readSettings(settingsFile));return;}
       if(request.method==='POST'){
         if(request.headers.origin&&request.headers.origin!==origin){response.writeHead(403).end();return;}
-        if(url.pathname==='/api/announcement-alerts/read'){
+        if(['/api/announcement-alerts/read','/api/announcement-alerts/shown'].includes(url.pathname)){
           if(!/^application\/json(?:;|$)/i.test(request.headers['content-type']||'')){response.writeHead(415).end();return;}
           try{
             let body='';for await(const chunk of request){body+=chunk;if(body.length>16384)throw Error();}
             const input=JSON.parse(body);
-            if(!Array.isArray(input?.ids)||input.ids.length>100||input.ids.some(id=>typeof id!=='string'||id.length>2048))throw Error();
-            json(await announcements.acknowledge(input.ids));
+            if(!Array.isArray(input?.ids)||input.ids.length>100||input.ids.some(entry=>typeof entry==='string'?entry.length>2048:!entry||typeof entry.id!=='string'||entry.id.length>2048||typeof entry.version!=='string'||entry.version.length>4096))throw Error();
+            json(await (url.pathname.endsWith('/shown')?announcements.recordIndicator(input.ids):announcements.acknowledge(input.ids)));
           }catch{response.writeHead(400).end();}return;
         }
         if(url.pathname==='/api/settings'){
@@ -124,7 +133,7 @@ export async function startMonitor({port=PORT,settingsFile=settingsPath(),query,
     }catch{if(!response.headersSent)response.writeHead(500);response.end();}
   });
   await new Promise((resolveListen,reject)=>{server.once('error',reject);server.listen(port,HOST,resolveListen);});cache.refresh();refreshExternal();
-  const timer=setInterval(()=>cache.refreshIfDue(),5000),externalTimer=setInterval(()=>refreshExternal(),600000);
+  const timer=setInterval(()=>cache.refreshIfDue(),5000),externalTimer=setInterval(()=>{if(Date.now()>=nextExternalAt)refreshExternal();},5000);
   const stop=async()=>{
     clearInterval(timer);clearInterval(externalTimer);
     const finishingExternal=externalPending;
