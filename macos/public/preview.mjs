@@ -13,23 +13,22 @@ export function parsePreviewTime(value,publishedAt) {
   }
   const absolute=text.match(/\b(?:at|by) (\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d(?:\.\d+)?)?(?:Z|[+-]\d\d:\d\d))\b/i);
   if(absolute&&Number.isFinite(stamp(absolute[1])))return {...empty,scheduleText:absolute[0],scheduledAt:new Date(stamp(absolute[1])).toISOString(),schedulePrecision:/^by/i.test(absolute[0])?'deadline':'instant'};
-  const pacific=text.match(/\b(?:at|by|before) (1[0-2]|0?[1-9])(?::([0-5]\d))?\s*(am|pm) (PST|PDT|PT)\b/i);
-  if(pacific) {
-    const prefix=text.slice(0,pacific.index),suffix=text.slice(pacific.index+pacific[0].length);
-    const calendar=String.raw`(?:tomorrow|today)(?:\s+(?:morning|afternoon|evening|night))?\b|tonight\b|(?:on|next|this)\s+[^.;!?]+|(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|January|February|March|April|May|June|July|August|September|October|November|December|\d{4}-\d\d-\d\d)\b[^.;!?]*`;
-    const before=prefix.match(new RegExp(String.raw`\b(${calendar})\s*$`,'i'));
-    const after=suffix.match(new RegExp(String.raw`^\s+(${calendar})`,'i'));
-    const qualifiers=[before?.[1],after?.[1]].filter(Boolean).map(value=>value.trim().toLowerCase());
-    const scheduleText=[before?.[0].trim(),pacific[0],after?.[0].trim()].filter(Boolean).join(' ');
-    if(/^PT$/i.test(pacific[4])||qualifiers.some(value=>!/^(?:tomorrow|today)$/.test(value))||new Set(qualifiers).size>1)
+  const pacificClock=String.raw`(at|by|before) (1[0-2]|0?[1-9])(?::([0-5]\d))?\s*(am|pm) (PST|PDT|PT)`;
+  if(new RegExp(String.raw`\b${pacificClock}\b`,'i').test(text)) {
+    const scheduleText=text.trim().replace(/^(?:(?:lands|landing)|(?:global|quota|codex) reset(?: landing)?)\s+/i,'').replace(/[.!?]\s*$/,'');
+    const exact=scheduleText.match(new RegExp(String.raw`^(?:(today|tomorrow)\s+)?${pacificClock}(?:\s+(today|tomorrow))?$`,'i'));
+    const qualifiers=[exact?.[1],exact?.[7]].filter(Boolean).map(value=>value.toLowerCase());
+    // No implicit date and no discarded calendar words. Unsupported expressions
+    // stay whole, rather than accidentally expiring a future notice yesterday.
+    if(!exact||!qualifiers.length||/^PT$/i.test(exact[6])||new Set(qualifiers).size>1)
       return {...empty,scheduleText,schedulePrecision:'text'};
     // Literal PST/PDT offsets: tomorrow follows the publication date in the
     // stated zone, which may still be yesterday relative to UTC or the user.
-    const offset=/^PST$/i.test(pacific[4])?-8:-7,date=new Date(published+offset*3600000);
+    const offset=/^PST$/i.test(exact[6])?-8:-7,date=new Date(published+offset*3600000);
     if(qualifiers.includes('tomorrow'))date.setUTCDate(date.getUTCDate()+1);
-    date.setUTCHours(Number(pacific[1])%12+(/^pm$/i.test(pacific[3])?12:0),Number(pacific[2]||0),0,0);
+    date.setUTCHours(Number(exact[3])%12+(/^pm$/i.test(exact[5])?12:0),Number(exact[4]||0),0,0);
     const scheduledAt=new Date(date.getTime()-offset*3600000).toISOString();
-    return {...empty,scheduleText,scheduledAt,schedulePrecision:/^at/i.test(pacific[0])?'instant':'deadline'};
+    return {...empty,scheduleText,scheduledAt,schedulePrecision:/^at$/i.test(exact[2])?'instant':'deadline'};
   }
   const utc=text.match(/\b(?:at|by) ([01]?\d|2[0-3]):([0-5]\d) (UTC|GMT)\b/i);
   if(utc) {

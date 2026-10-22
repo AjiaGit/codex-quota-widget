@@ -117,3 +117,14 @@ test('unsupported bare calendar qualifiers cannot silently become the publicatio
     assert.equal(result.schedulePrecision,'text');
   }
 });
+test('Pacific dates require a complete explicit day expression instead of a guessed default date',()=>{
+  for(const expression of ['before 10am PST 10/24','before 10am PST Oct 24','before 10am PST Fri',
+    'in 2 days before 10am PST','tomorrow before 10am PST Oct 24','tomorrow before 10am PST for a future date',
+    'Friday tomorrow before 10am PST','before 10am PST']) {
+    const result=parsePreviewTime('Lands '+expression+'.',reply.at);
+    assert.equal(result.scheduledAt,null,expression);
+    assert.equal(result.scheduleText,expression);
+    assert.equal(result.schedulePrecision,'text');
+  }
+  assert.equal(parsePreviewTime('Global reset tomorrow before 10am PST.',reply.at).scheduledAt,'2026-10-22T18:00:00.000Z');
+});
