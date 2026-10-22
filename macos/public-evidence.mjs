@@ -60,9 +60,10 @@ function campaignReset(post) {
   const text=cleanText(post?.text),day=text.match(/^Day\s+(?:[1-9]|1\d|2[0-8])\s*[/:-]\s*([^\n]*)/im);
   if(!day || !/^(?:Full )?Reset[.!]?\s*$/i.test(day[1]) &&
     !/(?:^|,\s*)it(?:['’]s| is) reset day today[.!]?\s*$/i.test(day[1]))return false;
+  if(unsafe(text))return false;
   // Check reset statements, not unrelated advice elsewhere in the same post.
   // The rhetorical "but no," affirms this narrow campaign headline.
-  return text.split(/(?<=[.!?])\s+|\n/).filter(value=>/\bresets?\b/i.test(value)).every(value=>{
+  return text.split(/(?<=[.!?])\s+|\n/).filter(value=>/\bresets?\b/i.test(value)||/^(?:it|this|that|they)\b/i.test(value)).every(value=>{
     const statement=value.replace(/\bbut no,\s*/gi,'');
     return !unsafe(statement)&&!negative(statement)&&!/\b(cancelled|canceled|postponed|delayed)\b/i.test(statement);
   });
@@ -88,7 +89,8 @@ export function analyzePublicPost(post, index = new Map(), fallbackKind = null) 
   const mentioned = [...new Set(clauses.map(kindIn).filter(Boolean))];
   const related = relatedUrls.map(url => index.get(url)).filter(Boolean);
   const contextKinds = [...new Set(related.flatMap(value => campaignReset(value)?['regular']:
-    !unsafe(cleanText(value.text))&&!negative(cleanText(value.text))?allKinds(cleanText(value.text)):[]))];
+    !unsafe(cleanText(value.text))&&!negative(cleanText(value.text))&&
+    !/\b(ui|button|patch|interface|redesign)\b/i.test(cleanText(value.text))?allKinds(cleanText(value.text)):[]))];
   const contextual = mentioned.length === 1 ? mentioned[0] : !mentioned.length && contextKinds.length === 1 ? contextKinds[0] : null;
   const rhetorical = clauses.some((clause, i) => i > 0 && /^it(?:['’]s| is) (?:done|complete|completed)[.!]?$/i.test(clause) &&
     /^what would you like with your side of (?:a |the )?(?:(?:global|banked) )?reset\?$/i.test(clauses[i - 1]));

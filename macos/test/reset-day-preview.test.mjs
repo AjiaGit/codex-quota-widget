@@ -90,3 +90,30 @@ test('ambiguous Pacific calendar expressions retain the full words instead of in
     assert.equal(result.schedulePrecision,'text');
   }
 });
+test('a Lands reply cannot turn a reset-button or reset-UI update into a quota promise',async()=>{
+  for(const text of ['The global reset button redesign is ready for testing.','Day 17/ Global reset UI improvements.']) {
+    const result=await query([{...parent,text},reply]);
+    const store=await createAnnouncementStore({now:()=>now});await store.update(result.announcements);
+    assert.deepEqual(store.alerts.unread,[],text);
+  }
+});
+test('campaign context retains a later governing condition, pronoun negation or cancellation',async()=>{
+  for(const text of ['Day 17/ Reset\nIt will happen only if all checks pass.',
+    'Day 17/ It’s reset day today.\nIt will happen only if all checks pass.',
+    'Day 17/ It’s reset day today.\nIt is not happening today.',
+    'Day 17/ It’s reset day today.\nIt is cancelled.']) {
+    const result=await query([{...parent,text},reply]);
+    const store=await createAnnouncementStore({now:()=>now});await store.update(result.announcements);
+    assert.deepEqual(store.alerts.unread,[],text);
+  }
+});
+test('unsupported bare calendar qualifiers cannot silently become the publication date',()=>{
+  for(const expression of ['before 10am PST Friday','before 10am PST October 24',
+    'this Friday before 10am PST','tomorrow morning before 10am PST',
+    '2026-10-24 before 10am PST','before 10am PST 2026-10-24']) {
+    const result=parsePreviewTime('Lands '+expression+'.',reply.at);
+    assert.equal(result.scheduledAt,null,expression);
+    assert.equal(result.scheduleText,expression);
+    assert.equal(result.schedulePrecision,'text');
+  }
+});

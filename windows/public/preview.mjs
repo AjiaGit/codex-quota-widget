@@ -16,8 +16,9 @@ export function parsePreviewTime(value,publishedAt) {
   const pacific=text.match(/\b(?:at|by|before) (1[0-2]|0?[1-9])(?::([0-5]\d))?\s*(am|pm) (PST|PDT|PT)\b/i);
   if(pacific) {
     const prefix=text.slice(0,pacific.index),suffix=text.slice(pacific.index+pacific[0].length);
-    const before=prefix.match(/\b(tomorrow|today|on\s+[^.;!?]+|next\s+[^.;!?]+)\s*$/i);
-    const after=suffix.match(/^\s+(tomorrow\b|today\b|on\s+[^.;!?]+|next\s+[^.;!?]+)/i);
+    const calendar=String.raw`(?:tomorrow|today)(?:\s+(?:morning|afternoon|evening|night))?\b|tonight\b|(?:on|next|this)\s+[^.;!?]+|(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|January|February|March|April|May|June|July|August|September|October|November|December|\d{4}-\d\d-\d\d)\b[^.;!?]*`;
+    const before=prefix.match(new RegExp(String.raw`\b(${calendar})\s*$`,'i'));
+    const after=suffix.match(new RegExp(String.raw`^\s+(${calendar})`,'i'));
     const qualifiers=[before?.[1],after?.[1]].filter(Boolean).map(value=>value.trim().toLowerCase());
     const scheduleText=[before?.[0].trim(),pacific[0],after?.[0].trim()].filter(Boolean).join(' ');
     if(/^PT$/i.test(pacific[4])||qualifiers.some(value=>!/^(?:tomorrow|today)$/.test(value))||new Set(qualifiers).size>1)
