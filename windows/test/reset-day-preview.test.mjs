@@ -128,3 +128,31 @@ test('Pacific dates require a complete explicit day expression instead of a gues
   }
   assert.equal(parsePreviewTime('Global reset tomorrow before 10am PST.',reply.at).scheduledAt,'2026-10-22T18:00:00.000Z');
 });
+test('a Lands reply needs an affirmative reset promise instead of dashboard or feature keywords',async()=>{
+  for(const text of ['Day 17/ The global reset dashboard feature is ready.',
+    'A quota reset dashboard is available.','The Codex reset shortcut feature is ready.']) {
+    const result=await query([{...parent,text},reply]);
+    const store=await createAnnouncementStore({now:()=>now});await store.update(result.announcements);
+    assert.deepEqual(store.alerts.unread,[],text);
+  }
+  const result=await query([{...parent,text:'We will perform a global reset.'},reply]);
+  const store=await createAnnouncementStore({now:()=>now});await store.update(result.announcements);
+  assert.equal(store.alerts.unread.length,1,'An independently explicit reset promise supplies genuine context');
+});
+test('a governing condition anywhere in a timed reply cannot be discarded by clause splitting',async()=>{
+  for(const text of ['Lands tomorrow before 10am PST; only if all checks pass.',
+    'Lands tomorrow before 10am PST. It will happen only if all checks pass.',
+    'Landing within the next 2 hours; only if all checks pass.']) {
+    const result=await query([parent,{...reply,text}]);
+    const store=await createAnnouncementStore({now:()=>now});await store.update(result.announcements);
+    assert.deepEqual(store.alerts.unread,[],text);
+  }
+});
+test('campaign context cannot discard a subjectless cancellation or a negative plan statement',async()=>{
+  for(const statement of ['Cancelled.','The plan is cancelled.','The plan is delayed.',
+    'The plan will not proceed.','There will be no reset.']) {
+    const result=await query([{...parent,text:'Day 17/ It’s reset day today.\n'+statement},reply]);
+    const store=await createAnnouncementStore({now:()=>now});await store.update(result.announcements);
+    assert.deepEqual(store.alerts.unread,[],statement);
+  }
+});

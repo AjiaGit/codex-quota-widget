@@ -60,18 +60,16 @@ function campaignReset(post) {
   const text=cleanText(post?.text),day=text.match(/^Day\s+(?:[1-9]|1\d|2[0-8])\s*[/:-]\s*([^\n]*)/im);
   if(!day || !/^(?:Full )?Reset[.!]?\s*$/i.test(day[1]) &&
     !/(?:^|,\s*)it(?:['’]s| is) reset day today[.!]?\s*$/i.test(day[1]))return false;
-  if(unsafe(text))return false;
-  // Check reset statements, not unrelated advice elsewhere in the same post.
-  // The rhetorical "but no," affirms this narrow campaign headline.
-  return text.split(/(?<=[.!?])\s+|\n/).filter(value=>/\bresets?\b/i.test(value)||/^(?:it|this|that|they)\b/i.test(value)).every(value=>{
-    const statement=value.replace(/\bbut no,\s*/gi,'');
-    return !unsafe(statement)&&!negative(statement)&&!/\b(cancelled|canceled|postponed|delayed)\b/i.test(statement);
-  });
+  // Retain every sentence, including subjectless cancellations and conditions.
+  // These two narrow forms express an affirmation and advice to the reader;
+  // neither negates the promised reset. Other negatives remain disqualifying.
+  const statement=text.replace(/\bbut no,\s*/gi,'').replace(/\byou (?:don['’]t|do not) want\b/gi,'you want');
+  return !unsafe(statement)&&!negative(statement)&&!/\b(cancelled|canceled|postponed|delayed)\b/i.test(statement);
 }
 const unsafe = value => /\?\s*$|\b(if|would|could|might|maybe|when|once|unless|until|assuming|provided|whether|never)\b|as long as/i.test(value);
 const negative = value => /\b(?:not|no)\b|n't\b/i.test(value);
 const future = value => /\b(will|going to|should|plan|planning|expect|tomorrow|tonight|soon|later|by)\b/i.test(value);
-function stage(sentence, context = false) {
+function stage(sentence, context = false, timeContext = false) {
   if (unsafe(sentence) || negative(sentence)) return 'unconfirmed';
   if(/\b(?:some|selected) accounts\b|\bpartial(?:ly)?\b|\bin progress\b|\bstill rolling out\b/i.test(sentence))return 'unconfirmed';
   if (!future(sentence) && (/^(?:(?:the|this) )?(?:(?:global|codex|quota|banked) )?resets? (?:(?:has|have) been processed|(?:is|are) (?:complete|done|live)|(?:all )?propagated|(?:has|have) (?:landed|arrived))/i.test(sentence) ||
@@ -80,7 +78,8 @@ function stage(sentence, context = false) {
   if (/^global reset (?:by|at|today|tomorrow|tonight|landing)\b|^global reset will (?:happen|occur|take place|be (?:issued|applied|performed|rolled out))\b/i.test(sentence) ||
       /^(?:(?:we|i)(?:'re|'m| are| am) )?(?:loading|granting|giving) (?:a |one |the )?(?:new )?(?:banked |global )reset\b/i.test(sentence) ||
       /^(?:(?:we|i)(?:'ll| will|(?:'re|'m| are| am) going to)|will|going to) (?:(?:load|grant|give|perform|issue|apply|roll out|do) (?:a |one |the )?(?:new )?(?:banked |global )reset\b|reset (?:rate|usage) limits\b)/i.test(sentence) ||
-      context && /^(?:lands|landing) (?:within|in|by|before|at|today|tomorrow|tonight)\b/i.test(sentence)) return 'announced';
+      context && /^landing (?:within|in|by)\b/i.test(sentence) ||
+      timeContext && /^(?:lands|landing) (?:within|in|by|before|at|today|tomorrow|tonight)\b/i.test(sentence)) return 'announced';
   return 'unconfirmed';
 }
 export function analyzePublicPost(post, index = new Map(), fallbackKind = null) {
@@ -91,6 +90,10 @@ export function analyzePublicPost(post, index = new Map(), fallbackKind = null) 
   const contextKinds = [...new Set(related.flatMap(value => campaignReset(value)?['regular']:
     !unsafe(cleanText(value.text))&&!negative(cleanText(value.text))&&
     !/\b(ui|button|patch|interface|redesign)\b/i.test(cleanText(value.text))?allKinds(cleanText(value.text)):[]))];
+  // New time-only forms require an affirmative parent, not topic words. Parse
+  // that parent without an index so it cannot borrow another hop of context.
+  const timeContextKinds=[...new Set(related.flatMap(value=>campaignReset(value)?['regular']:
+    analyzePublicPost(value).filter(row=>row.originalKind&&row.claim==='announced').map(row=>row.kind)))];
   const contextual = mentioned.length === 1 ? mentioned[0] : !mentioned.length && contextKinds.length === 1 ? contextKinds[0] : null;
   const rhetorical = clauses.some((clause, i) => i > 0 && /^it(?:['’]s| is) (?:done|complete|completed)[.!]?$/i.test(clause) &&
     /^what would you like with your side of (?:a |the )?(?:(?:global|banked) )?reset\?$/i.test(clauses[i - 1]));
@@ -106,8 +109,8 @@ export function analyzePublicPost(post, index = new Map(), fallbackKind = null) 
       relevant.some(clause => !unsafe(clause) && !negative(clause) && /\b(postponed|delayed)\b/i.test(clause)) ? 'delayed' : null;
     const safeTopic = mentioned.length === 1 && clauses.some(clause => kindIn(clause) === kind && !unsafe(clause) && !negative(clause) && !future(clause) &&
       !/\b(ui|button|patch|interface|redesign)\b/i.test(clause));
-    const stages = relevant.map(clause => stage(clause, contextKinds.includes(kind) || safeTopic || samePostContext || exactArchiveCompletion));
-    const claim = correction ? 'unconfirmed' : stages.includes('complete') ? 'complete' : stages.includes('announced') ? 'announced' : 'unconfirmed';
+    const stages = relevant.map(clause => stage(clause, contextKinds.includes(kind) || safeTopic || samePostContext || exactArchiveCompletion,timeContextKinds.includes(kind)));
+    const claim = correction ? 'unconfirmed' : stages.includes('complete') ? 'complete' : stages.includes('announced')&&!unsafe(text) ? 'announced' : 'unconfirmed';
     return { kind, claim, correction, relatedUrls, timeText:relevant.filter(clause=>!unsafe(clause)&&!negative(clause)).join('\n'),
       previewContextUrls:kind==='regular'?related.filter(campaignReset).map(value=>publicPostUrl(value.url)).filter(Boolean):[],
       multiKind: mentioned.length > 1, kindKnown: Boolean(mentioned.includes(kind) || inferred),
