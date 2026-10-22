@@ -156,3 +156,21 @@ test('campaign context cannot discard a subjectless cancellation or a negative p
     assert.deepEqual(store.alerts.unread,[],statement);
   }
 });
+test('a timed reply retains later event negation while non-event advice stays eligible',async()=>{
+  for(const suffix of ['This will not happen.','Not happening.','The plan will not proceed.',
+    'It won’t happen.','Not confirmed.','No reset.','We will not reset anything.']) {
+    const result=await query([parent,{...reply,text:reply.text+' '+suffix}]);
+    const store=await createAnnouncementStore({now:()=>now});await store.update(result.announcements);
+    assert.deepEqual(store.alerts.unread,[],suffix);
+  }
+  for(const suffix of ['No action required.','Don’t miss it.']) {
+    const result=await query([parent,{...reply,text:reply.text+' '+suffix}]);
+    const store=await createAnnouncementStore({now:()=>now});await store.update(result.announcements);
+    assert.equal(store.alerts.unread.length,1,suffix);
+  }
+});
+test('typographic apostrophes cannot hide a negative campaign statement',async()=>{
+  const result=await query([{...parent,text:'Day 17/ It’s reset day today.\nIt won’t happen.'},reply]);
+  const store=await createAnnouncementStore({now:()=>now});await store.update(result.announcements);
+  assert.deepEqual(store.alerts.unread,[]);
+});

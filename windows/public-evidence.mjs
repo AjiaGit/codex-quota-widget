@@ -67,7 +67,7 @@ function campaignReset(post) {
   return !unsafe(statement)&&!negative(statement)&&!/\b(cancelled|canceled|postponed|delayed)\b/i.test(statement);
 }
 const unsafe = value => /\?\s*$|\b(if|would|could|might|maybe|when|once|unless|until|assuming|provided|whether|never)\b|as long as/i.test(value);
-const negative = value => /\b(?:not|no)\b|n't\b/i.test(value);
+const negative = value => /\b(?:not|no)\b|n['’]t\b/i.test(value);
 const future = value => /\b(will|going to|should|plan|planning|expect|tomorrow|tonight|soon|later|by)\b/i.test(value);
 function stage(sentence, context = false, timeContext = false) {
   if (unsafe(sentence) || negative(sentence)) return 'unconfirmed';
@@ -110,7 +110,8 @@ export function analyzePublicPost(post, index = new Map(), fallbackKind = null) 
     const safeTopic = mentioned.length === 1 && clauses.some(clause => kindIn(clause) === kind && !unsafe(clause) && !negative(clause) && !future(clause) &&
       !/\b(ui|button|patch|interface|redesign)\b/i.test(clause));
     const stages = relevant.map(clause => stage(clause, contextKinds.includes(kind) || safeTopic || samePostContext || exactArchiveCompletion,timeContextKinds.includes(kind)));
-    const claim = correction ? 'unconfirmed' : stages.includes('complete') ? 'complete' : stages.includes('announced')&&!unsafe(text) ? 'announced' : 'unconfirmed';
+    const eventNegated=relevant.some(clause=>negative(clause)&&/\b(?:reset|happen(?:ing)?|land(?:ing)?|proceed(?:ing)?|occur(?:ring)?|scheduled|planned|confirmed|go ahead|take place)\b/i.test(clause));
+    const claim = correction ? 'unconfirmed' : stages.includes('complete') ? 'complete' : stages.includes('announced')&&!unsafe(text)&&!eventNegated ? 'announced' : 'unconfirmed';
     return { kind, claim, correction, relatedUrls, timeText:relevant.filter(clause=>!unsafe(clause)&&!negative(clause)).join('\n'),
       previewContextUrls:kind==='regular'?related.filter(campaignReset).map(value=>publicPostUrl(value.url)).filter(Boolean):[],
       multiKind: mentioned.length > 1, kindKnown: Boolean(mentioned.includes(kind) || inferred),
