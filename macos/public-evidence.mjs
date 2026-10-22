@@ -56,8 +56,16 @@ const allKinds = value => [
 // full reset. Only an explicit Reset day can supply a related reply's topic.
 function campaignReset(post) {
   const at=Date.parse(post?.declared_at??post?.at),start=Date.parse('2026-10-04T20:33:43Z');
-  return at>=start&&at<start+28*86400000&&
-    /^Day\s+(?:[1-9]|1\d|2[0-8])\s*[/:-]\s*(?:Full )?Reset[.!]?\s*$/im.test(cleanText(post?.text));
+  if(!(at>=start&&at<start+28*86400000))return false;
+  const text=cleanText(post?.text),day=text.match(/^Day\s+(?:[1-9]|1\d|2[0-8])\s*[/:-]\s*([^\n]*)/im);
+  if(!day || !/^(?:Full )?Reset[.!]?\s*$/i.test(day[1]) &&
+    !/(?:^|,\s*)it(?:['’]s| is) reset day today[.!]?\s*$/i.test(day[1]))return false;
+  // Check reset statements, not unrelated advice elsewhere in the same post.
+  // The rhetorical "but no," affirms this narrow campaign headline.
+  return text.split(/(?<=[.!?])\s+|\n/).filter(value=>/\bresets?\b/i.test(value)).every(value=>{
+    const statement=value.replace(/\bbut no,\s*/gi,'');
+    return !unsafe(statement)&&!negative(statement)&&!/\b(cancelled|canceled|postponed|delayed)\b/i.test(statement);
+  });
 }
 const unsafe = value => /\?\s*$|\b(if|would|could|might|maybe|when|once|unless|until|assuming|provided|whether|never)\b|as long as/i.test(value);
 const negative = value => /\b(?:not|no)\b|n't\b/i.test(value);
@@ -71,7 +79,7 @@ function stage(sentence, context = false) {
   if (/^global reset (?:by|at|today|tomorrow|tonight|landing)\b|^global reset will (?:happen|occur|take place|be (?:issued|applied|performed|rolled out))\b/i.test(sentence) ||
       /^(?:(?:we|i)(?:'re|'m| are| am) )?(?:loading|granting|giving) (?:a |one |the )?(?:new )?(?:banked |global )reset\b/i.test(sentence) ||
       /^(?:(?:we|i)(?:'ll| will|(?:'re|'m| are| am) going to)|will|going to) (?:(?:load|grant|give|perform|issue|apply|roll out|do) (?:a |one |the )?(?:new )?(?:banked |global )reset\b|reset (?:rate|usage) limits\b)/i.test(sentence) ||
-      context && /^landing (?:within|in|by)\b/i.test(sentence)) return 'announced';
+      context && /^(?:lands|landing) (?:within|in|by|before|at|today|tomorrow|tonight)\b/i.test(sentence)) return 'announced';
   return 'unconfirmed';
 }
 export function analyzePublicPost(post, index = new Map(), fallbackKind = null) {
@@ -79,8 +87,8 @@ export function analyzePublicPost(post, index = new Map(), fallbackKind = null) 
   const clauses = text.split(/(?<=[.!?])\s+|\n|;\s*|\s+(?:and|but)\s+(?=(?:we|i|a|the|global|banked|quota|codex)\b)/i).map(value => value.trim()).filter(Boolean);
   const mentioned = [...new Set(clauses.map(kindIn).filter(Boolean))];
   const related = relatedUrls.map(url => index.get(url)).filter(Boolean);
-  const contextKinds = [...new Set(related.filter(value => !unsafe(cleanText(value.text)) && !negative(cleanText(value.text)))
-    .flatMap(value => campaignReset(value)?['regular']:allKinds(cleanText(value.text))))];
+  const contextKinds = [...new Set(related.flatMap(value => campaignReset(value)?['regular']:
+    !unsafe(cleanText(value.text))&&!negative(cleanText(value.text))?allKinds(cleanText(value.text)):[]))];
   const contextual = mentioned.length === 1 ? mentioned[0] : !mentioned.length && contextKinds.length === 1 ? contextKinds[0] : null;
   const rhetorical = clauses.some((clause, i) => i > 0 && /^it(?:['’]s| is) (?:done|complete|completed)[.!]?$/i.test(clause) &&
     /^what would you like with your side of (?:a |the )?(?:(?:global|banked) )?reset\?$/i.test(clauses[i - 1]));
