@@ -153,7 +153,11 @@ function restoreImportedRollback(receipt) {
   imported.status = 'restored'; saveReceipt(imported);
 }
 function sources(data) {
-  return new Set([...(data.items || []), ...(data.history || [])].flatMap(row => [row.sourceUrl, row.previewSourceUrl, row.deliverySourceUrl, ...(row.previewAliases || [])]).filter(Boolean));
+  // The same post may carry both a regular reset and banked reset credits.
+  // Same-kind consolidation can retain a source as a preview/completion alias.
+  return new Set([...(data.items || []), ...(data.history || [])].flatMap(row =>
+    [row.sourceUrl, row.previewSourceUrl, row.deliverySourceUrl, ...(row.previewAliases || [])]
+      .filter(Boolean).map(url => JSON.stringify([row.kind ?? null, url]))));
 }
 function preserveData(receipt) {
   const before = receipt.dataBackup, after = receipt.config.dataPath;
@@ -211,6 +215,7 @@ export async function prepareUpdate(input, platform) {
       receipt.installedManifest = manifest(location.candidate);
       receipt.status = 'staged'; saveReceipt(receipt);
       await platform.stop(config.appPath, config.dataPath);
+      assert.ok(!await platform.isRunning(config.appPath), 'The application is still running after Stop; inspect missing or stale PID files');
       receipt.preferences = await platform.preferences();
       receipt.dataBackup = join(config.evidencePath, id, 'data-before');
       assert.ok(!existsSync(receipt.dataBackup), 'Data backup already exists');

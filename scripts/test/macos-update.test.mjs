@@ -296,3 +296,37 @@ test('case aliases on an insensitive filesystem cannot bypass the protected-root
   await assert.rejects(prepareUpdate({ ...f.config, evidencePath: join(alias, 'evidence') }, f.operations), /overlap|disjoint/i);
   assert.deepEqual(Object.keys((await engine()).manifest(f.config.appPath)), ['payload']);
 });
+
+test('a surviving application process blocks backup and replacement even if the Stop helper reports success', async t => {
+  const { prepareUpdate } = await engine();
+  const f = fixture(t);
+  f.running.add(f.config.appPath);
+  await assert.rejects(prepareUpdate(f.config, f.operations), /still running/i);
+  assert.equal(readFileSync(join(f.config.appPath, 'payload'), 'utf8'), 'version-original');
+  const registry = read(join(f.config.workspace, 'catalog.json'));
+  const receipt = read(join(f.config.evidencePath, registry.entries[0], 'transaction.json'));
+  assert.equal(receipt.status, 'failed');
+  assert.equal(receipt.dataBackup, undefined, 'no live state may be backed up as a stopped baseline');
+  assert.ok(existsSync(receipt.paths.package), 'failed validation cannot prune');
+});
+
+test('two kinds from the same original URL cannot conceal the loss of one public record', async t => {
+  const { prepareUpdate, verifyUpdate } = await engine();
+  const f = fixture(t), sourceUrl = 'https://example.invalid/FABRICATED-two-kinds';
+  const records = ['regular', 'banked'].map(kind => ({ id: sourceUrl + '#' + kind, kind, sourceUrl }));
+  json(join(f.config.dataPath, 'announcements.json'), { items: [], history: records });
+  const first = await prepareUpdate(f.config, f.operations);
+  json(join(f.config.dataPath, 'announcements.json'), { items: [], history: records.slice(0, 1) });
+  await assert.rejects(verifyUpdate(first.receiptPath, f.operations), /Public history/);
+  assert.ok(existsSync(first.paths.rollback) && existsSync(first.paths.package));
+});
+
+test('same-kind record consolidation preserves both source lineages without blocking a verified update', async t => {
+  const { prepareUpdate, verifyUpdate } = await engine();
+  const f = fixture(t), a = 'https://example.invalid/FABRICATED-preview', b = 'https://example.invalid/FABRICATED-completion';
+  json(join(f.config.dataPath, 'announcements.json'), { items: [{ kind: 'regular', sourceUrl: a }], history: [{ kind: 'regular', sourceUrl: b }] });
+  const first = await prepareUpdate(f.config, f.operations);
+  json(join(f.config.dataPath, 'announcements.json'), { items: [], history: [{ kind: 'regular', sourceUrl: a, deliverySourceUrl: b }] });
+  const result = await verifyUpdate(first.receiptPath, f.operations);
+  assert.equal(result.cleanup.blocked.length, 0);
+});
