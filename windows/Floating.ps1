@@ -1,6 +1,7 @@
 ﻿param(
     [ValidateSet('System', 'Light', 'Dark')]
-    [string]$Theme = 'System',
+    # Compatibility argument: widget surfaces always use the fixed dark palette.
+    [string]$Theme = 'Dark',
     [ValidatePattern('^http://127\.0\.0\.1:\d+$')]
     [string]$BaseUrl = 'http://127.0.0.1:39224'
 )
@@ -328,7 +329,6 @@ $script:externalData = Merge-WidgetExternalData (Read-WidgetJson $script:externa
 $script:nextExternalPoll = [DateTime]::MinValue
 $script:nextPoll = [DateTime]::MinValue
 $script:lastRender = [DateTime]::MinValue
-$script:lastThemeCheck = [DateTime]::MinValue
 $script:data = $null
 $script:remaining = $null
 $script:message = (T 'reading')
@@ -347,7 +347,7 @@ $script:announcementRenderKey = ''
 $script:activityRenderKeys = @{}
 $script:quotaRenderKey = ''
 $script:externalRenderKey = ''
-$script:themeIsLight = $null
+$script:themeApplied = $false
 $script:announcementRows = @()
 $script:mode = 'Detail'
 $script:animating = $false
@@ -842,27 +842,16 @@ function Set-ControlTheme($control) {
 }
 
 function Set-Theme {
-    $light = if ($Theme -eq 'Light') { $true } elseif ($Theme -eq 'Dark') { $false } else {
-        try {
-            (Get-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -Name AppsUseLightTheme -ErrorAction Stop).AppsUseLightTheme -eq 1
-        } catch { $false }
-    }
-    if ($null -ne $script:themeIsLight -and $script:themeIsLight -eq $light) { return }
-    $script:themeIsLight=$light
-    if ($light) {
-        $script:colors = @{
-            back = (New-Color '#F7F8FB'); text = (New-Color '#17202D'); muted = (New-Color '#637083')
-            danger=(New-Color '#C24C49'); warning=(New-Color '#916D00'); link=(New-Color '#315969'); accent = (New-Color '#1CA887'); track = (New-Color '#DFE5EB'); line = (New-Color '#DDE3E8'); hover = (New-Color '#EBEEF2'); pressed = (New-Color '#E1E6EC')
-        }
-    } else {
-        $script:colors = @{
-            back = (New-Color '#20252D'); text = (New-Color '#F3F5F7'); muted = (New-Color '#A1AAB6')
-            danger=(New-Color '#FA7D79'); warning=(New-Color '#F4CF65'); link=(New-Color '#C8DCE5'); accent = (New-Color '#24D3A5'); track = (New-Color '#3D4855'); line = (New-Color '#343D48'); hover = (New-Color '#303944'); pressed = (New-Color '#3B4652')
-        }
+    if ($script:themeApplied) { return }
+    # App content is fixed dark; taskbar digits keep their independent OS contrast.
+    $script:colors = @{
+        back = (New-Color '#20252D'); text = (New-Color '#F3F5F7'); muted = (New-Color '#A1AAB6')
+        danger=(New-Color '#FA7D79'); warning=(New-Color '#F4CF65'); link=(New-Color '#C8DCE5'); accent = (New-Color '#24D3A5'); track = (New-Color '#3D4855'); line = (New-Color '#343D48'); hover = (New-Color '#303944'); pressed = (New-Color '#3B4652')
     }
     Set-ControlTheme $form
     $ring.Invalidate()
     Set-Tray-QuotaIcon
+    $script:themeApplied=$true
 }
 
 function Show-Quota {
@@ -1571,7 +1560,6 @@ $timer.Add_Tick({
     if (-not $script:requestTask -and $now -ge $script:nextPoll) { Start-Request $false }
     if (-not $script:externalTask -and $now -ge $script:nextExternalPoll) { Start-ExternalRequest }
     if (($now - $script:lastRender).TotalSeconds -ge 30) { Show-Quota; $script:lastRender = $now }
-    if (($now - $script:lastThemeCheck).TotalMinutes -ge 1) { Set-Theme; $script:lastThemeCheck = $now }
 })
 
 $form.Add_VisibleChanged({

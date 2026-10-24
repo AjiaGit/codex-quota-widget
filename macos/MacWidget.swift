@@ -455,6 +455,8 @@ private final class WidgetApp: NSObject, NSApplicationDelegate, NSWindowDelegate
         panel.acceptsMouseMovedEvents = true
         panel.hidesOnDeactivate = false
         root = NSView(frame: NSRect(origin: .zero, size: frame.size))
+        // Pin only widget content; native menus retain the application's system appearance.
+        root.appearance = NSAppearance(named: .darkAqua)
         root.autoresizingMask = [.width, .height]
         root.wantsLayer = true
         root.layer?.backgroundColor = detailBackground.cgColor
