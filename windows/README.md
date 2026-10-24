@@ -15,6 +15,8 @@ The widget installer is unsigned, so Windows may display an unknown-publisher or
 
 ## Daily use
 
+The compact widget and expanded page use a fixed dark-gray appearance, independent of Windows and app light/dark modes. Tray numerals still switch between black and white to stay readable against the taskbar; context menus keep their native system style.
+
 - Click the **minus icon** or outside the detailed window to collapse; click the ring to expand. Each mode remembers its position and size. Drag the window to move it or its edges/corners to resize. The detail window fits current content, including inline disclosures, within the screen and opens at the top. Expanding long content can temporarily shift the window to fit; collapsing it restores the saved detail position. Content longer than the screen or a manually reduced window can scroll. This update restores automatic height for older Windows layouts while preserving positions, widths, and the compact size; subsequent manual resizing is remembered.
 - Click `×` to hide to the tray. Double-click the tray icon to show it again. The tray menu includes mode, refresh, always-on-top, language, and quit controls. The tray is the notification area at the right of the Windows taskbar; its icon shows a large remaining-quota number (or a dash when unavailable), with the percentage in the tooltip. The compact window keeps its ring.
 - Choose **Language → System / English / 简体中文**. Native UI and browser detail page share the saved choice.

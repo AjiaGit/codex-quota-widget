@@ -460,6 +460,39 @@ Test-Case 'completed public request is retained until the UI timer consumes it' 
    if(-not [object]::ReferenceEquals($first,$script:historyRows[0])){throw 'An unchanged refresh rebuilt the history controls'}
   }finally{$script:externalData=$oldExternal;$script:activityLimit=3;$script:historyLimit=3;$script:activityHistoryExpanded=$false;$script:announcementRenderKey='';Show-External}
  }
+ Test-Case 'compact detail and newly expanded controls keep the Mac dark palette for all system app modes' {
+  $existingReader=Get-Item Function:\Get-ItemProperty -ErrorAction SilentlyContinue
+  $existingReaderScript=if($existingReader){$existingReader.ScriptBlock}else{$null}
+  $oldTheme=$Theme;$oldMode=$script:mode
+  function script:Get-ItemProperty {
+   [CmdletBinding()]param([string]$Path,[string]$Name)
+   if($Path -ne 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize'){throw 'Unexpected theme registry query'}
+   if($Name -eq 'AppsUseLightTheme'){return [pscustomobject]@{AppsUseLightTheme=$script:fixtureAppLight}}
+   if($Name -eq 'SystemUsesLightTheme'){return [pscustomobject]@{SystemUsesLightTheme=$script:fixtureSystemLight}}
+   throw 'Unexpected theme registry value'
+  }
+  try {
+   $Theme='System'
+   foreach($systemLight in @(0,1,0)){foreach($appLight in @(0,1,0)){
+    $script:fixtureSystemLight=$systemLight;$script:fixtureAppLight=$appLight
+    Set-Theme
+    foreach($mode in @('Detail','Compact')){
+     $script:mode=$mode;Set-ModeVisual ($mode -eq 'Compact');[Windows.Forms.Application]::DoEvents()
+     foreach($control in @($form,$ring,$content,$title,$status)){
+      Assert-Equal $control.BackColor.ToArgb() ([Drawing.ColorTranslator]::FromHtml('#20252D')).ToArgb() ('Fixed dark '+$mode+' '+$control.Name)
+     }
+     Assert-Equal $title.ForeColor.ToArgb() ([Drawing.ColorTranslator]::FromHtml('#F3F5F7')).ToArgb() 'Readable heading'
+    }
+    $row=New-ResetCreditControl ([pscustomobject]@{title='FABRICATED APPEARANCE';description='Isolated test only';granted='Not provided';expires='Not provided'})
+    try{Assert-Equal $row.BackColor.ToArgb() ([Drawing.ColorTranslator]::FromHtml('#20252D')).ToArgb() 'New inline detail stays dark'}finally{$row.Dispose()}
+   }}
+  }finally{
+   $Theme=$oldTheme;$script:mode=$oldMode;Set-ModeVisual ($oldMode -eq 'Compact')
+   Remove-Item Function:\Get-ItemProperty -ErrorAction SilentlyContinue
+   if($existingReaderScript){Set-Item Function:\Get-ItemProperty $existingReaderScript}
+   Remove-Variable fixtureAppLight,fixtureSystemLight -Scope Script -ErrorAction SilentlyContinue
+  }
+ }
  Test-Case 'unchanged theme checks do not invalidate the visible native text tree' {
   Set-Theme
   $script:themeInvalidations=0

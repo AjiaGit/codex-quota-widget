@@ -15,6 +15,8 @@ Only run one copy. The service uses `127.0.0.1:39224`.
 
 ## Daily use
 
+The compact widget and expanded page use a fixed dark-gray appearance in both light and dark macOS modes. Menu-bar numerals and native menus retain their system appearance.
+
 - Click the menu-bar percentage to show or hide the window, select compact/detail mode, refresh, open the browser detail page, change language, or quit.
 - Choose **Language → System / English / 简体中文**. The choice is saved and shared with the browser detail page.
 - Click the compact ring to expand; click outside the detailed window to return to its saved compact position and size. Drag the window to move it, or its edges/corners to resize. The default detail window fits its content when screen space permits; long history or a manually reduced window can scroll.
