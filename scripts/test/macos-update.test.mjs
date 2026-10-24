@@ -14,7 +14,8 @@ async function engine() {
   return import(moduleURL.href);
 }
 function fixture(t) {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'quota-update-')));
+  // Match production canonicalization, including Windows DOS short-name aliases.
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'quota-update-')));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const config = { appPath: join(root, 'Applications', 'Quota.app'), dataPath: join(root, 'data'), workspace: join(root, 'cache'), evidencePath: join(root, 'evidence'), commit: sha('a'), run: 101 };
   mkdirSync(config.appPath, { recursive: true });
