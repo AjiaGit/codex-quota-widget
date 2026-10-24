@@ -32,6 +32,8 @@ Quota and cache checks run every 60 seconds. Refresh, reopening, and wake trigge
 
 Choose **Quit** before replacing the app with a newer copy in the same location. Reopen it afterwards; saved language and window geometry remain in `~/Library/Application Support/CodexWeeklyMonitor/`.
 
+Maintained local updates use the [verified update workflow](../CONTRIBUTING.md#verified-local-mac-updates-and-retention): after the new installation passes its checks, cleanup automatically keeps the current app and one immediate rollback. Settings, history, data backups and test records remain. An unverified or failed update does not trigger cleanup. The workflow runs when the maintainer updates the app; it is not a background auto-updater.
+
 To uninstall, quit and move the app to Trash. To remove saved preferences and logs as well, delete `~/Library/Application Support/CodexWeeklyMonitor/` after quitting. The widget does not configure startup at login.
 
 ## Troubleshooting and source use

@@ -65,6 +65,39 @@ The builder accepts `-IsccPath` if `ISCC.exe` is installed elsewhere. The smoke 
 
 The [Build packages workflow](.github/workflows/build-packages.yml) tests both service copies on Windows x64, macOS Apple Silicon, and macOS Intel; it uploads packages, checksums, and fabricated Windows UI previews/traces as Actions artifacts. This repository is public, so workflow logs and artifacts are publicly accessible. Never use real account responses or personal screenshots in CI. The package jobs have read-only repository permissions and do not create tags or GitHub releases. The optional existing-private-draft upload job is restricted to private repositories and does not run here. A hosted-runner pass does not certify physical Intel hardware, every OS version, or real-account login.
 
+## Verified local Mac updates and retention
+
+For authorized updates to an existing Mac installation, use [the maintained updater](scripts/update-macos.mjs) instead of making another per-release installation script or app copy. This is a maintainer command in the checkout, not a background auto-updater. It needs Node.js 24+, an authenticated `gh`, the exact commit available in local Git, and a completed successful **Build packages** run for that commit on all three platforms. Eligible events are `push` and `workflow_dispatch`; a PR run builds a synthetic merge and cannot certify the requested head commit. It uses the CI artifact for this Mac's architecture; the updater does not build another local app.
+
+Save a private configuration outside Git (replace the commit and numeric run with the approved values):
+
+```json
+{
+  "appPath": "/Users/your-name/Applications/Codex Quota Widget.app",
+  "dataPath": "/Users/your-name/Library/Application Support/CodexWeeklyMonitor",
+  "workspace": "/Users/your-name/Library/Caches/CodexQuotaWidget-updates",
+  "evidencePath": "/Users/your-name/Documents/QuotaWidget-update-records",
+  "commit": "FULL_40_CHARACTER_COMMIT_SHA",
+  "run": 123456789
+}
+```
+
+Use absolute, real paths: `dataPath` must be the current user's actual `~/Library/Application Support/CodexWeeklyMonitor`, which the native app and Stop script use. The four roots must be disjoint, the cache and evidence must be outside the checkout, and app/cache must be on the same filesystem. The cache must initially be empty or missing. On the **first managed update**, add `previousRollback` with the absolute path of the one retained legacy `.app` from the previous installation receipt, if present. The updater validates and moves only that bundle into its registry; surrounding test records stay put. Do not import an arbitrary collection of old apps. Omit this field after migration.
+
+```sh
+node scripts/update-macos.mjs prepare --config /absolute/private/update-config.json
+# Open the installed app normally, at its existing path.
+node scripts/update-macos.mjs verify --receipt /absolute/path/printed/by/prepare/transaction.json
+```
+
+`prepare` checks exact CI provenance, the artifact digest, inner package SHA256, bundle identities, signatures, bundled runtime and architecture. It uses the existing Stop script, saves data and native preferences, then swaps the app at the original location. It leaves all earlier artifacts in place. A handled replacement failure restores the original app when its identity is intact. It does not restart the app itself; launch it normally before verification.
+
+`verify` checks installed files and the immediate rollback, exact process ownership and one process per role, local service health, fresh readable quota, settings, native preferences, recovery records and public-history source lineage. After these checks succeed it **automatically** removes the registered downloaded ZIPs, extracted app copies and older rollback bundles. Only the current installation and its immediate pre-update rollback remain among managed apps. The rollback belongs to the prior installation, even if installing the same commit again. Active settings/history, every saved data snapshot, receipts, test logs and screenshots remain. Historical receipts may therefore refer to app artifacts intentionally removed later.
+
+Cleanup selects fixed artifact leaves from the owned registry; it does not scan other projects, the home directory, or arbitrary output folders. A running, modified or symlinked app blocks cleanup, as does an unfinished extracted app lacking a saved manifest. Exit code `2` means the new app passed verification but cleanup is blocked: inspect the private receipt, resolve the cause, and rerun the same `verify` command. Exit code `1` means an update/check failed; no successful validation is inferred. Do not bypass a failure by editing a receipt or setting a “passed” flag. A pending update prevents another `prepare`. If preparation stopped the app before failing, reopen the restored original app normally.
+
+After interruption, inspect the receipt/catalog and the sibling `.update-lock` file before removing a stale lock. A completed installation can resume with `verify`; an interrupted replacement or `needs-recovery` requires checking the recorded app/rollback manifests and restoring the original path before proceeding. There is no automatic crash-recovery or destructive force option. Retain all evidence until recovery is understood. Cleanup is part of verified updates, not a scheduled job. Manually created unregistered builds are outside its scope; keep experimental output temporary and remove it after its checks. Windows keeps using its fixed-location installer; this command does not change Windows installation or backup behavior.
+
 ## Reports and translations
 
 For bugs, include OS/architecture, Codex version, failing action, expected result, and a sanitized error. State whether `codex login status` succeeds without sharing account details. Do not upload `auth.json`, tokens, raw account responses, or personal account screenshots.
