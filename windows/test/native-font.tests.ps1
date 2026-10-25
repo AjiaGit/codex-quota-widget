@@ -134,6 +134,31 @@ try {
    } finally {$sourcesPanel.Dispose();foreach($font in $fonts){$font.Dispose()}}
   }
  }
+ $activityLinkFactory=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'New-ActivityLink'},$true)
+ Invoke-Expression $activityLinkFactory.Extent.Text
+ foreach($caption in @('查看原文','View original post','查看网站记录','codex-reset.com')) {
+  Test-Case "whole GDI link retains every trailing glyph pixel: $caption" {
+   $link=New-ActivityLink $caption 'https://example.invalid/FABRICATED-link-paint'
+   $reference=New-Label $caption 0 0 300 30 9.75
+   $reference.AutoEllipsis=$false;$reference.Font=[Drawing.Font]::new($link.Font,[Drawing.FontStyle]::Underline)
+   $link.Size=[Drawing.Size]::new(([Windows.Forms.TextRenderer]::MeasureText($caption,$link.Font).Width+6),30)
+   $bitmaps=@();$metrics=@()
+   try {
+    foreach($control in @($link,$reference)) {
+     $control.BackColor=[Drawing.Color]::Black;$control.ForeColor=[Drawing.Color]::White
+     if($control -is [Windows.Forms.LinkLabel]){$control.LinkColor=[Drawing.Color]::White}
+     $bitmap=[Drawing.Bitmap]::new($control.Width,$control.Height);$bitmaps+=,$bitmap
+     $control.DrawToBitmap($bitmap,$control.ClientRectangle)
+     $ink=@(for($y=0;$y -lt $bitmap.Height;$y++){for($x=0;$x -lt $bitmap.Width;$x++){if($bitmap.GetPixel($x,$y).R -gt 180){[Drawing.Point]::new($x,$y)}}})
+     $xs=$ink | Measure-Object X -Minimum -Maximum;$ys=$ink | Measure-Object Y -Minimum -Maximum
+     $metrics+=,[pscustomobject]@{count=$ink.Count;left=$xs.Minimum;right=$xs.Maximum;top=$ys.Minimum;bottom=$ys.Maximum}
+    }
+    if($metrics[0].count -ne $metrics[1].count -or ($metrics[0].right-$metrics[0].left) -ne ($metrics[1].right-$metrics[1].left)){throw "Link clips glyph pixels: link=$($metrics[0]), complete GDI reference=$($metrics[1])"}
+    $hitTest=[Windows.Forms.LinkLabel].GetMethod('PointInLink',([Reflection.BindingFlags]::Instance -bor [Reflection.BindingFlags]::NonPublic))
+    if($null -eq $hitTest.Invoke($link,@([int]$metrics[0].right,[int]$metrics[0].top))){throw 'Trailing link pixels are outside the native mouse hit region'}
+   }finally{foreach($bitmap in $bitmaps){$bitmap.Dispose()};$linkFont=$link.Font;$referenceFont=$reference.Font;$link.Dispose();$reference.Dispose();$linkFont.Dispose();$referenceFont.Dispose()}
+  }
+ }
  Test-Case 'Chinese and English wrapping retain the same logical measurements' {
   $font=[Drawing.Font]::new('Segoe UI',10.5)
   try {

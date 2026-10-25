@@ -167,8 +167,35 @@ public static class WidgetNativeLayout {
 public class WidgetLinkLabel : System.Windows.Forms.LinkLabel {
     public WidgetLinkLabel() {
         UseCompatibleTextRendering = false;
+        // Keep the GDI text inset explicit, so native link hit regions include it.
+        Padding = new System.Windows.Forms.Padding(3,0,0,0);
         SetStyle(System.Windows.Forms.ControlStyles.OptimizedDoubleBuffer |
                  System.Windows.Forms.ControlStyles.DoubleBuffer, false);
+    }
+    protected override void OnPaint(System.Windows.Forms.PaintEventArgs e) {
+        if (UseCompatibleTextRendering || Links.Count != 1 || Links[0].Start != 0 ||
+            Links[0].Length != Text.Length || LinkBehavior != System.Windows.Forms.LinkBehavior.AlwaysUnderline ||
+            TextAlign != System.Drawing.ContentAlignment.TopLeft || AutoEllipsis) {
+            base.OnPaint(e); return;
+        }
+        // LinkLabel's GDI visual region omits glyph padding, but its painter
+        // still adds that padding and clips the final strokes. Match the native
+        // region with unpadded GDI text; retain native mouse/keyboard handling.
+        using (var background = new System.Drawing.SolidBrush(BackColor))
+            e.Graphics.FillRectangle(background,ClientRectangle);
+        var bounds = new System.Drawing.Rectangle(Padding.Left,Padding.Top,
+            Math.Max(1,ClientSize.Width-Padding.Horizontal),Math.Max(1,ClientSize.Height-Padding.Vertical));
+        var color = !Enabled || !Links[0].Enabled ? DisabledLinkColor :
+            Capture && (System.Windows.Forms.Control.MouseButtons & System.Windows.Forms.MouseButtons.Left) != 0 ? ActiveLinkColor :
+            Links[0].Visited ? VisitedLinkColor : LinkColor;
+        using (var font = new System.Drawing.Font(Font,Font.Style | System.Drawing.FontStyle.Underline))
+            System.Windows.Forms.TextRenderer.DrawText(e.Graphics,Text,font,bounds,color,
+                System.Windows.Forms.TextFormatFlags.NoPadding | System.Windows.Forms.TextFormatFlags.NoPrefix |
+                System.Windows.Forms.TextFormatFlags.WordBreak | System.Windows.Forms.TextFormatFlags.PreserveGraphicsClipping |
+                System.Windows.Forms.TextFormatFlags.PreserveGraphicsTranslateTransform);
+        if (Focused && ShowFocusCues)
+            System.Windows.Forms.ControlPaint.DrawFocusRectangle(e.Graphics,bounds,color,BackColor);
+        RaisePaintEvent(this,e);
     }
 }
 public static class WidgetGlyph {
